@@ -2,6 +2,9 @@ use spacetimedb::{table, reducer, Identity, ReducerContext, Table};
 use noise::{NoiseFn, Perlin};
 use log::{info, warn};
 
+// Expose the movement module to the SpacetimeDB compilation tree
+pub mod movement;
+
 // ----------------------------------------------------------------------------
 // MULTIPLAYER SCHEMAS & ENTITY STATE
 // ----------------------------------------------------------------------------
@@ -26,14 +29,9 @@ pub struct PlayerPerspective {
     pub camera_mode: String, // "FPS" or "RTS"
 }
 
-#[table(accessor = transform, public)]
-#[derive(Clone)]
-pub struct Transform {
-    #[primary_key] pub entity_id: u64, 
-    pub x: f32, pub y: f32, pub z: f32,
-    pub rot_x: f32, pub rot_y: f32, pub rot_z: f32, pub rot_w: f32,
-    pub timestamp: u64,
-}
+// Architectural Note: The legacy Transform table has been removed from lib.rs.
+// It is now strictly managed by the `movement` module to support client-side 
+// prediction, rollback tolerances, and server reconciliation (tracking `last_processed_tick`).
 
 #[table(accessor = resource_stockpile, public)]
 #[derive(Clone)]
@@ -137,11 +135,18 @@ pub fn client_connected(ctx: &ReducerContext) {
         
         let entity_id = inserted_player.entity_id;
 
-        ctx.db.transform().insert(Transform {
+        // Architectural Note: We now initialize the new client-side prediction Transform
+        // and establish the PlayerSession mapping for the movement module to authenticate
+        // incoming movement vectors correctly.
+        ctx.db.transform().insert(movement::Transform {
             entity_id,
             x: 0.0, y: 20.0, z: 0.0,
-            rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0,
-            timestamp: ctx.timestamp.to_micros_since_unix_epoch() as u64,
+            last_processed_tick: 0,
+        });
+
+        ctx.db.player_session().insert(movement::PlayerSession {
+            identity: sender,
+            entity_id,
         });
 
         ctx.db.resource_stockpile().insert(ResourceStockpile {
@@ -191,41 +196,8 @@ pub fn set_camera_mode(ctx: &ReducerContext, mode: String) {
     info!("Player {} dynamically transitioned to {} mode spatial partitioning.", player.entity_id, mode);
 }
 
-#[reducer]
-pub fn process_movement(
-    ctx: &ReducerContext, 
-    px: f32, py: f32, pz: f32, 
-    rot_x: f32, rot_y: f32, rot_z: f32, rot_w: f32
-) {
-    let sender = ctx.sender();
-    let Some(player) = ctx.db.player().identity().find(sender) else { return; };
-    let Some(mut t) = ctx.db.transform().entity_id().find(player.entity_id) else { return; };
-
-    let now = ctx.timestamp.to_micros_since_unix_epoch() as u64;
-    let dt = ((now.saturating_sub(t.timestamp)) as f32 / 1_000_000.0).max(0.01);
-    
-    let dx = px - t.x;
-    let dy = py - t.y;
-    let dz = pz - t.z;
-    let dist_sq = dx * dx + dy * dy + dz * dz;
-    
-    let max_speed = 35.0; 
-    let max_dist = max_speed * dt;
-
-    if dist_sq > max_dist * max_dist && t.timestamp != 0 {
-        warn!("Speed hack or lag detected for entity {}. Rejecting client transform.", player.entity_id);
-        return;
-    } else {
-        t.x = px;
-        t.y = py;
-        t.z = pz;
-    }
-
-    t.rot_x = rot_x; t.rot_y = rot_y; t.rot_z = rot_z; t.rot_w = rot_w;
-    t.timestamp = now;
-
-    ctx.db.transform().entity_id().update(t);
-}
+// Architectural Note: Legacy process_movement has been removed.
+// Client movement vectors and buffer rollbacks are now fully handled by `movement::process_movement`.
 
 #[reducer]
 pub fn gather_loot(ctx: &ReducerContext, loot_id: u64) {
