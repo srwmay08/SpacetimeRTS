@@ -1,0 +1,295 @@
+use bevy::prelude::*;
+use avian3d::prelude::*;
+use tracing::info;
+use spacetimedb_sdk::Table; // Architectural Note: Required for table .iter() iterator methods in SpacetimeDB v2.x.
+
+use crate::components::*;
+use crate::network::SpacetimeConnection;
+use crate::module_bindings::place_structure_reducer::place_structure; 
+use crate::module_bindings::structure_table::StructureTableAccess; 
+
+// ----------------------------------------------------------------------------
+// DATA-DRIVEN CONFIGURATIONS
+// ----------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModularPieceType {
+    Foundation,
+    Wall,
+    Floor,
+    Roof,
+    Ramp,
+}
+
+impl ModularPieceType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Foundation => "Foundation",
+            Self::Wall => "Wall",
+            Self::Floor => "Floor",
+            Self::Roof => "Roof",
+            Self::Ramp => "Ramp",
+        }
+    }
+
+    pub fn wood_cost(&self) -> u32 {
+        match self {
+            Self::Foundation => 20,
+            Self::Wall => 10,
+            Self::Floor => 15,
+            Self::Roof => 15,
+            Self::Ramp => 20,
+        }
+    }
+
+    pub fn default_sockets(&self) -> Vec<Socket> {
+        match self {
+            Self::Foundation => vec![
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 1.0, 0.0), is_occupied: false },
+                Socket { name: "North".into(), local_offset: Vec3::new(0.0, 0.0, -2.0), is_occupied: false },
+                Socket { name: "South".into(), local_offset: Vec3::new(0.0, 0.0, 2.0), is_occupied: false },
+                Socket { name: "East".into(), local_offset: Vec3::new(2.0, 0.0, 0.0), is_occupied: false },
+                Socket { name: "West".into(), local_offset: Vec3::new(-2.0, 0.0, 0.0), is_occupied: false },
+            ],
+            Self::Wall => vec![
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 3.0, 0.0), is_occupied: false },
+                Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, 0.0, 0.0), is_occupied: false },
+            ],
+            Self::Floor => vec![
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 0.5, 0.0), is_occupied: false },
+            ],
+            Self::Roof => vec![
+                Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, 0.0, 0.0), is_occupied: false },
+            ],
+            Self::Ramp => vec![
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 2.0, -2.0), is_occupied: false },
+            ],
+        }
+    }
+}
+
+#[derive(Resource)]
+pub struct BuildModeState {
+    pub is_active: bool,
+    pub selected_piece: ModularPieceType,
+}
+
+impl Default for BuildModeState {
+    fn default() -> Self {
+        Self {
+            is_active: false,
+            selected_piece: ModularPieceType::Foundation,
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// BUILD MODE & SNAPPING SYSTEMS
+// ----------------------------------------------------------------------------
+
+/// Toggles build mode and cycles through available modular piece types.
+pub fn toggle_build_mode(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut build_state: ResMut<BuildModeState>,
+    mut commands: Commands,
+    hologram_query: Query<Entity, With<BuildHologram>>,
+) {
+    if keys.just_pressed(KeyCode::KeyB) {
+        build_state.is_active = !build_state.is_active;
+        info!("Build Mode Active: {}", build_state.is_active);
+
+        if !build_state.is_active {
+            for entity in hologram_query.iter() {
+                commands.entity(entity).despawn_recursive();
+            }
+        }
+    }
+
+    if build_state.is_active && keys.just_pressed(KeyCode::KeyR) {
+        build_state.selected_piece = match build_state.selected_piece {
+            ModularPieceType::Foundation => ModularPieceType::Wall,
+            ModularPieceType::Wall => ModularPieceType::Floor,
+            ModularPieceType::Floor => ModularPieceType::Roof,
+            ModularPieceType::Roof => ModularPieceType::Ramp,
+            ModularPieceType::Ramp => ModularPieceType::Foundation,
+        };
+        info!("Selected Modular Piece: {:?}", build_state.selected_piece);
+    }
+}
+
+/// Spawns or updates the placement hologram based on raycasting and socket snapping math.
+pub fn update_build_hologram(
+    mut commands: Commands,
+    build_state: Res<BuildModeState>,
+    camera_query: Query<(&GlobalTransform, &Camera), With<FpsCamera>>,
+    spatial_query: SpatialQuery,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut hologram_query: Query<(Entity, &mut Transform), With<BuildHologram>>,
+    socket_query: Query<(&GlobalTransform, &Socket)>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    conn: Res<SpacetimeConnection>,
+) {
+    if !build_state.is_active { return; }
+
+    let Ok((cam_t, _camera)) = camera_query.get_single() else { return; };
+    
+    // Perform 3D raycast from camera view
+    let ray_origin = cam_t.translation();
+    let ray_dir = cam_t.forward();
+
+    // Check if hologram exists; if not, spawn it with a translucent material.
+    let hologram_entity = if let Ok((entity, _)) = hologram_query.get_single() {
+        entity
+    } else {
+        let mesh = match build_state.selected_piece {
+            ModularPieceType::Foundation => meshes.add(Cuboid::new(4.0, 1.0, 4.0)),
+            ModularPieceType::Wall => meshes.add(Cuboid::new(4.0, 3.0, 0.4)),
+            ModularPieceType::Floor => meshes.add(Cuboid::new(4.0, 0.2, 4.0)),
+            ModularPieceType::Roof => meshes.add(Cuboid::new(4.0, 0.2, 4.0)),
+            ModularPieceType::Ramp => meshes.add(Cuboid::new(4.0, 2.0, 4.0)),
+        };
+
+        let material = materials.add(StandardMaterial {
+            base_color: Color::srgba(0.2, 0.8, 1.0, 0.5),
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..default()
+        });
+
+        commands.spawn((
+            PbrBundle { mesh, material, ..default() },
+            BuildHologram,
+        )).id()
+    };
+
+    // Raycast against physics world to find placement target
+    let ray_hit = spatial_query.cast_ray(
+        ray_origin,
+        ray_dir.into(),
+        50.0,
+        true,
+        SpatialQueryFilter::default(),
+    );
+
+    let mut target_transform = Transform::from_xyz(0.0, 0.0, 0.0);
+
+    if let Some(hit) = ray_hit {
+        // Grid-snapping math: Check if intersecting entity has sockets or snap to terrain grid
+        let mut snapped = false;
+        if let Ok((socket_t, socket)) = socket_query.get(hit.entity) {
+            if !socket.is_occupied {
+                target_transform.translation = socket_t.translation() + socket.local_offset;
+                // Architectural Note: Extract rotation directly from Bevy GlobalTransform affine properties.
+                let (_, rotation, _) = socket_t.to_scale_rotation_translation();
+                target_transform.rotation = rotation;
+                snapped = true;
+            }
+        }
+
+        if !snapped {
+            // Fallback to grid snapping on terrain/world intersection
+            let hit_point = ray_origin + ray_dir * hit.time_of_impact;
+            let grid_size = 4.0;
+            let snapped_x = (hit_point.x / grid_size).round() * grid_size;
+            let snapped_z = (hit_point.z / grid_size).round() * grid_size;
+            target_transform.translation = Vec3::new(snapped_x, hit_point.y, snapped_z);
+        }
+    } else {
+        target_transform.translation = ray_origin + ray_dir * 5.0;
+    }
+
+    // Update hologram transform
+    if let Ok((_, mut transform)) = hologram_query.get_mut(hologram_entity) {
+        *transform = target_transform;
+    }
+
+    // Left click to confirm placement and invoke SpacetimeDB reducer
+    if mouse_buttons.just_pressed(MouseButton::Left) {
+        let pos = target_transform.translation;
+        let rot = target_transform.rotation;
+        let piece_name = build_state.selected_piece.name().to_string();
+
+        info!("Dispatching place_structure reducer for {} at {:?}", piece_name, pos);
+        let _ = conn.db.reducers.place_structure(
+            piece_name,
+            pos.x, pos.y, pos.z,
+            rot.x, rot.y, rot.z, rot.w,
+        );
+
+        // Spawn local socket entities attached to the structure for subsequent pieces to snap onto
+        let sockets = build_state.selected_piece.default_sockets();
+        let mut entity_commands = commands.spawn((
+            PbrBundle {
+                transform: target_transform,
+                ..default()
+            },
+            RigidBody::Static,
+            Collider::cuboid(4.0, 1.0, 4.0),
+        ));
+
+        entity_commands.with_children(|parent| {
+            for socket in sockets {
+                parent.spawn(socket);
+            }
+        });
+    }
+}
+
+/// Syncs authoritative structures from SpacetimeDB into the Bevy client ECS.
+pub fn sync_structures(
+    mut commands: Commands,
+    conn: Res<SpacetimeConnection>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    existing_structures: Query<(Entity, &NetworkStructure)>,
+) {
+    let _ = conn.db.frame_tick();
+    // Architectural Note: Access the structure table via v2 generated table iterators.
+    let db_structures: Vec<_> = conn.db.db.structure().iter().collect();
+    
+    let mut spawned_ids = std::collections::HashSet::with_capacity(existing_structures.iter().len());
+
+    for (_entity, net_struct) in existing_structures.iter() {
+        spawned_ids.insert(net_struct.structure_id);
+    }
+
+    for s in db_structures {
+        if !spawned_ids.contains(&s.structure_id) {
+            let (mesh, color) = match s.piece_type.as_str() {
+                "Foundation" => (meshes.add(Cuboid::new(4.0, 1.0, 4.0)), Color::srgb(0.5, 0.4, 0.3)),
+                "Wall" => (meshes.add(Cuboid::new(4.0, 3.0, 0.4)), Color::srgb(0.6, 0.5, 0.4)),
+                "Floor" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.5, 0.4, 0.3)),
+                "Roof" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.4, 0.3, 0.2)),
+                _ => (meshes.add(Cuboid::new(4.0, 2.0, 4.0)), Color::srgb(0.5, 0.5, 0.5)),
+            };
+
+            let transform = Transform::from_xyz(s.x, s.y, s.z)
+                .with_rotation(Quat::from_xyzw(s.rot_x, s.rot_y, s.rot_z, s.rot_w));
+
+            let sockets = match s.piece_type.as_str() {
+                "Foundation" => ModularPieceType::Foundation.default_sockets(),
+                "Wall" => ModularPieceType::Wall.default_sockets(),
+                "Floor" => ModularPieceType::Floor.default_sockets(),
+                "Roof" => ModularPieceType::Roof.default_sockets(),
+                _ => ModularPieceType::Ramp.default_sockets(),
+            };
+
+            commands.spawn((
+                PbrBundle {
+                    mesh,
+                    material: materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.8, ..default() }),
+                    transform,
+                    ..default()
+                },
+                RigidBody::Static,
+                Collider::cuboid(4.0, 1.0, 4.0),
+                NetworkStructure { structure_id: s.structure_id },
+            )).with_children(|parent| {
+                for socket in sockets {
+                    parent.spawn(socket);
+                }
+            });
+        }
+    }
+}

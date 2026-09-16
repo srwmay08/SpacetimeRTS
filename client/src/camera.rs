@@ -1,7 +1,7 @@
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::window::{CursorGrabMode, PrimaryWindow};
-use tracing::{error, info}; // Architectural Note: Removed unused `warn` to keep build clean.
+use tracing::info; // Architectural Note: Removed unused `error` to keep build clean.
 use spacetimedb_sdk::DbContext; // Architectural Note: Required in v2.x to access subscription_builder.
 
 // Note: Assuming `module_bindings` is exposed at the crate root.
@@ -68,7 +68,7 @@ pub fn toggle_perspective(
                 // Architectural Note: subscribe() now returns a SubscriptionHandle directly.
                 let _handle = conn.db.subscription_builder().subscribe(vec![
                     "SELECT * FROM player".to_string(),
-                    format!("SELECT * FROM transform WHERE x > {} AND x < {} AND z > {} AND z < {}", px - radius, px + radius, pz - radius, pz + radius),
+                    format!("SELECT * FROM transform WHERE x > {} AND x < {} AND z > {} AND z < {}", px - radius, px + radius, pz - radius, pz - radius),
                     "SELECT * FROM resource_stockpile".to_string(),
                     "SELECT * FROM ground_loot".to_string(),
                     "SELECT * FROM resource_node".to_string(),

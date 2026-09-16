@@ -1,4 +1,4 @@
-use spacetimedb::{table, reducer, ReducerContext, SpacetimeType};
+use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table}; // Architectural Note: Added 'Table' trait to resolve .iter() scope error in SpacetimeDB v2.x.
 use crate::movement::player_session; // Architectural Note: v2.x requires explicitly bringing traits into scope.
 
 // Architectural Note: Defines a single frame of historical state for an entity.

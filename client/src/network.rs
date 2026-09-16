@@ -1,5 +1,5 @@
 use bevy::prelude::{Transform as BevyTransform, *};
-use bevy::math::primitives::{Capsule3d, Cuboid, Cylinder, Sphere, Torus}; // Architectural Note: Fixed Bevy primitive paths.
+use bevy::math::primitives::{Capsule3d, Cuboid, Cylinder, Sphere, Torus};
 use bevy::render::view::RenderLayers;
 use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
 use bevy::pbr::{ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings};
@@ -7,10 +7,8 @@ use avian3d::prelude::*;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
 
-// Architectural Note: Removed the ambiguous `TableLike` import to satisfy the compiler.
 use spacetimedb_sdk::{DbContext, Table}; 
 
-// Note: Assuming `module_bindings` is exposed at the crate root.
 use crate::module_bindings::{self, *};
 use crate::core::*;
 use crate::components::*;
@@ -19,28 +17,15 @@ use crate::module_bindings::process_movement_reducer::process_movement;
 const SPACETIMEDB_URI: &str = "http://localhost:3000";
 const DB_NAME: &str = "hybrid-backend";
 
-// ----------------------------------------------------------------------------
-// NETWORK RESOURCES
-// ----------------------------------------------------------------------------
-
-/// Maintains the active websocket connection to SpacetimeDB.
-/// Architectural Note: Keeping this globally accessible allows decoupled input/UI 
-/// systems to dispatch reducers directly without tight coupling to the network tick.
 #[derive(Resource)] 
 pub struct SpacetimeConnection {
     pub db: module_bindings::DbConnection, 
     pub identity: Option<spacetimedb_sdk::Identity>,
 }
 
-/// A thread-safe container for the identity resolved in the background connection callback.
 #[derive(Resource)] 
 pub struct IdentityStore(pub Arc<Mutex<Option<spacetimedb_sdk::Identity>>>);
 
-// ----------------------------------------------------------------------------
-// BOOTSTRAP SYSTEMS
-// ----------------------------------------------------------------------------
-
-/// Initializes the SDK connection, requests the initial spatial subscription, and spawns the local player prefab.
 pub fn init_network_connection(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -50,7 +35,6 @@ pub fn init_network_connection(
         .with_uri(SPACETIMEDB_URI)
         .with_database_name(DB_NAME);
 
-    // Architectural Note: Attempt to load an existing auth token to avoid creating a new player record on every boot.
     if let Ok(token) = std::fs::read_to_string("stdb_token.txt") { 
         builder = builder.with_token(Some(token)); 
     }
@@ -65,15 +49,15 @@ pub fn init_network_connection(
         
         info!("Authenticated to SpacetimeDB with Identity: {}", identity.to_hex());
         
-        // Architectural Note: Default subscription initializes in tight FPS mode (50m bounds) to save server compute (TeV).
-        // subscribe() now strictly returns a SubscriptionHandle and is infallible on construction.
+        // Architectural Note: Added `structure` table subscription for modular building synchronization.
         let _handle = conn.subscription_builder().subscribe(vec![
             "SELECT * FROM player",
             "SELECT * FROM transform WHERE x > -50 AND x < 50 AND z > -50 AND z < 50",
             "SELECT * FROM resource_stockpile",
             "SELECT * FROM ground_loot",
             "SELECT * FROM resource_node",
-            "SELECT * FROM combat_event" 
+            "SELECT * FROM combat_event",
+            "SELECT * FROM structure" 
         ]);
 
         match store_clone.lock() {
@@ -82,7 +66,6 @@ pub fn init_network_connection(
         }
     }).build();
 
-    // Architectural Note: Hard crash prevention. We explicitly handle builder failure.
     let db = match build_result {
         Ok(db) => db,
         Err(e) => {
@@ -94,7 +77,6 @@ pub fn init_network_connection(
     commands.insert_resource(SpacetimeConnection { db, identity: None });
     commands.insert_resource(IdentityStore(identity_store));
 
-    // Spawn initial local cameras and lighting
     commands.spawn((
         SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 0.0, 0.0)),
         RtsCameraRig,
@@ -188,7 +170,6 @@ pub fn init_network_connection(
     });
 }
 
-/// Processes SDK frame ticks until the background thread resolves our identity.
 pub fn wait_for_connection(
     store: Res<IdentityStore>,
     mut next_state: ResMut<NextState<GameState>>,
@@ -207,11 +188,6 @@ pub fn wait_for_connection(
     }
 }
 
-// ----------------------------------------------------------------------------
-// SYNCHRONIZATION SYSTEMS
-// ----------------------------------------------------------------------------
-
-/// Rubber-bands the local client character to the server's authoritative state if they drift too far.
 pub fn reconcile_local_transform(
     mut query: Query<&mut BevyTransform, With<PlayerBody>>,
     conn: Res<SpacetimeConnection>,
@@ -219,7 +195,6 @@ pub fn reconcile_local_transform(
     let Ok(mut transform) = query.get_single_mut() else { return; };
     let Some(my_identity) = &conn.identity else { return; };
     
-    // Architectural Note: Avoids unwrap/expect on client state mismatch, bails gracefully instead.
     let Some(my_player) = conn.db.db.player().identity().find(my_identity) else { return; };
     let Some(server_transform) = conn.db.db.transform().entity_id().find(&my_player.entity_id) else { return; };
 
@@ -231,7 +206,6 @@ pub fn reconcile_local_transform(
     }
 }
 
-/// Smoothly interpolates foreign entities toward their authoritative logical positions.
 pub fn sync_logical_components(
     time: Res<Time>,
     mut query: Query<(&LogicalPosition, &LogicalRotation, &mut BevyTransform), Without<PlayerBody>>
@@ -240,7 +214,7 @@ pub fn sync_logical_components(
     
     for (log_pos, log_rot, mut transform) in query.iter_mut() {
         if transform.translation.distance(log_pos.0) > 5.0 {
-            transform.translation = log_pos.0; // Snap if drift is immense (e.g. teleporting)
+            transform.translation = log_pos.0; 
         } else {
             transform.translation = transform.translation.lerp(log_pos.0, dt);
         }
@@ -248,7 +222,6 @@ pub fn sync_logical_components(
     }
 }
 
-/// Replicates the SpacetimeDB `transform` table state into the Bevy ECS, spawning missing entities.
 pub fn sync_transforms(
     mut commands: Commands, 
     conn: Res<SpacetimeConnection>, 
@@ -256,7 +229,6 @@ pub fn sync_transforms(
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Architectural Note: We tick the SDK connection exactly once per frame update in this system.
     let _ = conn.db.frame_tick();
     
     let my_entity_id = conn.identity.as_ref()
@@ -264,18 +236,12 @@ pub fn sync_transforms(
         .map(|p| p.entity_id);
 
     let db_transforms: Vec<_> = conn.db.db.transform().iter().collect();
-    
-    // Architectural Note: Replaced raw Vector with HashSet for O(1) lookups. 
-    // In RTS mode with a 500m radius, a Vec.contains() scan would severely throttle the tick rate.
     let mut spawned_ids = std::collections::HashSet::with_capacity(query.iter().len());
 
-    for (net_entity, mut log_pos, mut log_rot) in query.iter_mut() {
+    for (net_entity, mut log_pos, _) in query.iter_mut() {
         spawned_ids.insert(net_entity.0);
         if let Some(db_t) = db_transforms.iter().find(|t| t.entity_id == net_entity.0) {
             log_pos.0 = Vec3::new(db_t.x, db_t.y, db_t.z);
-            if Some(db_t.entity_id) != my_entity_id {
-                // Ignore rot as we decoupled it from the core transform sync for now to save bandwidth
-            }
         }
     }
 
@@ -290,7 +256,7 @@ pub fn sync_transforms(
                 ),
                 LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
                 LogicalRotation(Quat::IDENTITY),
-                Faction::Player, // Assuming player faction defaults for foreign clients for now
+                Faction::Player,
             )).with_children(|parent| {
                 parent.spawn((
                     PbrBundle {
@@ -306,7 +272,6 @@ pub fn sync_transforms(
     }
 }
 
-/// Dispatches our local physics position to the SpacetimeDB `process_movement` reducer.
 pub fn send_movement_input(
     mut timer: ResMut<NetworkTickTimer>, 
     time: Res<Time>,
@@ -319,12 +284,8 @@ pub fn send_movement_input(
 
     let Ok(body_transform) = body_query.get_single() else { return; };
     let current_pos = body_transform.translation;
-
     let delta = current_pos - *last_pos;
 
-    // Architectural Note: We now send velocity/delta vectors along with a rolling
-    // tick_id to support the server's new reconciliation queue, instead of absolute coordinates.
-    // We only fire if the delta is non-zero to conserve network bandwidth and TeV.
     if delta.length_squared() > 0.0001 {
         *tick_counter += 1;
         let _ = conn.db.reducers.process_movement(
@@ -334,7 +295,6 @@ pub fn send_movement_input(
     }
 }
 
-/// Syncs static harvestable trees/rocks based on the `resource_node` table.
 pub fn sync_resource_nodes(
     mut commands: Commands, 
     mut meshes: ResMut<Assets<Mesh>>, 
@@ -378,7 +338,6 @@ pub fn sync_resource_nodes(
     }
 }
 
-/// Syncs physics-enabled dropped items based on the `ground_loot` table.
 pub fn sync_ground_loot(
     mut commands: Commands, 
     mut meshes: ResMut<Assets<Mesh>>, 
@@ -421,7 +380,6 @@ pub fn sync_ground_loot(
     }
 }
 
-/// Triggers transient visual effects (VFX) when the server table `combat_event` updates.
 pub fn process_combat_events(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -431,8 +389,6 @@ pub fn process_combat_events(
 ) {
     let mut highest_id = tracker.last_event_id;
 
-    // Architectural Note: We only spawn particle bursts for events with IDs higher than our tracked state.
-    // This prevents re-processing the entire event history since SpacetimeDB syncs the full table locally.
     for event in conn.db.db.combat_event().iter() {
         if event.id > tracker.last_event_id {
             highest_id = highest_id.max(event.id);

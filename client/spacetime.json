@@ -1,0 +1,11 @@
+{
+  "server": "http://localhost:3000",
+  "database": "hybrid-backend",
+  "module-path": "../backend/spacetimedb",
+  "generate": [
+    {
+      "language": "rust",
+      "out-dir": "./src/module_bindings"
+    }
+  ]
+}

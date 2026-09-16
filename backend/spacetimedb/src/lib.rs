@@ -2,17 +2,13 @@ use spacetimedb::{table, reducer, Identity, ReducerContext, Table};
 use noise::{NoiseFn, Perlin};
 use log::info; 
 
-// Expose internal modules to the SpacetimeDB compilation tree
 pub mod movement;
 pub mod combat;
+pub mod building; // Architectural Note: Registers modular building backend module.
 
-// Bring generated accessor traits into scope
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history};
-
-// ----------------------------------------------------------------------------
-// MULTIPLAYER SCHEMAS & ENTITY STATE
-// ----------------------------------------------------------------------------
+use crate::building::{structure, place_structure};
 
 #[table(accessor = player, public)]
 #[derive(Clone)]
@@ -62,10 +58,6 @@ pub struct CombatEvent {
     pub event_type: String, 
     pub x: f32, pub y: f32, pub z: f32,
 }
-
-// ----------------------------------------------------------------------------
-// LIFECYCLE REDUCERS
-// ----------------------------------------------------------------------------
 
 #[spacetimedb::reducer(init)]
 pub fn init(_ctx: &ReducerContext) {}
@@ -131,7 +123,6 @@ pub fn client_connected(ctx: &ReducerContext) {
         
         let entity_id = inserted_player.entity_id;
 
-        // Architectural Note: Provision new schemas for movement and combat.
         ctx.db.transform().insert(movement::Transform {
             entity_id,
             x: 0.0, y: 20.0, z: 0.0,
@@ -155,7 +146,7 @@ pub fn client_connected(ctx: &ReducerContext) {
         });
 
         ctx.db.resource_stockpile().insert(ResourceStockpile {
-            entity_id, wood: 0, ore: 0, food: 0,
+            entity_id, wood: 100, ore: 50, food: 20,
         });
         
         ctx.db.player_perspective().insert(PlayerPerspective {
@@ -175,10 +166,6 @@ pub fn client_disconnected(ctx: &ReducerContext) {
         info!("Player disconnected and state persisted: {}", sender.to_hex());
     }
 }
-
-// ----------------------------------------------------------------------------
-// GAME LOGIC REDUCERS (AUTHORITATIVE STATE)
-// ----------------------------------------------------------------------------
 
 #[reducer]
 pub fn set_camera_mode(ctx: &ReducerContext, mode: String) {
@@ -203,7 +190,6 @@ pub fn gather_loot(ctx: &ReducerContext, loot_id: u64) {
     let sender = ctx.sender();
     let Some(player) = ctx.db.player().identity().find(sender) else { return; };
     let Some(loot) = ctx.db.ground_loot().loot_id().find(loot_id) else { return; };
-    
     let Some(mut stockpile) = ctx.db.resource_stockpile().entity_id().find(player.entity_id) else { return; };
 
     ctx.db.ground_loot().loot_id().delete(loot_id);
@@ -264,10 +250,6 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
         }
     }
 }
-
-// ----------------------------------------------------------------------------
-// UTILITY FUNCTIONS & PROCEDURAL TERRAIN FORMULAS
-// ----------------------------------------------------------------------------
 
 fn get_terrain_height(x: f32, z: f32) -> f32 {
     let scale = 0.015; 

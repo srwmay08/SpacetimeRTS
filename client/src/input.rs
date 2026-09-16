@@ -7,10 +7,10 @@ use tracing::info;
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
-use crate::prediction::ClientTick; // Architectural Note: Importing the rolling tick for lag compensation
-use crate::module_bindings::swing_tool_reducer::swing_tool; 
+use crate::prediction::ClientTick; 
 use crate::module_bindings::gather_loot_reducer::gather_loot; 
-use crate::module_bindings::fire_weapon_reducer::fire_weapon; // Architectural Note: v2.x explicit trait import.
+use crate::module_bindings::fire_weapon_reducer::fire_weapon; 
+use crate::module_bindings::swing_tool_reducer::swing_tool; 
 
 // ----------------------------------------------------------------------------
 // EVENTS & ENUMS
@@ -45,8 +45,6 @@ pub struct ActionEvent {
 // ----------------------------------------------------------------------------
 
 /// Translates raw mouse and keyboard states into abstract `ActionEvent`s.
-/// Architectural Note: This separation allows us to easily implement key rebinding 
-/// in the future, or simulate inputs for headless integration tests.
 pub fn input_router_system(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -78,9 +76,9 @@ pub fn input_router_system(
 // ACTION DISPATCHING
 // ----------------------------------------------------------------------------
 
-/// Consumes `ActionEvent`s and applies context-aware logic depending on the active `CameraMode`.
-/// Architectural Note: Handles local state prediction (like the swing timer) while 
-/// dispatching authoritative actions (like gathering loot) to SpacetimeDB reducers.
+/// Consumes `ActionEvent`s and applies context-aware logic depending on active targets and camera mode.
+/// Architectural Note: Performs raycast target inspection in FPS mode to dynamically route 
+/// player intent between resource harvesting (`swing_tool`) and combat (`fire_weapon`).
 pub fn context_aware_action_dispatcher(
     mut commands: Commands,
     mut action_events: EventReader<ActionEvent>,
@@ -91,6 +89,8 @@ pub fn context_aware_action_dispatcher(
     fps_camera_query: Query<&GlobalTransform, With<FpsCamera>>,
     player_query: Query<(Entity, &BevyTransform), With<PlayerBody>>,
     loot_query: Query<&GroundLootItem>,
+    node_query: Query<&ResourceNodeItem>, // Architectural Note: Identifies trees, rocks, and bushes.
+    structure_query: Query<&NetworkStructure>, // Architectural Note: Identifies player-built structures.
     
     rts_camera_query: Query<(&Camera, &GlobalTransform), With<RtsCameraChild>>,
     spatial_query: SpatialQuery,
@@ -98,7 +98,7 @@ pub fn context_aware_action_dispatcher(
     selectable_query: Query<(Entity, &BevyTransform), With<Selectable>>,
     mut selection_state: ResMut<SelectionState>,
     conn: Res<SpacetimeConnection>,
-    tick: Res<ClientTick>, // Architectural Note: Inject the rolling local simulation tick for lag compensation.
+    tick: Res<ClientTick>,
 ) {
     let multi_select = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
@@ -107,19 +107,64 @@ pub fn context_aware_action_dispatcher(
             CameraMode::FPS => {
                 match event.action {
                     VirtualAction::Primary if event.state == ActionState::JustPressed => {
-                        // Architectural Note: Instant Client-Side Prediction Raycast & Firing
                         if !swing_state.is_swinging {
                             swing_state.is_swinging = true;
                             if let Ok(cam_transform) = fps_camera_query.get_single() {
                                 let origin = cam_transform.translation();
                                 let dir = cam_transform.forward();
                                 
-                                // Architectural Note: Transmit Fire Event with Tick Timestamp for Lag Comp
-                                let _ = conn.db.reducers.fire_weapon(
-                                    tick.0, 
-                                    origin.x, origin.y, origin.z, 
-                                    dir.x, dir.y, dir.z
+                                // Perform a raycast to inspect what the player is targeting within range (e.g., 6.0 units)
+                                let hit = spatial_query.cast_ray(
+                                    origin,
+                                    dir.into(),
+                                    6.0,
+                                    true,
+                                    SpatialQueryFilter::default(),
                                 );
+
+                                if let Some(hit_data) = hit {
+                                    let hit_entity = hit_data.entity;
+
+                                    // 1. Target is a Resource Node (Tree, Rock, Bush) -> Gather / Swing Tool
+                                    if node_query.contains(hit_entity) {
+                                        info!("Context Target: Resource Node. Invoking swing_tool.");
+                                        let _ = conn.db.reducers.swing_tool(
+                                            origin.x, origin.y, origin.z, 
+                                            dir.x, dir.y, dir.z
+                                        );
+                                    } 
+                                    // 2. Target is a Player or NPC Character -> Combat / Fire Weapon
+                                    else if player_query.contains(hit_entity) {
+                                        info!("Context Target: Character/Player. Invoking fire_weapon.");
+                                        let _ = conn.db.reducers.fire_weapon(
+                                            tick.0, 
+                                            origin.x, origin.y, origin.z, 
+                                            dir.x, dir.y, dir.z
+                                        );
+                                    }
+                                    // 3. Target is a Structure -> Future hook for repair or inspection
+                                    else if structure_query.contains(hit_entity) {
+                                        info!("Context Target: Structure. (Interaction hook available)");
+                                        // Optional: dispatch structure interaction or default swing
+                                        let _ = conn.db.reducers.swing_tool(
+                                            origin.x, origin.y, origin.z, 
+                                            dir.x, dir.y, dir.z
+                                        );
+                                    } 
+                                    // 4. Default fallback for terrain or unclassified objects
+                                    else {
+                                        let _ = conn.db.reducers.swing_tool(
+                                            origin.x, origin.y, origin.z, 
+                                            dir.x, dir.y, dir.z
+                                        );
+                                    }
+                                } else {
+                                    // Hit nothing in range -> Default tool swing / empty attack
+                                    let _ = conn.db.reducers.swing_tool(
+                                        origin.x, origin.y, origin.z, 
+                                        dir.x, dir.y, dir.z
+                                    );
+                                }
                             }
                         }
                     }
@@ -135,7 +180,7 @@ pub fn context_aware_action_dispatcher(
                             for entity in intersections {
                                 if let Ok(loot) = loot_query.get(entity) {
                                     let _ = conn.db.reducers.gather_loot(loot.loot_id);
-                                    break; // Only pick up one item per interaction press
+                                    break;
                                 }
                             }
                         }
@@ -172,7 +217,6 @@ pub fn context_aware_action_dispatcher(
                                 let dist = start.distance(cursor_pos);
 
                                 if dist < 5.0 {
-                                    // Click Selection or Move Command
                                     if let Some(ray) = camera.viewport_to_world(cam_transform, cursor_pos) {
                                         if let Some(hit) = spatial_query.cast_ray(
                                             ray.origin,
@@ -194,7 +238,6 @@ pub fn context_aware_action_dispatcher(
                                         }
                                     }
                                 } else {
-                                    // Marquee Selection Box
                                     let min_x = start.x.min(cursor_pos.x);
                                     let max_x = start.x.max(cursor_pos.x);
                                     let min_y = start.y.min(cursor_pos.y);
@@ -225,9 +268,6 @@ pub fn context_aware_action_dispatcher(
 // MOVEMENT SYSTEMS
 // ----------------------------------------------------------------------------
 
-/// Applies Avian3D forces to selected RTS units moving toward a `NavTarget`.
-/// Architectural Note: This is currently client-side prediction logic. Eventually,
-/// RTS pathfinding nodes should be validated server-side by a SpacetimeDB reducer.
 pub fn rts_navmesh_movement_system(
     mut commands: Commands,
     mut query: Query<(Entity, &BevyTransform, &mut LinearVelocity, &NavTarget)>,
@@ -249,7 +289,6 @@ pub fn rts_navmesh_movement_system(
     }
 }
 
-/// Handles localized FPS player movement via keyboard WASD inputs.
 pub fn player_movement_system(
     keys: Res<ButtonInput<KeyCode>>, 
     camera_mode: Res<State<CameraMode>>,
