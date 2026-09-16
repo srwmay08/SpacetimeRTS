@@ -11,11 +11,7 @@ pub struct Transform {
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    pub rot_x: f32,
-    pub rot_y: f32,
-    pub rot_z: f32,
-    pub rot_w: f32,
-    pub timestamp: u64,
+    pub last_processed_tick: u64,
 }
 
 impl __sdk::InModule for Transform {
@@ -30,11 +26,7 @@ pub struct TransformCols {
     pub x: __sdk::__query_builder::Col<Transform, f32>,
     pub y: __sdk::__query_builder::Col<Transform, f32>,
     pub z: __sdk::__query_builder::Col<Transform, f32>,
-    pub rot_x: __sdk::__query_builder::Col<Transform, f32>,
-    pub rot_y: __sdk::__query_builder::Col<Transform, f32>,
-    pub rot_z: __sdk::__query_builder::Col<Transform, f32>,
-    pub rot_w: __sdk::__query_builder::Col<Transform, f32>,
-    pub timestamp: __sdk::__query_builder::Col<Transform, u64>,
+    pub last_processed_tick: __sdk::__query_builder::Col<Transform, u64>,
 }
 
 impl __sdk::__query_builder::HasCols for Transform {
@@ -45,11 +37,10 @@ impl __sdk::__query_builder::HasCols for Transform {
             x: __sdk::__query_builder::Col::new(table_name, "x"),
             y: __sdk::__query_builder::Col::new(table_name, "y"),
             z: __sdk::__query_builder::Col::new(table_name, "z"),
-            rot_x: __sdk::__query_builder::Col::new(table_name, "rot_x"),
-            rot_y: __sdk::__query_builder::Col::new(table_name, "rot_y"),
-            rot_z: __sdk::__query_builder::Col::new(table_name, "rot_z"),
-            rot_w: __sdk::__query_builder::Col::new(table_name, "rot_w"),
-            timestamp: __sdk::__query_builder::Col::new(table_name, "timestamp"),
+            last_processed_tick: __sdk::__query_builder::Col::new(
+                table_name,
+                "last_processed_tick",
+            ),
         }
     }
 }

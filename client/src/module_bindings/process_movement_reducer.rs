@@ -7,25 +7,19 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct ProcessMovementArgs {
-    pub px: f32,
-    pub py: f32,
-    pub pz: f32,
-    pub rot_x: f32,
-    pub rot_y: f32,
-    pub rot_z: f32,
-    pub rot_w: f32,
+    pub tick_id: u64,
+    pub delta_x: f32,
+    pub delta_y: f32,
+    pub delta_z: f32,
 }
 
 impl From<ProcessMovementArgs> for super::Reducer {
     fn from(args: ProcessMovementArgs) -> Self {
         Self::ProcessMovement {
-            px: args.px,
-            py: args.py,
-            pz: args.pz,
-            rot_x: args.rot_x,
-            rot_y: args.rot_y,
-            rot_z: args.rot_z,
-            rot_w: args.rot_w,
+            tick_id: args.tick_id,
+            delta_x: args.delta_x,
+            delta_y: args.delta_y,
+            delta_z: args.delta_z,
         }
     }
 }
@@ -47,15 +41,12 @@ pub trait process_movement {
     /// /// Use [`process_movement:process_movement_then`] to run a callback after the reducer completes.
     fn process_movement(
         &self,
-        px: f32,
-        py: f32,
-        pz: f32,
-        rot_x: f32,
-        rot_y: f32,
-        rot_z: f32,
-        rot_w: f32,
+        tick_id: u64,
+        delta_x: f32,
+        delta_y: f32,
+        delta_z: f32,
     ) -> __sdk::Result<()> {
-        self.process_movement_then(px, py, pz, rot_x, rot_y, rot_z, rot_w, |_, _| {})
+        self.process_movement_then(tick_id, delta_x, delta_y, delta_z, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `process_movement` to run as soon as possible,
@@ -66,13 +57,10 @@ pub trait process_movement {
     ///  and its status can be observed with the `callback`.
     fn process_movement_then(
         &self,
-        px: f32,
-        py: f32,
-        pz: f32,
-        rot_x: f32,
-        rot_y: f32,
-        rot_z: f32,
-        rot_w: f32,
+        tick_id: u64,
+        delta_x: f32,
+        delta_y: f32,
+        delta_z: f32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -83,13 +71,10 @@ pub trait process_movement {
 impl process_movement for super::RemoteReducers {
     fn process_movement_then(
         &self,
-        px: f32,
-        py: f32,
-        pz: f32,
-        rot_x: f32,
-        rot_y: f32,
-        rot_z: f32,
-        rot_w: f32,
+        tick_id: u64,
+        delta_x: f32,
+        delta_y: f32,
+        delta_z: f32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -97,13 +82,10 @@ impl process_movement for super::RemoteReducers {
     ) -> __sdk::Result<()> {
         self.imp.invoke_reducer_with_callback(
             ProcessMovementArgs {
-                px,
-                py,
-                pz,
-                rot_x,
-                rot_y,
-                rot_z,
-                rot_w,
+                tick_id,
+                delta_x,
+                delta_y,
+                delta_z,
             },
             callback,
         )

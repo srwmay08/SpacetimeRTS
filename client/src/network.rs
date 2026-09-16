@@ -1,5 +1,5 @@
 use bevy::prelude::{Transform as BevyTransform, *};
-use bevy::render::mesh::{Capsule3d, Cuboid, Cylinder, Sphere, Torus};
+use bevy::math::primitives::{Capsule3d, Cuboid, Cylinder, Sphere, Torus}; // Architectural Note: Fixed Bevy primitive paths.
 use bevy::render::view::RenderLayers;
 use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
 use bevy::pbr::{ScreenSpaceAmbientOcclusionQualityLevel, ScreenSpaceAmbientOcclusionSettings};
@@ -7,10 +7,14 @@ use avian3d::prelude::*;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
 
+// Architectural Note: Removed the ambiguous `TableLike` import to satisfy the compiler.
+use spacetimedb_sdk::{DbContext, Table}; 
+
 // Note: Assuming `module_bindings` is exposed at the crate root.
 use crate::module_bindings::{self, *};
 use crate::core::*;
 use crate::components::*;
+use crate::module_bindings::process_movement_reducer::process_movement;
 
 const SPACETIMEDB_URI: &str = "http://localhost:3000";
 const DB_NAME: &str = "hybrid-backend";
@@ -62,16 +66,15 @@ pub fn init_network_connection(
         info!("Authenticated to SpacetimeDB with Identity: {}", identity.to_hex());
         
         // Architectural Note: Default subscription initializes in tight FPS mode (50m bounds) to save server compute (TeV).
-        if let Err(e) = conn.subscription_builder().subscribe(vec![
+        // subscribe() now strictly returns a SubscriptionHandle and is infallible on construction.
+        let _handle = conn.subscription_builder().subscribe(vec![
             "SELECT * FROM player",
             "SELECT * FROM transform WHERE x > -50 AND x < 50 AND z > -50 AND z < 50",
             "SELECT * FROM resource_stockpile",
             "SELECT * FROM ground_loot",
             "SELECT * FROM resource_node",
             "SELECT * FROM combat_event" 
-        ]) {
-            error!("Failed to register SpacetimeDB subscriptions: {}", e);
-        }
+        ]);
 
         match store_clone.lock() {
             Ok(mut guard) => { *guard = Some(identity.clone()); },
@@ -271,7 +274,7 @@ pub fn sync_transforms(
         if let Some(db_t) = db_transforms.iter().find(|t| t.entity_id == net_entity.0) {
             log_pos.0 = Vec3::new(db_t.x, db_t.y, db_t.z);
             if Some(db_t.entity_id) != my_entity_id {
-                log_rot.0 = Quat::from_xyzw(db_t.rot_x, db_t.rot_y, db_t.rot_z, db_t.rot_w);
+                // Ignore rot as we decoupled it from the core transform sync for now to save bandwidth
             }
         }
     }
@@ -280,14 +283,13 @@ pub fn sync_transforms(
         if Some(db_t.entity_id) == my_entity_id { continue; }
         
         if !spawned_ids.contains(&db_t.entity_id) {
-            let spawn_quat = Quat::from_xyzw(db_t.rot_x, db_t.rot_y, db_t.rot_z, db_t.rot_w);
             commands.spawn((
                 NetworkEntity(db_t.entity_id),
                 SpatialBundle::from_transform(
-                    BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z).with_rotation(spawn_quat)
+                    BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)
                 ),
                 LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
-                LogicalRotation(spawn_quat),
+                LogicalRotation(Quat::IDENTITY),
                 Faction::Player, // Assuming player faction defaults for foreign clients for now
             )).with_children(|parent| {
                 parent.spawn((
@@ -309,21 +311,27 @@ pub fn send_movement_input(
     mut timer: ResMut<NetworkTickTimer>, 
     time: Res<Time>,
     body_query: Query<&BevyTransform, With<PlayerBody>>,
-    head_query: Query<&BevyTransform, With<PlayerHead>>,
     conn: Res<SpacetimeConnection>,
+    mut last_pos: Local<Vec3>,
+    mut tick_counter: Local<u64>,
 ) {
     if !timer.0.tick(time.delta()).just_finished() { return; }
 
     let Ok(body_transform) = body_query.get_single() else { return; };
-    let Ok(head_transform) = head_query.get_single() else { return; };
+    let current_pos = body_transform.translation;
 
-    let combined_rot = body_transform.rotation * head_transform.rotation;
+    let delta = current_pos - *last_pos;
 
-    // Architectural Note: Rate-limited to 20Hz by NetworkTickTimer to respect DB energy constraints.
-    let _ = conn.db.reducers.process_movement(
-        body_transform.translation.x, body_transform.translation.y, body_transform.translation.z, 
-        combined_rot.x, combined_rot.y, combined_rot.z, combined_rot.w
-    );
+    // Architectural Note: We now send velocity/delta vectors along with a rolling
+    // tick_id to support the server's new reconciliation queue, instead of absolute coordinates.
+    // We only fire if the delta is non-zero to conserve network bandwidth and TeV.
+    if delta.length_squared() > 0.0001 {
+        *tick_counter += 1;
+        let _ = conn.db.reducers.process_movement(
+            *tick_counter, delta.x, delta.y, delta.z
+        );
+        *last_pos = current_pos;
+    }
 }
 
 /// Syncs static harvestable trees/rocks based on the `resource_node` table.

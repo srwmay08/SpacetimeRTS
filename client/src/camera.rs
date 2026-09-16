@@ -1,12 +1,14 @@
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::window::{CursorGrabMode, PrimaryWindow};
-use tracing::{error, info, warn};
+use tracing::{error, info}; // Architectural Note: Removed unused `warn` to keep build clean.
+use spacetimedb_sdk::DbContext; // Architectural Note: Required in v2.x to access subscription_builder.
 
 // Note: Assuming `module_bindings` is exposed at the crate root.
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
+use crate::module_bindings::set_camera_mode_reducer::set_camera_mode; // Architectural Note: Explicit v2 trait import.
 
 // ----------------------------------------------------------------------------
 // PERSPECTIVE TOGGLING & CULLING
@@ -44,18 +46,16 @@ pub fn toggle_perspective(
                 let _ = conn.db.reducers.set_camera_mode("RTS".to_string());
                 
                 let radius = 500.0;
-                if let Err(e) = conn.db.subscription_builder().subscribe(vec![
+                // Architectural Note: subscribe() now returns a SubscriptionHandle directly.
+                let _handle = conn.db.subscription_builder().subscribe(vec![
                     "SELECT * FROM player".to_string(),
                     format!("SELECT * FROM transform WHERE x > {} AND x < {} AND z > {} AND z < {}", px - radius, px + radius, pz - radius, pz + radius),
                     "SELECT * FROM resource_stockpile".to_string(),
                     "SELECT * FROM ground_loot".to_string(),
                     "SELECT * FROM resource_node".to_string(),
                     "SELECT * FROM combat_event".to_string() 
-                ]) {
-                    error!("Failed to expand SpacetimeDB subscription radius for RTS mode: {}", e);
-                } else {
-                    info!("Expanded network culling bounds to 500m (RTS Mode)");
-                }
+                ]);
+                info!("Expanded network culling bounds to 500m (RTS Mode)");
             }
             CameraMode::RTS => {
                 next_state.set(CameraMode::FPS);
@@ -65,18 +65,16 @@ pub fn toggle_perspective(
                 let _ = conn.db.reducers.set_camera_mode("FPS".to_string());
                 
                 let radius = 50.0;
-                if let Err(e) = conn.db.subscription_builder().subscribe(vec![
+                // Architectural Note: subscribe() now returns a SubscriptionHandle directly.
+                let _handle = conn.db.subscription_builder().subscribe(vec![
                     "SELECT * FROM player".to_string(),
                     format!("SELECT * FROM transform WHERE x > {} AND x < {} AND z > {} AND z < {}", px - radius, px + radius, pz - radius, pz + radius),
                     "SELECT * FROM resource_stockpile".to_string(),
                     "SELECT * FROM ground_loot".to_string(),
                     "SELECT * FROM resource_node".to_string(),
                     "SELECT * FROM combat_event".to_string() 
-                ]) {
-                    error!("Failed to contract SpacetimeDB subscription radius for FPS mode: {}", e);
-                } else {
-                    info!("Contracted network culling bounds to 50m (FPS Mode)");
-                }
+                ]);
+                info!("Contracted network culling bounds to 50m (FPS Mode)");
             }
         }
     }

@@ -1,11 +1,12 @@
-use spacetimedb::{spacetimedb, ReducerContext, SpacetimeType};
+use spacetimedb::{table, reducer, ReducerContext, Identity};
 
 /// Represents the physical manifestation of an entity in the game world.
 /// We store the `last_processed_tick` directly on the transform to ensure 
 /// that whenever a client receives a state sync, they know exactly which 
 /// local inputs have already been applied by the server.
-#[derive(SpacetimeType, Clone)]
-#[spacetimedb::table(accessor = transform)]
+// Architectural Note: #[table] automatically derives SpacetimeType, Serialize, and Deserialize in v2.x.
+#[derive(Clone)]
+#[table(accessor = transform, public)]
 pub struct Transform {
     #[primary_key]
     pub entity_id: u64,
@@ -17,11 +18,11 @@ pub struct Transform {
 }
 
 /// Links a player's connection identity to their in-game physical entity.
-#[derive(SpacetimeType, Clone)]
-#[spacetimedb::table(accessor = player_session)]
+#[derive(Clone)]
+#[table(accessor = player_session, public)]
 pub struct PlayerSession {
     #[primary_key]
-    pub identity: spacetimedb::Identity,
+    pub identity: Identity,
     #[unique]
     pub entity_id: u64,
 }
@@ -33,7 +34,7 @@ pub struct PlayerSession {
 /// We enforce a strict maximum magnitude check to protect the server's economy 
 /// of compute energy (TeV) from having to do complex pathfinding validations 
 /// on every single micro-tick.
-#[spacetimedb::reducer]
+#[reducer]
 pub fn process_movement(
     ctx: &ReducerContext,
     tick_id: u64,
@@ -44,7 +45,7 @@ pub fn process_movement(
     // 1. Authenticate and resolve the sender's entity identity
     let session = ctx.db.player_session()
         .identity()
-        .find(ctx.sender)
+        .find(ctx.sender())
         .ok_or_else(|| "Unauthorized: No active player session found for sender".to_string())?;
         
     // 2. Retrieve the entity's current authoritative transform
@@ -86,8 +87,7 @@ pub fn process_movement(
     transform.last_processed_tick = tick_id;
 
     // 6. Commit the updated transform back to SpacetimeDB
-    // This will automatically fire an update event to all subscribed clients.
-    ctx.db.transform().entity_id().update(transform.entity_id, transform.clone());
+    ctx.db.transform().entity_id().update(transform.clone());
     
     Ok(())
 }

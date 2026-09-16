@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)] // Architectural Note: Suppresses third-party Avian3D macro warnings.
+
 use bevy::prelude::*;
 use avian3d::prelude::*;
 

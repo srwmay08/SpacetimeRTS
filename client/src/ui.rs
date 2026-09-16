@@ -4,6 +4,8 @@ use bevy::prelude::*;
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
+use crate::module_bindings::player_table::PlayerTableAccess; // Architectural Note: v2.x explicit trait import.
+use crate::module_bindings::resource_stockpile_table::ResourceStockpileTableAccess; // Architectural Note: v2.x explicit trait import.
 
 // ----------------------------------------------------------------------------
 // INVENTORY UI SETUP & MANAGEMENT

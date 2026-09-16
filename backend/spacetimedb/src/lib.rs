@@ -1,9 +1,12 @@
 use spacetimedb::{table, reducer, Identity, ReducerContext, Table};
 use noise::{NoiseFn, Perlin};
-use log::{info, warn};
+use log::info; 
 
 // Expose the movement module to the SpacetimeDB compilation tree
 pub mod movement;
+
+// Bring generated accessor traits into scope so we can use ctx.db.transform()
+use crate::movement::{transform, player_session};
 
 // ----------------------------------------------------------------------------
 // MULTIPLAYER SCHEMAS & ENTITY STATE

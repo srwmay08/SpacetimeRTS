@@ -13,6 +13,8 @@ pub mod ground_loot_table;
 pub mod ground_loot_type;
 pub mod player_perspective_table;
 pub mod player_perspective_type;
+pub mod player_session_table;
+pub mod player_session_type;
 pub mod player_table;
 pub mod player_type;
 pub mod process_movement_reducer;
@@ -32,6 +34,8 @@ pub use ground_loot_table::*;
 pub use ground_loot_type::GroundLoot;
 pub use player_perspective_table::*;
 pub use player_perspective_type::PlayerPerspective;
+pub use player_session_table::*;
+pub use player_session_type::PlayerSession;
 pub use player_table::*;
 pub use player_type::Player;
 pub use process_movement_reducer::process_movement;
@@ -56,13 +60,10 @@ pub enum Reducer {
         loot_id: u64,
     },
     ProcessMovement {
-        px: f32,
-        py: f32,
-        pz: f32,
-        rot_x: f32,
-        rot_y: f32,
-        rot_z: f32,
-        rot_w: f32,
+        tick_id: u64,
+        delta_x: f32,
+        delta_y: f32,
+        delta_z: f32,
     },
     SetCameraMode {
         mode: String,
@@ -100,21 +101,15 @@ impl __sdk::Reducer for Reducer {
                 })
             }
             Reducer::ProcessMovement {
-                px,
-                py,
-                pz,
-                rot_x,
-                rot_y,
-                rot_z,
-                rot_w,
+                tick_id,
+                delta_x,
+                delta_y,
+                delta_z,
             } => __sats::bsatn::to_vec(&process_movement_reducer::ProcessMovementArgs {
-                px: px.clone(),
-                py: py.clone(),
-                pz: pz.clone(),
-                rot_x: rot_x.clone(),
-                rot_y: rot_y.clone(),
-                rot_z: rot_z.clone(),
-                rot_w: rot_w.clone(),
+                tick_id: tick_id.clone(),
+                delta_x: delta_x.clone(),
+                delta_y: delta_y.clone(),
+                delta_z: delta_z.clone(),
             }),
             Reducer::SetCameraMode { mode } => {
                 __sats::bsatn::to_vec(&set_camera_mode_reducer::SetCameraModeArgs {
@@ -149,6 +144,7 @@ pub struct DbUpdate {
     ground_loot: __sdk::TableUpdate<GroundLoot>,
     player: __sdk::TableUpdate<Player>,
     player_perspective: __sdk::TableUpdate<PlayerPerspective>,
+    player_session: __sdk::TableUpdate<PlayerSession>,
     resource_node: __sdk::TableUpdate<ResourceNode>,
     resource_stockpile: __sdk::TableUpdate<ResourceStockpile>,
     transform: __sdk::TableUpdate<Transform>,
@@ -172,6 +168,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "player_perspective" => db_update
                     .player_perspective
                     .append(player_perspective_table::parse_table_update(table_update)?),
+                "player_session" => db_update
+                    .player_session
+                    .append(player_session_table::parse_table_update(table_update)?),
                 "resource_node" => db_update
                     .resource_node
                     .append(resource_node_table::parse_table_update(table_update)?),
@@ -222,6 +221,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 &self.player_perspective,
             )
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.player_session = cache
+            .apply_diff_to_table::<PlayerSession>("player_session", &self.player_session)
+            .with_updates_by_pk(|row| &row.identity);
         diff.resource_node = cache
             .apply_diff_to_table::<ResourceNode>("resource_node", &self.resource_node)
             .with_updates_by_pk(|row| &row.node_id);
@@ -252,6 +254,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player_perspective" => db_update
                     .player_perspective
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "player_session" => db_update
+                    .player_session
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "resource_node" => db_update
                     .resource_node
@@ -287,6 +292,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "player_perspective" => db_update
                     .player_perspective
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "player_session" => db_update
+                    .player_session
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "resource_node" => db_update
                     .resource_node
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -315,6 +323,7 @@ pub struct AppliedDiff<'r> {
     ground_loot: __sdk::TableAppliedDiff<'r, GroundLoot>,
     player: __sdk::TableAppliedDiff<'r, Player>,
     player_perspective: __sdk::TableAppliedDiff<'r, PlayerPerspective>,
+    player_session: __sdk::TableAppliedDiff<'r, PlayerSession>,
     resource_node: __sdk::TableAppliedDiff<'r, ResourceNode>,
     resource_stockpile: __sdk::TableAppliedDiff<'r, ResourceStockpile>,
     transform: __sdk::TableAppliedDiff<'r, Transform>,
@@ -341,6 +350,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<PlayerPerspective>(
             "player_perspective",
             &self.player_perspective,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<PlayerSession>(
+            "player_session",
+            &self.player_session,
             event,
         );
         callbacks.invoke_table_row_callbacks::<ResourceNode>(
@@ -1018,6 +1032,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         ground_loot_table::register_table(client_cache);
         player_table::register_table(client_cache);
         player_perspective_table::register_table(client_cache);
+        player_session_table::register_table(client_cache);
         resource_node_table::register_table(client_cache);
         resource_stockpile_table::register_table(client_cache);
         transform_table::register_table(client_cache);
@@ -1027,6 +1042,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "ground_loot",
         "player",
         "player_perspective",
+        "player_session",
         "resource_node",
         "resource_stockpile",
         "transform",

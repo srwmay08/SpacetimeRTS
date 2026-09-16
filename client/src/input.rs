@@ -7,6 +7,8 @@ use tracing::info;
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
+use crate::module_bindings::swing_tool_reducer::swing_tool; // Architectural Note: v2.x explicit trait import.
+use crate::module_bindings::gather_loot_reducer::gather_loot; // Architectural Note: v2.x explicit trait import.
 
 // ----------------------------------------------------------------------------
 // EVENTS & ENUMS
