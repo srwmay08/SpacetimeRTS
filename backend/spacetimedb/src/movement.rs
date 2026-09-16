@@ -1,10 +1,10 @@
 use spacetimedb::{table, reducer, ReducerContext, Identity};
+use crate::combat::{hitbox_history, Snapshot}; // Architectural Note: Required for lag compensation appending.
 
 /// Represents the physical manifestation of an entity in the game world.
 /// We store the `last_processed_tick` directly on the transform to ensure 
 /// that whenever a client receives a state sync, they know exactly which 
 /// local inputs have already been applied by the server.
-// Architectural Note: #[table] automatically derives SpacetimeType, Serialize, and Deserialize in v2.x.
 #[derive(Clone)]
 #[table(accessor = transform, public)]
 pub struct Transform {
@@ -13,7 +13,6 @@ pub struct Transform {
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    /// Identifies the latest client tick incorporated into this authoritative position.
     pub last_processed_tick: u64, 
 }
 
@@ -31,9 +30,7 @@ pub struct PlayerSession {
 /// 
 /// **Architecture Note:** We process a `delta` (velocity * dt) rather than an 
 /// absolute position. This prevents a compromised client from teleporting. 
-/// We enforce a strict maximum magnitude check to protect the server's economy 
-/// of compute energy (TeV) from having to do complex pathfinding validations 
-/// on every single micro-tick.
+/// We enforce a strict maximum magnitude check to protect the server's economy.
 #[reducer]
 pub fn process_movement(
     ctx: &ReducerContext,
@@ -64,14 +61,11 @@ pub fn process_movement(
     }
 
     // 4. Validate movement magnitude (Basic Anti-Speedhack)
-    // By squaring the components, we save the TeV cost of a square root operation 
-    // unless a violation is detected and scaling is strictly necessary.
-    let max_speed = 5.0_f32; // Configurable maximum units per tick
+    let max_speed = 5.0_f32; 
     let max_speed_sq = max_speed * max_speed;
     let magnitude_sq = (delta_x * delta_x) + (delta_y * delta_y) + (delta_z * delta_z);
 
     let (dx, dy, dz) = if magnitude_sq > max_speed_sq {
-        // Only pay the TeV cost of sqrt() if they exceed the speed limit
         let magnitude = magnitude_sq.sqrt(); 
         let scale = max_speed / magnitude;
         log::debug!("Speedhack mitigated for entity {}. Scaling delta.", session.entity_id);
@@ -88,6 +82,23 @@ pub fn process_movement(
 
     // 6. Commit the updated transform back to SpacetimeDB
     ctx.db.transform().entity_id().update(transform.clone());
+    
+    // 7. Architectural Note: Append to Lag Compensation Buffer.
+    // 10 snapshots at a 20Hz network tick rate provides a rolling 500ms rewind history.
+    if let Some(mut history) = ctx.db.hitbox_history().entity_id().find(session.entity_id) {
+        history.snapshots.push(Snapshot {
+            tick_id,
+            x: transform.x,
+            y: transform.y,
+            z: transform.z,
+        });
+        
+        // Prune old history to preserve TeV memory bounds and limit rewind exploitation
+        if history.snapshots.len() > 10 {
+            history.snapshots.remove(0); 
+        }
+        ctx.db.hitbox_history().entity_id().update(history.clone());
+    }
     
     Ok(())
 }

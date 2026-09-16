@@ -6,6 +6,7 @@ mod input;
 mod camera;
 mod terrain;
 mod ui;
+mod prediction; // Architectural Note: Registers the prediction module for the client build tree.
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -22,6 +23,10 @@ fn main() {
     App::new()
         // Core Engine Setup
         .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
+        
+        // Architectural Note: Registers the Prediction Plugin initializing the ClientTick resource.
+        .add_plugins(prediction::PredictionPlugin) 
+        
         .insert_resource(Msaa::Off)
         
         // Custom State & Event Registrations
@@ -74,7 +79,8 @@ fn main() {
         .add_systems(Update, fps_look.run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
         .add_systems(Update, (
             rts_camera_controller,
-            update_marquee_ui
+            update_marquee_ui,
+            update_floating_health_bars // Architectural Note: Scheduled UI pass explicitly for RTS view.
         ).run_if(in_state(CameraMode::RTS).and_then(in_state(GameState::InGame))))
         
         .run();

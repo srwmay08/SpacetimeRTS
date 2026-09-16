@@ -76,6 +76,9 @@ pub struct TerrainChunk {
 #[derive(Component)] pub struct OreText;
 #[derive(Component)] pub struct FoodText;
 
+/// Identifies a UI Node as a floating health bar synchronized with server state.
+#[derive(Component)] pub struct HealthBarUI;
+
 /// Tracks the lifespan of localized visual effect entities (e.g., resource breaking debris).
 #[derive(Component)] 
 pub struct Particle { 

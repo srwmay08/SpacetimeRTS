@@ -7,8 +7,10 @@ use tracing::info;
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
-use crate::module_bindings::swing_tool_reducer::swing_tool; // Architectural Note: v2.x explicit trait import.
-use crate::module_bindings::gather_loot_reducer::gather_loot; // Architectural Note: v2.x explicit trait import.
+use crate::prediction::ClientTick; // Architectural Note: Importing the rolling tick for lag compensation
+use crate::module_bindings::swing_tool_reducer::swing_tool; 
+use crate::module_bindings::gather_loot_reducer::gather_loot; 
+use crate::module_bindings::fire_weapon_reducer::fire_weapon; // Architectural Note: v2.x explicit trait import.
 
 // ----------------------------------------------------------------------------
 // EVENTS & ENUMS
@@ -96,6 +98,7 @@ pub fn context_aware_action_dispatcher(
     selectable_query: Query<(Entity, &BevyTransform), With<Selectable>>,
     mut selection_state: ResMut<SelectionState>,
     conn: Res<SpacetimeConnection>,
+    tick: Res<ClientTick>, // Architectural Note: Inject the rolling local simulation tick for lag compensation.
 ) {
     let multi_select = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
@@ -104,13 +107,19 @@ pub fn context_aware_action_dispatcher(
             CameraMode::FPS => {
                 match event.action {
                     VirtualAction::Primary if event.state == ActionState::JustPressed => {
+                        // Architectural Note: Instant Client-Side Prediction Raycast & Firing
                         if !swing_state.is_swinging {
                             swing_state.is_swinging = true;
                             if let Ok(cam_transform) = fps_camera_query.get_single() {
-                                let pos = cam_transform.translation();
-                                let fwd = cam_transform.forward();
-                                // Fire and forget to SpacetimeDB. Server evaluates hit validation authoritatively.
-                                let _ = conn.db.reducers.swing_tool(pos.x, pos.y, pos.z, fwd.x, fwd.y, fwd.z);
+                                let origin = cam_transform.translation();
+                                let dir = cam_transform.forward();
+                                
+                                // Architectural Note: Transmit Fire Event with Tick Timestamp for Lag Comp
+                                let _ = conn.db.reducers.fire_weapon(
+                                    tick.0, 
+                                    origin.x, origin.y, origin.z, 
+                                    dir.x, dir.y, dir.z
+                                );
                             }
                         }
                     }

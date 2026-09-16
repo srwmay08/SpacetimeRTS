@@ -2,11 +2,13 @@ use spacetimedb::{table, reducer, Identity, ReducerContext, Table};
 use noise::{NoiseFn, Perlin};
 use log::info; 
 
-// Expose the movement module to the SpacetimeDB compilation tree
+// Expose internal modules to the SpacetimeDB compilation tree
 pub mod movement;
+pub mod combat;
 
-// Bring generated accessor traits into scope so we can use ctx.db.transform()
+// Bring generated accessor traits into scope
 use crate::movement::{transform, player_session};
+use crate::combat::{health, hitbox_history};
 
 // ----------------------------------------------------------------------------
 // MULTIPLAYER SCHEMAS & ENTITY STATE
@@ -20,21 +22,12 @@ pub struct Player {
     pub is_online: bool, 
 }
 
-// Architectural Note: Authoritative backend tracking of the client's camera mode.
-// We maintain this on the server so that scheduled server-side reducers (like AI, 
-// global weather, or global economy events) can intelligently cull high-frequency 
-// micro-data (like granular footstep states or precise projectile vectors) from 
-// being processed for players currently engaged in the macro RTS perspective.
 #[table(accessor = player_perspective, public)]
 #[derive(Clone)]
 pub struct PlayerPerspective {
     #[primary_key] pub entity_id: u64,
-    pub camera_mode: String, // "FPS" or "RTS"
+    pub camera_mode: String, 
 }
-
-// Architectural Note: The legacy Transform table has been removed from lib.rs.
-// It is now strictly managed by the `movement` module to support client-side 
-// prediction, rollback tolerances, and server reconciliation (tracking `last_processed_tick`).
 
 #[table(accessor = resource_stockpile, public)]
 #[derive(Clone)]
@@ -138,9 +131,7 @@ pub fn client_connected(ctx: &ReducerContext) {
         
         let entity_id = inserted_player.entity_id;
 
-        // Architectural Note: We now initialize the new client-side prediction Transform
-        // and establish the PlayerSession mapping for the movement module to authenticate
-        // incoming movement vectors correctly.
+        // Architectural Note: Provision new schemas for movement and combat.
         ctx.db.transform().insert(movement::Transform {
             entity_id,
             x: 0.0, y: 20.0, z: 0.0,
@@ -150,6 +141,17 @@ pub fn client_connected(ctx: &ReducerContext) {
         ctx.db.player_session().insert(movement::PlayerSession {
             identity: sender,
             entity_id,
+        });
+
+        ctx.db.health().insert(combat::Health {
+            entity_id,
+            current: 100.0,
+            max: 100.0,
+        });
+        
+        ctx.db.hitbox_history().insert(combat::HitboxHistory {
+            entity_id,
+            snapshots: Vec::new(),
         });
 
         ctx.db.resource_stockpile().insert(ResourceStockpile {
@@ -183,9 +185,6 @@ pub fn set_camera_mode(ctx: &ReducerContext, mode: String) {
     let sender = ctx.sender();
     let Some(player) = ctx.db.player().identity().find(sender) else { return; };
     
-    // Architectural Note: Updates the server-side perspective tracking table. 
-    // This allows the backend to know exactly which spatial streaming radius 
-    // the client has requested, enabling server-driven LOD (Level of Detail) logic.
     if let Some(mut perspective) = ctx.db.player_perspective().entity_id().find(player.entity_id) {
         perspective.camera_mode = mode.clone();
         ctx.db.player_perspective().entity_id().update(perspective);
@@ -198,9 +197,6 @@ pub fn set_camera_mode(ctx: &ReducerContext, mode: String) {
     
     info!("Player {} dynamically transitioned to {} mode spatial partitioning.", player.entity_id, mode);
 }
-
-// Architectural Note: Legacy process_movement has been removed.
-// Client movement vectors and buffer rollbacks are now fully handled by `movement::process_movement`.
 
 #[reducer]
 pub fn gather_loot(ctx: &ReducerContext, loot_id: u64) {

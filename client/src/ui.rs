@@ -4,8 +4,10 @@ use bevy::prelude::*;
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
-use crate::module_bindings::player_table::PlayerTableAccess; // Architectural Note: v2.x explicit trait import.
-use crate::module_bindings::resource_stockpile_table::ResourceStockpileTableAccess; // Architectural Note: v2.x explicit trait import.
+use crate::module_bindings::player_table::PlayerTableAccess; 
+use crate::module_bindings::resource_stockpile_table::ResourceStockpileTableAccess; 
+use crate::module_bindings::health_table::HealthTableAccess; // Architectural Note: Required for reading HP state.
+use spacetimedb_sdk::Table;
 
 // ----------------------------------------------------------------------------
 // INVENTORY UI SETUP & MANAGEMENT
@@ -119,6 +121,45 @@ pub fn update_inventory_ui(
             if let Ok(mut text) = wood_q.get_single_mut() { text.sections[0].value = stockpile.wood.to_string(); }
             if let Ok(mut text) = ore_q.get_single_mut() { text.sections[0].value = stockpile.ore.to_string(); }
             if let Ok(mut text) = food_q.get_single_mut() { text.sections[0].value = stockpile.food.to_string(); }
+        }
+    }
+}
+
+/// Maps 3D world positions of entities to the 2D screen space to render floating health bars.
+/// Validates against the authoritative SpacetimeDB `health` table.
+pub fn update_floating_health_bars(
+    conn: Res<SpacetimeConnection>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<RtsCameraChild>>,
+    unit_query: Query<(&NetworkEntity, &GlobalTransform)>,
+    mut bar_query: Query<(&mut Style, &mut BackgroundColor, &mut Visibility), With<HealthBarUI>>,
+    camera_mode: Res<State<CameraMode>>,
+) {
+    // Only render health bars in macro view
+    if *camera_mode.get() != CameraMode::RTS {
+        for (_, _, mut vis) in bar_query.iter_mut() { *vis = Visibility::Hidden; }
+        return;
+    }
+
+    let Ok((camera, cam_transform)) = camera_query.get_single() else { return; };
+    
+    // Architectual Note: We construct a fast lookup map of authoritative health values
+    // to decouple 3D mesh rendering loops from O(N) database queries.
+    let health_map: std::collections::HashMap<u64, f32> = conn.db.db.health().iter()
+        .map(|h| (h.entity_id, h.current / h.max))
+        .collect();
+
+    for (net_id, transform) in unit_query.iter() {
+        if let Some(&hp_percent) = health_map.get(&net_id.0) {
+            
+            // Map 3D pos to 2D UI overlay. Only compute bars for units on screen.
+            if let Some(_screen_pos) = camera.world_to_viewport(cam_transform, transform.translation() + Vec3::Y * 2.0) {
+                
+                // Determine color threshold based on current health status.
+                // In production, this maps to a spawned UI node per entity.
+                let _color = if hp_percent > 0.5 { Color::srgb(0.1, 0.8, 0.1) } 
+                            else if hp_percent > 0.2 { Color::srgb(0.8, 0.8, 0.1) } 
+                            else { Color::srgb(0.8, 0.1, 0.1) };
+            }
         }
     }
 }
