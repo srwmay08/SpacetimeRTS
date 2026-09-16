@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "client",
+    "backend/spacetimedb" # Note the nested path here!
+]
+resolver = "2"

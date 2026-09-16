@@ -1,0 +1,32 @@
+# -----------------------------------------------------------------------------
+# RUST & CARGO
+# -----------------------------------------------------------------------------
+# Ignore all target build directories anywhere in the project
+target/
+**/*.rs.bk
+Cargo.lock 
+# Note: For executable games (Bevy client), some teams commit Cargo.lock to lock dependency versions. 
+# For SpacetimeDB backend modules, it is often best to commit it as well to ensure identical server builds. 
+# Remove Cargo.lock from this ignore list if you want strictly reproducible builds across machines.
+
+# -----------------------------------------------------------------------------
+# SPACETIMEDB & SECURITY
+# -----------------------------------------------------------------------------
+.spacetime/
+.stdb/
+# CRITICAL: Never commit your authentication tokens!
+stdb_token.txt  
+stdb_identity.txt
+
+# -----------------------------------------------------------------------------
+# IDE, OS, & AI TOOLS
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Optional: Ignore Cursor/AI rules if you don't want to enforce them on other devs
+# .cursor/
