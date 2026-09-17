@@ -121,6 +121,7 @@ pub fn update_build_hologram(
     mut commands: Commands,
     build_state: Res<BuildModeState>,
     camera_query: Query<(&GlobalTransform, &Camera), With<FpsCamera>>,
+    player_query: Query<Entity, With<PlayerBody>>, 
     spatial_query: SpatialQuery,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -162,27 +163,35 @@ pub fn update_build_hologram(
         )).id()
     };
 
+    // Architectural Note: Crucial raycast fix. We MUST exclude the player's own 
+    // collider physics volume to prevent the raycast from hitting the camera 
+    // origin at `time_of_impact = 0.0` and stranding the hologram in mid-air.
+    let mut filter = SpatialQueryFilter::default();
+    if let Ok(player_entity) = player_query.get_single() {
+        filter = filter.with_excluded_entities([player_entity]);
+    }
+
     let ray_hit = spatial_query.cast_ray(
         ray_origin,
         ray_dir.into(),
         50.0,
         true,
-        SpatialQueryFilter::default(),
+        filter,
     );
 
     let mut target_transform = Transform::from_xyz(0.0, 0.0, 0.0);
     let mut target_parent_id = None;
+    let mut snapped = false;
 
     if let Some(hit) = ray_hit {
-        let mut snapped = false;
-        
         if let Ok(net_struct) = structure_query.get(hit.entity) {
             target_parent_id = Some(net_struct.structure_id);
         }
 
         if let Ok(children) = children_query.get(hit.entity) {
             let hit_point = ray_origin + ray_dir * hit.time_of_impact;
-            let mut closest_dist = f32::MAX;
+            // Limit snap targeting to sockets within a 4-meter spherical radius.
+            let mut closest_dist = 16.0; 
             
             for &child in children.iter() {
                 if let Ok((socket_t, socket)) = socket_query.get(child) {
@@ -190,9 +199,6 @@ pub fn update_build_hologram(
                         let dist = socket_t.translation().distance_squared(hit_point);
                         if dist < closest_dist {
                             closest_dist = dist;
-                            // Architectural Note: Because we now spawn sockets with a `SpatialBundle`,
-                            // Bevy's transform hierarchy automatically computes the absolute world coordinate
-                            // combining the parent structure's position, rotation, and the socket's local offset.
                             target_transform.translation = socket_t.translation();
                             let (_, rotation, _) = socket_t.to_scale_rotation_translation();
                             target_transform.rotation = rotation;
@@ -210,7 +216,7 @@ pub fn update_build_hologram(
             let snapped_x = (hit_point.x / grid_size).round() * grid_size;
             let snapped_z = (hit_point.z / grid_size).round() * grid_size;
             target_transform.translation = Vec3::new(snapped_x, hit_point.y, snapped_z);
-            target_transform.rotation = Quat::IDENTITY; // Reset rotation for ground grid placement
+            target_transform.rotation = Quat::IDENTITY;
         }
     } else {
         target_transform.translation = ray_origin + ray_dir * 5.0;
@@ -254,12 +260,16 @@ pub fn sync_structures(
 
     for s in db_structures {
         if !spawned_ids.contains(&s.structure_id) {
-            let (mesh, color) = match s.piece_type.as_str() {
-                "Foundation" => (meshes.add(Cuboid::new(4.0, 1.0, 4.0)), Color::srgb(0.5, 0.4, 0.3)),
-                "Wall" => (meshes.add(Cuboid::new(4.0, 3.0, 0.4)), Color::srgb(0.6, 0.5, 0.4)),
-                "Floor" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.5, 0.4, 0.3)),
-                "Roof" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.4, 0.3, 0.2)),
-                _ => (meshes.add(Cuboid::new(4.0, 2.0, 4.0)), Color::srgb(0.5, 0.5, 0.5)),
+            
+            // Architectural Note: Generating geometrically accurate colliders. 
+            // Previous hardcoded Cuboid(4.0, 1.0, 4.0) caused walls to project massive
+            // invisible physics boundaries, blinding the socket raycaster.
+            let (mesh, color, collider) = match s.piece_type.as_str() {
+                "Foundation" => (meshes.add(Cuboid::new(4.0, 1.0, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 1.0, 4.0)),
+                "Wall" => (meshes.add(Cuboid::new(4.0, 3.0, 0.4)), Color::srgb(0.6, 0.5, 0.4), Collider::cuboid(4.0, 3.0, 0.4)),
+                "Floor" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 0.2, 4.0)),
+                "Roof" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.4, 0.3, 0.2), Collider::cuboid(4.0, 0.2, 4.0)),
+                _ => (meshes.add(Cuboid::new(4.0, 2.0, 4.0)), Color::srgb(0.5, 0.5, 0.5), Collider::cuboid(4.0, 2.0, 4.0)),
             };
 
             let transform = Transform::from_xyz(s.x, s.y, s.z)
@@ -281,13 +291,10 @@ pub fn sync_structures(
                     ..default()
                 },
                 RigidBody::Static,
-                Collider::cuboid(4.0, 1.0, 4.0),
+                collider, 
                 NetworkStructure { structure_id: s.structure_id },
             )).with_children(|parent| {
                 for socket in sockets {
-                    // Architectural Note: Spawning the socket with a `SpatialBundle` gives it a local Transform.
-                    // This allows Bevy to automatically compute its `GlobalTransform` relative to the parent structure,
-                    // satisfying the target extraction requirements in `update_build_hologram`.
                     parent.spawn((
                         SpatialBundle::from_transform(Transform::from_translation(socket.local_offset)),
                         socket,

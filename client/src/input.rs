@@ -8,7 +8,7 @@ use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
 use crate::prediction::ClientTick; 
-use crate::building::BuildModeState; // Architectural Note: Required to mask primary inputs.
+use crate::building::BuildModeState; 
 
 use crate::module_bindings::gather_loot_reducer::gather_loot; 
 use crate::module_bindings::fire_weapon_reducer::fire_weapon; 
@@ -112,7 +112,8 @@ pub fn context_aware_action_dispatcher(
             CameraMode::FPS => {
                 match event.action {
                     VirtualAction::Primary if event.state == ActionState::JustPressed => {
-                        // Architectural Note: Strictly isolates combat/gathering input from the build system
+                        
+                        // Architectural Note: Silences combat and tool actions if actively building.
                         if build_state.is_active { continue; }
 
                         if !swing_state.is_swinging {
@@ -175,6 +176,7 @@ pub fn context_aware_action_dispatcher(
                         }
                     }
                     VirtualAction::Interact if event.state == ActionState::JustPressed => {
+                        
                         if build_state.is_active { continue; }
 
                         if let Ok((player_entity, player_transform)) = queries.player.get_single() {
@@ -199,6 +201,7 @@ pub fn context_aware_action_dispatcher(
             CameraMode::RTS => {
                 match event.action {
                     VirtualAction::Primary => {
+                        
                         if build_state.is_active { continue; }
 
                         let Some(cursor_pos) = event.cursor_pos else { continue; };
