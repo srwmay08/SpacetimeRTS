@@ -26,14 +26,12 @@ pub fn toggle_perspective(
     player_query: Query<&BevyTransform, With<PlayerBody>>,
     mut rts_rig_query: Query<&mut BevyTransform, (With<RtsCameraRig>, Without<PlayerBody>)>,
     conn: Res<SpacetimeConnection>,
+    mut culling_state: ResMut<NetworkCullingState>, // Architectural Note: Centralized culling trigger
 ) {
     if keys.just_pressed(KeyCode::KeyV) {
         let Ok(mut window) = window_query.get_single_mut() else { return; };
         let Ok(player_transform) = player_query.get_single() else { return; };
         let Ok(mut rig_transform) = rts_rig_query.get_single_mut() else { return; };
-
-        let px = player_transform.translation.x;
-        let pz = player_transform.translation.z;
 
         match state.get() {
             CameraMode::FPS => {
@@ -45,17 +43,10 @@ pub fn toggle_perspective(
                 // Authoritative camera state tracking for server-side metrics
                 let _ = conn.db.reducers.set_camera_mode("RTS".to_string());
                 
-                let radius = 500.0;
-                // Architectural Note: subscribe() now returns a SubscriptionHandle directly.
-                let _handle = conn.db.subscription_builder().subscribe(vec![
-                    "SELECT * FROM player".to_string(),
-                    format!("SELECT * FROM transform WHERE x > {} AND x < {} AND z > {} AND z < {}", px - radius, px + radius, pz - radius, pz + radius),
-                    "SELECT * FROM resource_stockpile".to_string(),
-                    "SELECT * FROM ground_loot".to_string(),
-                    "SELECT * FROM resource_node".to_string(),
-                    "SELECT * FROM combat_event".to_string() 
-                ]);
-                info!("Expanded network culling bounds to 500m (RTS Mode)");
+                // Architectural Note: Expand spatial culling to 10 chunks (500m radius) for RTS macro view.
+                culling_state.radius = 10;
+                culling_state.needs_rebuild = true;
+                info!("Camera Mode: RTS. Expanding network culling bounds to 10 chunks.");
             }
             CameraMode::RTS => {
                 next_state.set(CameraMode::FPS);
@@ -64,17 +55,10 @@ pub fn toggle_perspective(
                 
                 let _ = conn.db.reducers.set_camera_mode("FPS".to_string());
                 
-                let radius = 50.0;
-                // Architectural Note: subscribe() now returns a SubscriptionHandle directly.
-                let _handle = conn.db.subscription_builder().subscribe(vec![
-                    "SELECT * FROM player".to_string(),
-                    format!("SELECT * FROM transform WHERE x > {} AND x < {} AND z > {} AND z < {}", px - radius, px + radius, pz - radius, pz - radius),
-                    "SELECT * FROM resource_stockpile".to_string(),
-                    "SELECT * FROM ground_loot".to_string(),
-                    "SELECT * FROM resource_node".to_string(),
-                    "SELECT * FROM combat_event".to_string() 
-                ]);
-                info!("Contracted network culling bounds to 50m (FPS Mode)");
+                // Architectural Note: Contract spatial culling to 1 chunk (50m radius) for FPS micro view.
+                culling_state.radius = 1;
+                culling_state.needs_rebuild = true;
+                info!("Camera Mode: FPS. Contracting network culling bounds to 1 chunk.");
             }
         }
     }

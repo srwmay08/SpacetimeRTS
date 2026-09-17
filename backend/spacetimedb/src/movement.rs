@@ -13,6 +13,10 @@ pub struct Transform {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+    // Architectural Note: Added spatial partitioning chunk IDs to support the dual-rate 
+    // network culling architecture. Recomputed purely mathematically only when boundaries are crossed.
+    pub chunk_x: i32,
+    pub chunk_z: i32,
     pub last_processed_tick: u64, 
 }
 
@@ -79,6 +83,12 @@ pub fn process_movement(
     transform.y += dy;
     transform.z += dz;
     transform.last_processed_tick = tick_id;
+    
+    // Architectural Note: Recalculate Chunk_ID for spatial partitioning (assuming 50m chunks). 
+    // This is the specific boundary threshold trigger that enables clients to dynamically 
+    // adjust their network subscriptions without computing heavy distance matrices.
+    transform.chunk_x = (transform.x / 50.0).floor() as i32;
+    transform.chunk_z = (transform.z / 50.0).floor() as i32;
 
     // 6. Commit the updated transform back to SpacetimeDB
     ctx.db.transform().entity_id().update(transform.clone());

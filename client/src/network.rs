@@ -48,14 +48,17 @@ pub fn init_network_connection(
         
         info!("Authenticated to SpacetimeDB with Identity: {}", identity.to_hex());
         
+        // Architectural Note: Initializing the network connection with the default origin chunk (0,0).
+        // This subscription is highly volatile and will be rebuilt continuously by `update_spatial_subscriptions`
+        // as the player moves across the physical chunk boundaries.
         let _handle = conn.subscription_builder().subscribe(vec![
-            "SELECT * FROM player",
-            "SELECT * FROM transform WHERE x > -50 AND x < 50 AND z > -50 AND z < 50",
-            "SELECT * FROM resource_stockpile",
-            "SELECT * FROM ground_loot",
-            "SELECT * FROM resource_node",
-            "SELECT * FROM combat_event",
-            "SELECT * FROM structure" 
+            "SELECT * FROM player".to_string(),
+            "SELECT * FROM transform WHERE chunk_x >= -1 AND chunk_x <= 1 AND chunk_z >= -1 AND chunk_z <= 1".to_string(),
+            "SELECT * FROM resource_stockpile".to_string(),
+            "SELECT * FROM ground_loot".to_string(),
+            "SELECT * FROM resource_node".to_string(),
+            "SELECT * FROM combat_event".to_string(),
+            "SELECT * FROM structure".to_string() 
         ]);
 
         match store_clone.lock() {
@@ -193,6 +196,45 @@ pub fn wait_for_connection(
                 info!("Bootstrapping complete. Entering In-Game State.");
             }
         }
+    }
+}
+
+/// Dynamic Spatial Partitioning engine. Evaluates positional boundaries every frame.
+/// Architectural Note: If a threshold is crossed, we forcibly sever the previous network load
+/// and construct a new targeted SQL subscription. This prevents the RTS scale from overwhelming 
+/// local client bandwidth and memory.
+pub fn update_spatial_subscriptions(
+    player_query: Query<&LogicalPosition, With<PlayerBody>>,
+    mut culling_state: ResMut<NetworkCullingState>,
+    conn: Res<SpacetimeConnection>,
+) {
+    if let Ok(pos) = player_query.get_single() {
+        let current_x = (pos.0.x / 50.0).floor() as i32;
+        let current_z = (pos.0.z / 50.0).floor() as i32;
+
+        if culling_state.current_chunk.0 != current_x || culling_state.current_chunk.1 != current_z {
+            culling_state.current_chunk = (current_x, current_z);
+            culling_state.needs_rebuild = true;
+        }
+    }
+
+    if culling_state.needs_rebuild && conn.identity.is_some() {
+        let cx = culling_state.current_chunk.0;
+        let cz = culling_state.current_chunk.1;
+        let rad = culling_state.radius;
+
+        let _handle = conn.db.subscription_builder().subscribe(vec![
+            "SELECT * FROM player".to_string(),
+            format!("SELECT * FROM transform WHERE chunk_x >= {} AND chunk_x <= {} AND chunk_z >= {} AND chunk_z <= {}", cx - rad, cx + rad, cz - rad, cz + rad),
+            "SELECT * FROM resource_stockpile".to_string(),
+            "SELECT * FROM ground_loot".to_string(),
+            "SELECT * FROM resource_node".to_string(),
+            "SELECT * FROM combat_event".to_string(),
+            "SELECT * FROM structure".to_string() 
+        ]);
+
+        culling_state.needs_rebuild = false;
+        info!("Rebuilt SpacetimeDB spatial subscription for Chunk_ID ({}, {}) with radius {}", cx, cz, rad);
     }
 }
 

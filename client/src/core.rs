@@ -18,8 +18,8 @@ pub enum GameState {
 }
 
 /// Determines the active control scheme and network culling bounds.
-/// Architectural Note: FPS mode relies on high-frequency micro-data streaming (tight 50m radius).
-/// RTS mode triggers a SpacetimeDB subscription rebuild to stream macro-data (500m radius).
+/// Architectural Note: FPS mode relies on high-frequency micro-data streaming.
+/// RTS mode triggers a SpacetimeDB subscription rebuild to stream macro-data.
 #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
 pub enum CameraMode {
     #[default]
@@ -91,3 +91,23 @@ pub struct GeneratedChunks {
 /// Architectural Note: Locked to 0.05s (20Hz) to preserve server TeV compute energy.
 #[derive(Resource)] 
 pub struct NetworkTickTimer(pub Timer);
+
+/// Manages the dynamic SpacetimeDB SQL subscription for spatial partitioning.
+/// Architectural Note: Tracks the client's current chunk and rebuilds queries 
+/// when boundaries are crossed to isolate the network load strictly to the required perimeter.
+#[derive(Resource)]
+pub struct NetworkCullingState {
+    pub current_chunk: (i32, i32),
+    pub radius: i32,
+    pub needs_rebuild: bool,
+}
+
+impl Default for NetworkCullingState {
+    fn default() -> Self {
+        Self {
+            current_chunk: (0, 0),
+            radius: 1, // Default FPS 3x3 perimeter limit
+            needs_rebuild: true,
+        }
+    }
+}

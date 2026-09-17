@@ -8,7 +8,6 @@ pub mod building; // Architectural Note: Registers modular building backend modu
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history};
-// Architectural Note: Removed unused `crate::building::{structure, place_structure}` to resolve compiler warning.
 
 #[table(accessor = player, public)]
 #[derive(Clone)]
@@ -60,7 +59,27 @@ pub struct CombatEvent {
 }
 
 #[spacetimedb::reducer(init)]
-pub fn init(_ctx: &ReducerContext) {}
+pub fn init(ctx: &ReducerContext) {
+    // Architectural Note: Bootstrap the dual-rate server ticking infrastructure.
+    // The high-frequency loop handles physics and FPS elements with minimal latency tolerance.
+    // The low-frequency loop handles RTS macro logic to conserve critical TeV cycles.
+    let _ = ctx.db.high_frequency_tick().schedule_delay(std::time::Duration::from_millis(16)); // ~60Hz
+    let _ = ctx.db.low_frequency_tick().schedule_delay(std::time::Duration::from_millis(100)); // 10Hz
+}
+
+#[reducer]
+pub fn high_frequency_tick(ctx: &ReducerContext) {
+    // Future Implementation: Physics validation, hit registration processing, player movement smoothing.
+    // Loops continuously at 60Hz.
+    let _ = ctx.db.high_frequency_tick().schedule_delay(std::time::Duration::from_millis(16));
+}
+
+#[reducer]
+pub fn low_frequency_tick(ctx: &ReducerContext) {
+    // Future Implementation: Peasant FSM logic, NavMesh pathfinding, and economy resource deposits.
+    // Loops continuously at 10Hz.
+    let _ = ctx.db.low_frequency_tick().schedule_delay(std::time::Duration::from_millis(100));
+}
 
 #[spacetimedb::reducer(client_connected)]
 pub fn client_connected(ctx: &ReducerContext) {
@@ -126,6 +145,7 @@ pub fn client_connected(ctx: &ReducerContext) {
         ctx.db.transform().insert(movement::Transform {
             entity_id,
             x: 0.0, y: 20.0, z: 0.0,
+            chunk_x: 0, chunk_z: 0, // Initial spatial partition zone assignment
             last_processed_tick: 0,
         });
 

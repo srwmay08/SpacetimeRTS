@@ -35,6 +35,7 @@ fn main() {
         .insert_resource(GeneratedChunks::default())
         .insert_resource(SelectionState::default())
         .insert_resource(BuildModeState::default())
+        .insert_resource(NetworkCullingState::default()) // Architectural Note: Registers active network partitioning state
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState { is_swinging: false, timer: Timer::from_seconds(0.3, TimerMode::Once) })
         .insert_resource(AmbientLight { color: Color::srgb(1.0, 0.95, 0.9), brightness: 400.0 })
@@ -61,9 +62,8 @@ fn main() {
         .add_systems(Update, update_infinite_terrain_chunks.run_if(in_state(GameState::InGame)))
 
         .add_systems(Update, (
-            // Architectural Note: Removed naive `send_movement_input` and `reconcile_local_transform`
-            // delegation functions in favor of the chained `PredictionPlugin` execution.
             sync_transforms, 
+            update_spatial_subscriptions, // Architectural Note: Monitors spatial movement and triggers dynamic culling queries
             sync_logical_components,
             sync_resource_nodes, 
             sync_ground_loot,
