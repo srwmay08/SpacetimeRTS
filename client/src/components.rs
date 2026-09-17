@@ -8,6 +8,7 @@ use bevy::prelude::*;
 #[derive(Component)] pub struct LogicalRotation(pub Quat);
 
 #[derive(Component, Default, PartialEq, Eq)] 
+#[allow(dead_code)] // Architectural Note: Suppressed warnings for unused logic frameworks
 pub enum Faction { 
     #[default] 
     Player, 
@@ -23,8 +24,8 @@ pub enum Faction {
 
 #[derive(Component)]
 pub struct TerrainChunk {
-    pub chunk_x: i32,
-    pub chunk_z: i32,
+    #[allow(dead_code)] pub chunk_x: i32,
+    #[allow(dead_code)] pub chunk_z: i32,
 }
 
 // ----------------------------------------------------------------------------
@@ -60,7 +61,7 @@ pub struct TerrainChunk {
 /// Defines a mathematical snap point on a structure for modular piece connection.
 #[derive(Component, Clone, Debug)]
 pub struct Socket {
-    pub name: String,
+    #[allow(dead_code)] pub name: String,
     pub local_offset: Vec3,
     pub is_occupied: bool,
 }

@@ -32,6 +32,7 @@ impl ModularPieceType {
         }
     }
 
+    #[allow(dead_code)]
     pub fn wood_cost(&self) -> u32 {
         match self {
             Self::Foundation => 20,
@@ -217,22 +218,11 @@ pub fn update_build_hologram(
             rot.x, rot.y, rot.z, rot.w,
         );
 
-        // Spawn local socket entities attached to the structure for subsequent pieces to snap onto
-        let sockets = build_state.selected_piece.default_sockets();
-        let mut entity_commands = commands.spawn((
-            PbrBundle {
-                transform: target_transform,
-                ..default()
-            },
-            RigidBody::Static,
-            Collider::cuboid(4.0, 1.0, 4.0),
-        ));
-
-        entity_commands.with_children(|parent| {
-            for socket in sockets {
-                parent.spawn(socket);
-            }
-        });
+        // Architectural Note: Removed the local static collider instantiation here.
+        // Spawning an immediate ghost collider without a `NetworkStructure` component
+        // permanently blocks raycasts (preventing tool interaction/destruction).
+        // The authoritative `sync_structures` system will instantiate the true 
+        // collider and sockets dynamically upon server replication (~50ms).
     }
 }
 

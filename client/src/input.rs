@@ -107,7 +107,7 @@ pub fn context_aware_action_dispatcher(
     mut selection_state: ResMut<SelectionState>,
     conn: Res<SpacetimeConnection>,
     tick: Res<ClientTick>,
-    mut meshes: ResMut<Assets<Mesh>>, // Architectural Note: Extracted for local visual hit prediction.
+    mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let multi_select = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
@@ -120,61 +120,62 @@ pub fn context_aware_action_dispatcher(
                         if !swing_state.is_swinging {
                             swing_state.is_swinging = true;
                             if let Ok(cam_transform) = queries.fps_camera.get_single() {
-                                let origin = cam_transform.translation();
-                                let dir = cam_transform.forward();
-                                
-                                let hit = spatial_query.cast_ray(
-                                    origin,
-                                    dir.into(),
-                                    50.0, // Architectural Note: Extended raycast range to support long-distance weapon prediction.
-                                    true,
-                                    SpatialQueryFilter::default(),
-                                );
-
-                                // Architectural Note: Evaluates context immediately. If pointing at a building
-                                // or resource within melee range, we swing the tool. If pointing at empty space,
-                                // terrain, or a player, we predict the weapon tracer and dispatch the hitscan RPC.
-                                let is_tool_context = hit.map_or(false, |hit_data| {
-                                    hit_data.time_of_impact < 6.0 && 
-                                    (queries.node.contains(hit_data.entity) || queries.structure.contains(hit_data.entity))
-                                });
-
-                                if is_tool_context {
-                                    info!("Context Target: Resource Node / Structure. Invoking swing_tool.");
-                                    let _ = conn.db.reducers.swing_tool(
-                                        origin.x, origin.y, origin.z, 
-                                        dir.x, dir.y, dir.z
+                                // Architectural Note: Retrieve the local player entity first so we can exclude it.
+                                if let Ok((player_entity, _)) = queries.player.get_single() {
+                                    let origin = cam_transform.translation();
+                                    let dir = cam_transform.forward();
+                                    
+                                    let hit = spatial_query.cast_ray(
+                                        origin,
+                                        dir.into(),
+                                        50.0, 
+                                        true,
+                                        // Architectural Note: Critical fix. We must explicitly exclude our own
+                                        // player capsule from the raycast. Otherwise, the raycast instantly collides 
+                                        // with ourselves at distance 0.0, permanently blocking interaction detection.
+                                        SpatialQueryFilter::from_excluded_entities([player_entity]),
                                     );
-                                } else {
-                                    info!("Context Target: Enemy / Terrain. Invoking fire_weapon with prediction.");
-                                    
-                                    // 1. Client-Side Instantaneous Tracer Prediction
-                                    let distance = hit.map_or(50.0, |h| h.time_of_impact);
-                                    let mid_point = origin + dir * (distance / 2.0);
-                                    let mut tracer_transform = BevyTransform::from_translation(mid_point)
-                                        .looking_at(origin + dir * distance, Vec3::Y);
-                                    tracer_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
-                                    
-                                    commands.spawn((
-                                        PbrBundle {
-                                            mesh: meshes.add(Cylinder::new(0.02, distance)),
-                                            material: materials.add(StandardMaterial {
-                                                base_color: Color::srgb(1.0, 0.9, 0.5),
-                                                unlit: true,
+
+                                    let is_tool_context = hit.map_or(false, |hit_data| {
+                                        hit_data.time_of_impact < 6.0 && 
+                                        (queries.node.contains(hit_data.entity) || queries.structure.contains(hit_data.entity))
+                                    });
+
+                                    if is_tool_context {
+                                        info!("Context Target: Resource Node / Structure. Invoking swing_tool.");
+                                        let _ = conn.db.reducers.swing_tool(
+                                            origin.x, origin.y, origin.z, 
+                                            dir.x, dir.y, dir.z
+                                        );
+                                    } else {
+                                        info!("Context Target: Enemy / Terrain. Invoking fire_weapon with prediction.");
+                                        
+                                        let distance = hit.map_or(50.0, |h| h.time_of_impact);
+                                        let mid_point = origin + dir * (distance / 2.0);
+                                        let mut tracer_transform = BevyTransform::from_translation(mid_point)
+                                            .looking_at(origin + dir * distance, Vec3::Y);
+                                        tracer_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+                                        
+                                        commands.spawn((
+                                            PbrBundle {
+                                                mesh: meshes.add(Cylinder::new(0.02, distance)),
+                                                material: materials.add(StandardMaterial {
+                                                    base_color: Color::srgb(1.0, 0.9, 0.5),
+                                                    unlit: true,
+                                                    ..default()
+                                                }),
+                                                transform: tracer_transform,
                                                 ..default()
-                                            }),
-                                            transform: tracer_transform,
-                                            ..default()
-                                        },
-                                        Particle { timer: Timer::from_seconds(0.05, TimerMode::Once) },
-                                    ));
+                                            },
+                                            Particle { timer: Timer::from_seconds(0.05, TimerMode::Once) },
+                                        ));
 
-                                    // 2. Dispatch Authoritative RPC for Server Rewind Protocol
-                                    let _ = conn.db.reducers.fire_weapon(
-                                        tick.0, 
-                                        origin.x, origin.y, origin.z, 
-                                        dir.x, dir.y, dir.z
-                                    );
+                                        let _ = conn.db.reducers.fire_weapon(
+                                            tick.0, 
+                                            origin.x, origin.y, origin.z, 
+                                            dir.x, dir.y, dir.z
+                                        );
+                                    }
                                 }
                             }
                         }
