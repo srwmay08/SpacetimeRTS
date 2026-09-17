@@ -1,13 +1,28 @@
-use spacetimedb::{table, reducer, Identity, ReducerContext, Table};
+use spacetimedb::{table, reducer, Identity, ReducerContext, Table, ScheduleAt};
+use std::time::Duration;
 use noise::{NoiseFn, Perlin};
 use log::info; 
 
 pub mod movement;
 pub mod combat;
-pub mod building; // Architectural Note: Registers modular building backend module.
+pub mod building; 
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history};
+
+#[table(accessor = high_frequency_timer, scheduled(high_frequency_tick))]
+#[derive(Clone)]
+pub struct HighFrequencyTimer {
+    #[primary_key] #[auto_inc] pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
+
+#[table(accessor = low_frequency_timer, scheduled(low_frequency_tick))]
+#[derive(Clone)]
+pub struct LowFrequencyTimer {
+    #[primary_key] #[auto_inc] pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+}
 
 #[table(accessor = player, public)]
 #[derive(Clone)]
@@ -22,6 +37,8 @@ pub struct Player {
 pub struct PlayerPerspective {
     #[primary_key] pub entity_id: u64,
     pub camera_mode: String, 
+    // Architectural Note: Tracks occlusion state for macro-pathing network culling.
+    pub in_interior: bool, 
 }
 
 #[table(accessor = resource_stockpile, public)]
@@ -60,26 +77,22 @@ pub struct CombatEvent {
 
 #[spacetimedb::reducer(init)]
 pub fn init(ctx: &ReducerContext) {
-    // Architectural Note: Bootstrap the dual-rate server ticking infrastructure.
-    // The high-frequency loop handles physics and FPS elements with minimal latency tolerance.
-    // The low-frequency loop handles RTS macro logic to conserve critical TeV cycles.
-    let _ = ctx.db.high_frequency_tick().schedule_delay(std::time::Duration::from_millis(16)); // ~60Hz
-    let _ = ctx.db.low_frequency_tick().schedule_delay(std::time::Duration::from_millis(100)); // 10Hz
+    ctx.db.high_frequency_timer().insert(HighFrequencyTimer {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Interval(Duration::from_millis(16).into()), // ~60Hz
+    });
+
+    ctx.db.low_frequency_timer().insert(LowFrequencyTimer {
+        scheduled_id: 0,
+        scheduled_at: ScheduleAt::Interval(Duration::from_millis(100).into()), // 10Hz
+    });
 }
 
 #[reducer]
-pub fn high_frequency_tick(ctx: &ReducerContext) {
-    // Future Implementation: Physics validation, hit registration processing, player movement smoothing.
-    // Loops continuously at 60Hz.
-    let _ = ctx.db.high_frequency_tick().schedule_delay(std::time::Duration::from_millis(16));
-}
+pub fn high_frequency_tick(_ctx: &ReducerContext, _timer: HighFrequencyTimer) {}
 
 #[reducer]
-pub fn low_frequency_tick(ctx: &ReducerContext) {
-    // Future Implementation: Peasant FSM logic, NavMesh pathfinding, and economy resource deposits.
-    // Loops continuously at 10Hz.
-    let _ = ctx.db.low_frequency_tick().schedule_delay(std::time::Duration::from_millis(100));
-}
+pub fn low_frequency_tick(_ctx: &ReducerContext, _timer: LowFrequencyTimer) {}
 
 #[spacetimedb::reducer(client_connected)]
 pub fn client_connected(ctx: &ReducerContext) {
@@ -141,11 +154,12 @@ pub fn client_connected(ctx: &ReducerContext) {
         });
         
         let entity_id = inserted_player.entity_id;
+        let spawn_y = get_terrain_height(0.0, 0.0) + 10.0;
 
         ctx.db.transform().insert(movement::Transform {
             entity_id,
-            x: 0.0, y: 20.0, z: 0.0,
-            chunk_x: 0, chunk_z: 0, // Initial spatial partition zone assignment
+            x: 0.0, y: spawn_y, z: 0.0,
+            chunk_x: 0, chunk_z: 0, 
             last_processed_tick: 0,
         });
 
@@ -156,21 +170,22 @@ pub fn client_connected(ctx: &ReducerContext) {
 
         ctx.db.health().insert(combat::Health {
             entity_id,
-            current: 100.0,
-            max: 100.0,
+            current: 100.0, max: 100.0,
         });
         
         ctx.db.hitbox_history().insert(combat::HitboxHistory {
-            entity_id,
-            snapshots: Vec::new(),
+            entity_id, snapshots: Vec::new(),
         });
 
         ctx.db.resource_stockpile().insert(ResourceStockpile {
             entity_id, wood: 100, ore: 50, food: 20,
         });
         
+        // Architectural Note: Initialize standard non-occluded view state
         ctx.db.player_perspective().insert(PlayerPerspective {
-            entity_id, camera_mode: "FPS".to_string(),
+            entity_id, 
+            camera_mode: "FPS".to_string(),
+            in_interior: false,
         });
         
         info!("Provisioned new player profile for identity: {}", sender.to_hex());
@@ -199,10 +214,33 @@ pub fn set_camera_mode(ctx: &ReducerContext, mode: String) {
         ctx.db.player_perspective().insert(PlayerPerspective {
             entity_id: player.entity_id,
             camera_mode: mode.clone(),
+            in_interior: false,
         });
     }
     
     info!("Player {} dynamically transitioned to {} mode spatial partitioning.", player.entity_id, mode);
+}
+
+/// Architectural Note: Invoked by the client when the FPS camera crosses the AABB threshold of an enclosed base.
+/// Informs the backend to pause/flush the transmission of macro AI data to preserve bandwidth.
+#[reducer]
+pub fn set_interior_culling(ctx: &ReducerContext, is_inside: bool) -> Result<(), String> {
+    let sender = ctx.sender();
+    let player = ctx.db.player().identity().find(sender)
+        .ok_or("Unauthorized: No active player session")?;
+    
+    if let Some(mut perspective) = ctx.db.player_perspective().entity_id().find(player.entity_id) {
+        perspective.in_interior = is_inside;
+        ctx.db.player_perspective().entity_id().update(perspective);
+        
+        if is_inside {
+            log::info!("Player {} entered interior volume. Halting external macro-data transmission.", player.entity_id);
+        } else {
+            log::info!("Player {} exited interior volume. Flushing external macro-data state.", player.entity_id);
+        }
+    }
+    
+    Ok(())
 }
 
 #[reducer]
@@ -271,7 +309,7 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
     }
 }
 
-fn get_terrain_height(x: f32, z: f32) -> f32 {
+pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     let scale = 0.015; 
     let base_height_amp = 18.0; 
     let noise_elevation = Perlin::new(42); 

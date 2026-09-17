@@ -7,6 +7,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct PlaceStructureArgs {
+    pub parent_id: Option<u64>,
     pub piece_type: String,
     pub x: f32,
     pub y: f32,
@@ -20,6 +21,7 @@ pub(super) struct PlaceStructureArgs {
 impl From<PlaceStructureArgs> for super::Reducer {
     fn from(args: PlaceStructureArgs) -> Self {
         Self::PlaceStructure {
+            parent_id: args.parent_id,
             piece_type: args.piece_type,
             x: args.x,
             y: args.y,
@@ -49,6 +51,7 @@ pub trait place_structure {
     /// /// Use [`place_structure:place_structure_then`] to run a callback after the reducer completes.
     fn place_structure(
         &self,
+        parent_id: Option<u64>,
         piece_type: String,
         x: f32,
         y: f32,
@@ -58,7 +61,18 @@ pub trait place_structure {
         rot_z: f32,
         rot_w: f32,
     ) -> __sdk::Result<()> {
-        self.place_structure_then(piece_type, x, y, z, rot_x, rot_y, rot_z, rot_w, |_, _| {})
+        self.place_structure_then(
+            parent_id,
+            piece_type,
+            x,
+            y,
+            z,
+            rot_x,
+            rot_y,
+            rot_z,
+            rot_w,
+            |_, _| {},
+        )
     }
 
     /// Request that the remote module invoke the reducer `place_structure` to run as soon as possible,
@@ -69,6 +83,7 @@ pub trait place_structure {
     ///  and its status can be observed with the `callback`.
     fn place_structure_then(
         &self,
+        parent_id: Option<u64>,
         piece_type: String,
         x: f32,
         y: f32,
@@ -87,6 +102,7 @@ pub trait place_structure {
 impl place_structure for super::RemoteReducers {
     fn place_structure_then(
         &self,
+        parent_id: Option<u64>,
         piece_type: String,
         x: f32,
         y: f32,
@@ -102,6 +118,7 @@ impl place_structure for super::RemoteReducers {
     ) -> __sdk::Result<()> {
         self.imp.invoke_reducer_with_callback(
             PlaceStructureArgs {
+                parent_id,
                 piece_type,
                 x,
                 y,

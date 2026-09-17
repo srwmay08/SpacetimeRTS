@@ -8,7 +8,10 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[sats(crate = __lib)]
 pub struct Structure {
     pub structure_id: u64,
+    pub parent_id: Option<u64>,
     pub piece_type: String,
+    pub stability: u32,
+    pub is_grounded: bool,
     pub x: f32,
     pub y: f32,
     pub z: f32,
@@ -28,7 +31,10 @@ impl __sdk::InModule for Structure {
 /// Provides typed access to columns for query building.
 pub struct StructureCols {
     pub structure_id: __sdk::__query_builder::Col<Structure, u64>,
+    pub parent_id: __sdk::__query_builder::Col<Structure, Option<u64>>,
     pub piece_type: __sdk::__query_builder::Col<Structure, String>,
+    pub stability: __sdk::__query_builder::Col<Structure, u32>,
+    pub is_grounded: __sdk::__query_builder::Col<Structure, bool>,
     pub x: __sdk::__query_builder::Col<Structure, f32>,
     pub y: __sdk::__query_builder::Col<Structure, f32>,
     pub z: __sdk::__query_builder::Col<Structure, f32>,
@@ -44,7 +50,10 @@ impl __sdk::__query_builder::HasCols for Structure {
     fn cols(table_name: &'static str) -> Self::Cols {
         StructureCols {
             structure_id: __sdk::__query_builder::Col::new(table_name, "structure_id"),
+            parent_id: __sdk::__query_builder::Col::new(table_name, "parent_id"),
             piece_type: __sdk::__query_builder::Col::new(table_name, "piece_type"),
+            stability: __sdk::__query_builder::Col::new(table_name, "stability"),
+            is_grounded: __sdk::__query_builder::Col::new(table_name, "is_grounded"),
             x: __sdk::__query_builder::Col::new(table_name, "x"),
             y: __sdk::__query_builder::Col::new(table_name, "y"),
             z: __sdk::__query_builder::Col::new(table_name, "z"),

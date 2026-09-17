@@ -73,7 +73,7 @@ pub fn spawn_initial_world(
         RigidBody::Dynamic, 
         Collider::sphere(0.5),
         LockedAxes::ROTATION_LOCKED,
-        GravityScale(2.5),
+        GravityScale(4.5),
         LinearVelocity::ZERO,
         CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Unit, GameLayer::Environment]),
         Selectable,

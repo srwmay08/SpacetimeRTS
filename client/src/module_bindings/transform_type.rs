@@ -11,6 +11,8 @@ pub struct Transform {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+    pub chunk_x: i32,
+    pub chunk_z: i32,
     pub last_processed_tick: u64,
 }
 
@@ -26,6 +28,8 @@ pub struct TransformCols {
     pub x: __sdk::__query_builder::Col<Transform, f32>,
     pub y: __sdk::__query_builder::Col<Transform, f32>,
     pub z: __sdk::__query_builder::Col<Transform, f32>,
+    pub chunk_x: __sdk::__query_builder::Col<Transform, i32>,
+    pub chunk_z: __sdk::__query_builder::Col<Transform, i32>,
     pub last_processed_tick: __sdk::__query_builder::Col<Transform, u64>,
 }
 
@@ -37,6 +41,8 @@ impl __sdk::__query_builder::HasCols for Transform {
             x: __sdk::__query_builder::Col::new(table_name, "x"),
             y: __sdk::__query_builder::Col::new(table_name, "y"),
             z: __sdk::__query_builder::Col::new(table_name, "z"),
+            chunk_x: __sdk::__query_builder::Col::new(table_name, "chunk_x"),
+            chunk_z: __sdk::__query_builder::Col::new(table_name, "chunk_z"),
             last_processed_tick: __sdk::__query_builder::Col::new(
                 table_name,
                 "last_processed_tick",

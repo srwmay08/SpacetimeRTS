@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use avian3d::prelude::*;
 use tracing::info;
-use spacetimedb_sdk::Table; // Architectural Note: Required for table .iter() iterator methods in SpacetimeDB v2.x.
+use spacetimedb_sdk::Table; 
 
 use crate::components::*;
 use crate::network::SpacetimeConnection;
@@ -88,7 +88,6 @@ impl Default for BuildModeState {
 // BUILD MODE & SNAPPING SYSTEMS
 // ----------------------------------------------------------------------------
 
-/// Toggles build mode and cycles through available modular piece types.
 pub fn toggle_build_mode(
     keys: Res<ButtonInput<KeyCode>>,
     mut build_state: ResMut<BuildModeState>,
@@ -118,7 +117,6 @@ pub fn toggle_build_mode(
     }
 }
 
-/// Spawns or updates the placement hologram based on raycasting and socket snapping math.
 pub fn update_build_hologram(
     mut commands: Commands,
     build_state: Res<BuildModeState>,
@@ -127,6 +125,8 @@ pub fn update_build_hologram(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hologram_query: Query<(Entity, &mut Transform), With<BuildHologram>>,
+    structure_query: Query<&NetworkStructure>,
+    children_query: Query<&Children>,
     socket_query: Query<(&GlobalTransform, &Socket)>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     conn: Res<SpacetimeConnection>,
@@ -135,11 +135,9 @@ pub fn update_build_hologram(
 
     let Ok((cam_t, _camera)) = camera_query.get_single() else { return; };
     
-    // Perform 3D raycast from camera view
     let ray_origin = cam_t.translation();
     let ray_dir = cam_t.forward();
 
-    // Check if hologram exists; if not, spawn it with a translucent material.
     let hologram_entity = if let Ok((entity, _)) = hologram_query.get_single() {
         entity
     } else {
@@ -164,7 +162,6 @@ pub fn update_build_hologram(
         )).id()
     };
 
-    // Raycast against physics world to find placement target
     let ray_hit = spatial_query.cast_ray(
         ray_origin,
         ray_dir.into(),
@@ -174,59 +171,71 @@ pub fn update_build_hologram(
     );
 
     let mut target_transform = Transform::from_xyz(0.0, 0.0, 0.0);
+    let mut target_parent_id = None;
 
     if let Some(hit) = ray_hit {
-        // Grid-snapping math: Check if intersecting entity has sockets or snap to terrain grid
         let mut snapped = false;
-        if let Ok((socket_t, socket)) = socket_query.get(hit.entity) {
-            if !socket.is_occupied {
-                target_transform.translation = socket_t.translation() + socket.local_offset;
-                // Architectural Note: Extract rotation directly from Bevy GlobalTransform affine properties.
-                let (_, rotation, _) = socket_t.to_scale_rotation_translation();
-                target_transform.rotation = rotation;
-                snapped = true;
+        
+        if let Ok(net_struct) = structure_query.get(hit.entity) {
+            target_parent_id = Some(net_struct.structure_id);
+        }
+
+        if let Ok(children) = children_query.get(hit.entity) {
+            let hit_point = ray_origin + ray_dir * hit.time_of_impact;
+            let mut closest_dist = f32::MAX;
+            
+            for &child in children.iter() {
+                if let Ok((socket_t, socket)) = socket_query.get(child) {
+                    if !socket.is_occupied {
+                        let dist = socket_t.translation().distance_squared(hit_point);
+                        if dist < closest_dist {
+                            closest_dist = dist;
+                            // Architectural Note: Because we now spawn sockets with a `SpatialBundle`,
+                            // Bevy's transform hierarchy automatically computes the absolute world coordinate
+                            // combining the parent structure's position, rotation, and the socket's local offset.
+                            target_transform.translation = socket_t.translation();
+                            let (_, rotation, _) = socket_t.to_scale_rotation_translation();
+                            target_transform.rotation = rotation;
+                            snapped = true;
+                        }
+                    }
+                }
             }
         }
 
         if !snapped {
-            // Fallback to grid snapping on terrain/world intersection
+            target_parent_id = None; 
             let hit_point = ray_origin + ray_dir * hit.time_of_impact;
             let grid_size = 4.0;
             let snapped_x = (hit_point.x / grid_size).round() * grid_size;
             let snapped_z = (hit_point.z / grid_size).round() * grid_size;
             target_transform.translation = Vec3::new(snapped_x, hit_point.y, snapped_z);
+            target_transform.rotation = Quat::IDENTITY; // Reset rotation for ground grid placement
         }
     } else {
         target_transform.translation = ray_origin + ray_dir * 5.0;
     }
 
-    // Update hologram transform
     if let Ok((_, mut transform)) = hologram_query.get_mut(hologram_entity) {
         *transform = target_transform;
     }
 
-    // Left click to confirm placement and invoke SpacetimeDB reducer
     if mouse_buttons.just_pressed(MouseButton::Left) {
         let pos = target_transform.translation;
         let rot = target_transform.rotation;
         let piece_name = build_state.selected_piece.name().to_string();
 
         info!("Dispatching place_structure reducer for {} at {:?}", piece_name, pos);
+        
         let _ = conn.db.reducers.place_structure(
+            target_parent_id,
             piece_name,
             pos.x, pos.y, pos.z,
             rot.x, rot.y, rot.z, rot.w,
         );
-
-        // Architectural Note: Removed the local static collider instantiation here.
-        // Spawning an immediate ghost collider without a `NetworkStructure` component
-        // permanently blocks raycasts (preventing tool interaction/destruction).
-        // The authoritative `sync_structures` system will instantiate the true 
-        // collider and sockets dynamically upon server replication (~50ms).
     }
 }
 
-/// Syncs authoritative structures from SpacetimeDB into the Bevy client ECS.
 pub fn sync_structures(
     mut commands: Commands,
     conn: Res<SpacetimeConnection>,
@@ -235,7 +244,6 @@ pub fn sync_structures(
     existing_structures: Query<(Entity, &NetworkStructure)>,
 ) {
     let _ = conn.db.frame_tick();
-    // Architectural Note: Access the structure table via v2 generated table iterators.
     let db_structures: Vec<_> = conn.db.db.structure().iter().collect();
     
     let mut spawned_ids = std::collections::HashSet::with_capacity(existing_structures.iter().len());
@@ -277,7 +285,13 @@ pub fn sync_structures(
                 NetworkStructure { structure_id: s.structure_id },
             )).with_children(|parent| {
                 for socket in sockets {
-                    parent.spawn(socket);
+                    // Architectural Note: Spawning the socket with a `SpatialBundle` gives it a local Transform.
+                    // This allows Bevy to automatically compute its `GlobalTransform` relative to the parent structure,
+                    // satisfying the target extraction requirements in `update_build_hologram`.
+                    parent.spawn((
+                        SpatialBundle::from_transform(Transform::from_translation(socket.local_offset)),
+                        socket,
+                    ));
                 }
             });
         }

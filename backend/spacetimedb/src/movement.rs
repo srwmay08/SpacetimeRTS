@@ -13,8 +13,6 @@ pub struct Transform {
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    // Architectural Note: Added spatial partitioning chunk IDs to support the dual-rate 
-    // network culling architecture. Recomputed purely mathematically only when boundaries are crossed.
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub last_processed_tick: u64, 
@@ -84,9 +82,14 @@ pub fn process_movement(
     transform.z += dz;
     transform.last_processed_tick = tick_id;
     
-    // Architectural Note: Recalculate Chunk_ID for spatial partitioning (assuming 50m chunks). 
-    // This is the specific boundary threshold trigger that enables clients to dynamically 
-    // adjust their network subscriptions without computing heavy distance matrices.
+    // Architectural Note: Absolute Server-Side Terrain Clamp.
+    // Adjusted to 1.05 to mirror the client-side friction-nullifying hover epsilon.
+    // This perfectly synchronizes backend validation with front-end visual physics.
+    let ground_y = crate::get_terrain_height(transform.x, transform.z);
+    if transform.y < ground_y + 1.05 {
+        transform.y = ground_y + 1.05;
+    }
+
     transform.chunk_x = (transform.x / 50.0).floor() as i32;
     transform.chunk_z = (transform.z / 50.0).floor() as i32;
 
@@ -103,7 +106,6 @@ pub fn process_movement(
             z: transform.z,
         });
         
-        // Prune old history to preserve TeV memory bounds and limit rewind exploitation
         if history.snapshots.len() > 10 {
             history.snapshots.remove(0); 
         }

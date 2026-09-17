@@ -1,19 +1,18 @@
 use bevy::prelude::*;
 
-// Note: Assuming `module_bindings` is exposed at the crate root.
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
+use crate::building::BuildModeState; 
 use crate::module_bindings::player_table::PlayerTableAccess; 
 use crate::module_bindings::resource_stockpile_table::ResourceStockpileTableAccess; 
-use crate::module_bindings::health_table::HealthTableAccess; // Architectural Note: Required for reading HP state.
+use crate::module_bindings::health_table::HealthTableAccess; 
 use spacetimedb_sdk::Table;
 
 // ----------------------------------------------------------------------------
 // INVENTORY UI SETUP & MANAGEMENT
 // ----------------------------------------------------------------------------
 
-/// Constructs the DOM-like hierarchy for the inventory interface.
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn((NodeBundle {
         style: Style {
@@ -78,7 +77,6 @@ pub fn setup_ui(mut commands: Commands) {
         });
     });
 
-    // Invisible marquee selection box setup
     commands.spawn((NodeBundle {
         style: Style {
             position_type: PositionType::Absolute,
@@ -90,9 +88,41 @@ pub fn setup_ui(mut commands: Commands) {
         visibility: Visibility::Hidden,
         ..default()
     }, MarqueeUI));
+
+    // Build Mode Status UI
+    commands.spawn((
+        TextBundle::from_section(
+            "",
+            TextStyle { font_size: 20.0, color: Color::srgb(0.1, 0.8, 1.0), ..default() }
+        )
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(20.0),
+            left: Val::Percent(50.0),
+            margin: UiRect::left(Val::Px(-150.0)),
+            ..default()
+        }),
+        BuildUIText,
+    ));
 }
 
-/// Polls hardware input directly to toggle the inventory visibility.
+/// Updates the dynamic HUD overlay reacting to build mode activation and piece selection.
+pub fn update_build_ui(
+    build_state: Res<BuildModeState>,
+    mut ui_query: Query<(&mut Visibility, &mut Text), With<BuildUIText>>,
+) {
+    if build_state.is_changed() {
+        for (mut vis, mut text) in ui_query.iter_mut() {
+            if build_state.is_active {
+                *vis = Visibility::Inherited;
+                text.sections[0].value = format!("BUILD MODE: ACTIVE\n[R] to cycle: {}", build_state.selected_piece.name());
+            } else {
+                *vis = Visibility::Hidden;
+            }
+        }
+    }
+}
+
 pub fn toggle_inventory_ui(
     keys: Res<ButtonInput<KeyCode>>, 
     mut query: Query<&mut Visibility, With<InventoryUiRoot>>
@@ -107,7 +137,6 @@ pub fn toggle_inventory_ui(
     }
 }
 
-/// Reads authoritative resource data from SpacetimeDB to update text elements safely.
 pub fn update_inventory_ui(
     conn: Res<SpacetimeConnection>,
     mut wood_q: Query<&mut Text, (With<WoodText>, Without<OreText>, Without<FoodText>)>,
@@ -125,8 +154,6 @@ pub fn update_inventory_ui(
     }
 }
 
-/// Maps 3D world positions of entities to the 2D screen space to render floating health bars.
-/// Validates against the authoritative SpacetimeDB `health` table.
 pub fn update_floating_health_bars(
     conn: Res<SpacetimeConnection>,
     camera_query: Query<(&Camera, &GlobalTransform), With<RtsCameraChild>>,
@@ -134,7 +161,6 @@ pub fn update_floating_health_bars(
     mut bar_query: Query<(&mut Style, &mut BackgroundColor, &mut Visibility), With<HealthBarUI>>,
     camera_mode: Res<State<CameraMode>>,
 ) {
-    // Only render health bars in macro view
     if *camera_mode.get() != CameraMode::RTS {
         for (_, _, mut vis) in bar_query.iter_mut() { *vis = Visibility::Hidden; }
         return;
@@ -142,20 +168,13 @@ pub fn update_floating_health_bars(
 
     let Ok((camera, cam_transform)) = camera_query.get_single() else { return; };
     
-    // Architectual Note: We construct a fast lookup map of authoritative health values
-    // to decouple 3D mesh rendering loops from O(N) database queries.
     let health_map: std::collections::HashMap<u64, f32> = conn.db.db.health().iter()
         .map(|h| (h.entity_id, h.current / h.max))
         .collect();
 
     for (net_id, transform) in unit_query.iter() {
         if let Some(&hp_percent) = health_map.get(&net_id.0) {
-            
-            // Map 3D pos to 2D UI overlay. Only compute bars for units on screen.
             if let Some(_screen_pos) = camera.world_to_viewport(cam_transform, transform.translation() + Vec3::Y * 2.0) {
-                
-                // Determine color threshold based on current health status.
-                // In production, this maps to a spawned UI node per entity.
                 let _color = if hp_percent > 0.5 { Color::srgb(0.1, 0.8, 0.1) } 
                             else if hp_percent > 0.2 { Color::srgb(0.8, 0.8, 0.1) } 
                             else { Color::srgb(0.8, 0.1, 0.1) };
@@ -168,7 +187,6 @@ pub fn update_floating_health_bars(
 // VISUAL EFFECTS & ANIMATIONS
 // ----------------------------------------------------------------------------
 
-/// Updates the dynamic size and position of the RTS selection box.
 pub fn update_marquee_ui(
     state: Res<SelectionState>,
     mut query: Query<(&mut Style, &mut Visibility), With<MarqueeUI>>
@@ -193,7 +211,6 @@ pub fn update_marquee_ui(
     *vis = Visibility::Hidden;
 }
 
-/// Toggles the green rendering ring underneath selected units.
 pub fn visualize_selection(
     selected_query: Query<&Children, With<Selected>>,
     unselected_query: Query<&Children, (With<Selectable>, Without<Selected>)>,
@@ -216,7 +233,6 @@ pub fn visualize_selection(
     }
 }
 
-/// Drives the client-side predicted view model swing animation.
 pub fn animate_view_model(
     time: Res<Time>,
     mut swing_state: ResMut<SwingState>,
@@ -237,7 +253,6 @@ pub fn animate_view_model(
     }
 }
 
-/// Garbage collects finished combat and interaction visual effects.
 pub fn tick_particles(
     mut commands: Commands,
     time: Res<Time>,

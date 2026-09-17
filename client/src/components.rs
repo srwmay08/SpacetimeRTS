@@ -8,7 +8,7 @@ use bevy::prelude::*;
 #[derive(Component)] pub struct LogicalRotation(pub Quat);
 
 #[derive(Component, Default, PartialEq, Eq)] 
-#[allow(dead_code)] // Architectural Note: Suppressed warnings for unused logic frameworks
+#[allow(dead_code)] 
 pub enum Faction { 
     #[default] 
     Player, 
@@ -79,6 +79,7 @@ pub struct BuildHologram;
 #[derive(Component)] pub struct OreText;
 #[derive(Component)] pub struct FoodText;
 #[derive(Component)] pub struct HealthBarUI;
+#[derive(Component)] pub struct BuildUIText;
 
 #[derive(Component)] 
 pub struct Particle { 

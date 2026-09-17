@@ -48,9 +48,6 @@ pub fn init_network_connection(
         
         info!("Authenticated to SpacetimeDB with Identity: {}", identity.to_hex());
         
-        // Architectural Note: Initializing the network connection with the default origin chunk (0,0).
-        // This subscription is highly volatile and will be rebuilt continuously by `update_spatial_subscriptions`
-        // as the player moves across the physical chunk boundaries.
         let _handle = conn.subscription_builder().subscribe(vec![
             "SELECT * FROM player".to_string(),
             "SELECT * FROM transform WHERE chunk_x >= -1 AND chunk_x <= 1 AND chunk_z >= -1 AND chunk_z <= 1".to_string(),
@@ -95,17 +92,15 @@ pub fn init_network_connection(
     });
 
     commands.spawn((
-        // Architectural Note: Bevy has a hard limit of 15 elements per tuple for implicit 
-        // Bundle derivation. To prevent E0277, we group the physics/logical components 
-        // and the prediction components into nested tuples. Bevy flattens them automatically.
         (
             SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 25.0, 0.0)),
             PlayerBody,
             RigidBody::Dynamic, 
             Collider::capsule(0.4, 1.2),
+            SweptCcd::default(),
             CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Unit, GameLayer::Environment]),
             LockedAxes::ROTATION_LOCKED,
-            GravityScale(2.5),
+            GravityScale(0.0),
             LinearVelocity::ZERO,
             ExternalForce::default().with_persistence(false),
             Kcc { is_grounded: false },
@@ -118,6 +113,7 @@ pub fn init_network_connection(
             crate::prediction::InputBuffer::default(),
             crate::prediction::AuthoritativeState::default(),
             crate::prediction::LocalMovementTracker { last_position: Vec3::new(0.0, 25.0, 0.0) },
+            Friction::new(0.0).with_combine_rule(CoefficientCombine::Min),
         )
     )).with_children(|parent| {
         parent.spawn((
@@ -185,6 +181,13 @@ pub fn wait_for_connection(
     store: Res<IdentityStore>,
     mut next_state: ResMut<NextState<GameState>>,
     mut connection: ResMut<SpacetimeConnection>,
+    mut player_query: Query<(
+        &mut BevyTransform, 
+        &mut LinearVelocity, 
+        &mut GravityScale, 
+        &mut crate::prediction::LocalMovementTracker,
+        &mut crate::prediction::InputBuffer,
+    ), With<PlayerBody>>,
 ) {
     let _ = connection.db.frame_tick();
 
@@ -194,15 +197,24 @@ pub fn wait_for_connection(
                 connection.identity = Some(id.clone());
                 next_state.set(GameState::InGame);
                 info!("Bootstrapping complete. Entering In-Game State.");
+                
+                let spawn_y = crate::terrain::get_terrain_height(0.0, 0.0) + 10.0;
+                
+                if let Ok((mut transform, mut velocity, mut gravity, mut tracker, mut buffer)) = player_query.get_single_mut() {
+                    transform.translation = Vec3::new(0.0, spawn_y, 0.0);
+                    velocity.x = 0.0;
+                    velocity.y = 0.0;
+                    velocity.z = 0.0;
+                    // Architectural Note: Synchronized with the new heavy gravity profile.
+                    gravity.0 = 8.0; 
+                    tracker.last_position = transform.translation;
+                    buffer.queue.clear();
+                }
             }
         }
     }
 }
 
-/// Dynamic Spatial Partitioning engine. Evaluates positional boundaries every frame.
-/// Architectural Note: If a threshold is crossed, we forcibly sever the previous network load
-/// and construct a new targeted SQL subscription. This prevents the RTS scale from overwhelming 
-/// local client bandwidth and memory.
 pub fn update_spatial_subscriptions(
     player_query: Query<&LogicalPosition, With<PlayerBody>>,
     mut culling_state: ResMut<NetworkCullingState>,

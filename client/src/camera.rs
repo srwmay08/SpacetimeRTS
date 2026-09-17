@@ -2,7 +2,6 @@ use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use tracing::info; // Architectural Note: Removed unused `error` to keep build clean.
-use spacetimedb_sdk::DbContext; // Architectural Note: Required in v2.x to access subscription_builder.
 
 // Note: Assuming `module_bindings` is exposed at the crate root.
 use crate::core::*;

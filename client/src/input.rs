@@ -1,14 +1,15 @@
 use bevy::prelude::{Transform as BevyTransform, *};
-use bevy::ecs::system::SystemParam; // Architectural Note: Required derive macro trait import for SystemParam structs.
+use bevy::ecs::system::SystemParam; 
 use bevy::window::PrimaryWindow;
 use avian3d::prelude::*;
 use tracing::info;
 
-// Note: Assuming `module_bindings` is exposed at the crate root.
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
 use crate::prediction::ClientTick; 
+use crate::building::BuildModeState; // Architectural Note: Required to mask primary inputs.
+
 use crate::module_bindings::gather_loot_reducer::gather_loot; 
 use crate::module_bindings::fire_weapon_reducer::fire_weapon; 
 use crate::module_bindings::swing_tool_reducer::swing_tool; 
@@ -17,7 +18,6 @@ use crate::module_bindings::swing_tool_reducer::swing_tool;
 // EVENTS & ENUMS
 // ----------------------------------------------------------------------------
 
-/// Abstract representations of player intent, independent of hardware bindings.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum VirtualAction {
     Primary,
@@ -25,7 +25,6 @@ pub enum VirtualAction {
     Interact,
 }
 
-/// Tracks the lifecycle of a discrete input action.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ActionState {
     JustPressed,
@@ -33,7 +32,6 @@ pub enum ActionState {
     JustReleased,
 }
 
-/// Event fired when a hardware input successfully maps to a `VirtualAction`.
 #[derive(Event, Debug)]
 pub struct ActionEvent {
     pub action: VirtualAction,
@@ -42,10 +40,9 @@ pub struct ActionEvent {
 }
 
 // ----------------------------------------------------------------------------
-// SYSTEM PARAM BUNDLING (Architectural Fix for Bevy Parameter Limits)
+// SYSTEM PARAM BUNDLING 
 // ----------------------------------------------------------------------------
 
-/// Bundles world interaction queries to keep system parameter counts within Bevy limits.
 #[derive(SystemParam)]
 pub struct ActionContextQueries<'w, 's> {
     pub fps_camera: Query<'w, 's, &'static GlobalTransform, With<FpsCamera>>,
@@ -62,7 +59,6 @@ pub struct ActionContextQueries<'w, 's> {
 // INPUT ROUTING
 // ----------------------------------------------------------------------------
 
-/// Translates raw mouse and keyboard states into abstract `ActionEvent`s.
 pub fn input_router_system(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -94,12 +90,11 @@ pub fn input_router_system(
 // ACTION DISPATCHING
 // ----------------------------------------------------------------------------
 
-/// Consumes `ActionEvent`s and applies context-aware logic depending on active targets and camera mode.
-/// Architectural Note: Utilizes bundled `ActionContextQueries` to bypass Bevy system parameter limits.
 pub fn context_aware_action_dispatcher(
     mut commands: Commands,
     mut action_events: EventReader<ActionEvent>,
     camera_mode: Res<State<CameraMode>>,
+    build_state: Res<BuildModeState>,
     keys: Res<ButtonInput<KeyCode>>,
     mut swing_state: ResMut<SwingState>,
     queries: ActionContextQueries,
@@ -117,10 +112,12 @@ pub fn context_aware_action_dispatcher(
             CameraMode::FPS => {
                 match event.action {
                     VirtualAction::Primary if event.state == ActionState::JustPressed => {
+                        // Architectural Note: Strictly isolates combat/gathering input from the build system
+                        if build_state.is_active { continue; }
+
                         if !swing_state.is_swinging {
                             swing_state.is_swinging = true;
                             if let Ok(cam_transform) = queries.fps_camera.get_single() {
-                                // Architectural Note: Retrieve the local player entity first so we can exclude it.
                                 if let Ok((player_entity, _)) = queries.player.get_single() {
                                     let origin = cam_transform.translation();
                                     let dir = cam_transform.forward();
@@ -130,9 +127,6 @@ pub fn context_aware_action_dispatcher(
                                         dir.into(),
                                         50.0, 
                                         true,
-                                        // Architectural Note: Critical fix. We must explicitly exclude our own
-                                        // player capsule from the raycast. Otherwise, the raycast instantly collides 
-                                        // with ourselves at distance 0.0, permanently blocking interaction detection.
                                         SpatialQueryFilter::from_excluded_entities([player_entity]),
                                     );
 
@@ -181,6 +175,8 @@ pub fn context_aware_action_dispatcher(
                         }
                     }
                     VirtualAction::Interact if event.state == ActionState::JustPressed => {
+                        if build_state.is_active { continue; }
+
                         if let Ok((player_entity, player_transform)) = queries.player.get_single() {
                             let intersections = spatial_query.shape_intersections(
                                 &Collider::sphere(3.5), 
@@ -203,6 +199,8 @@ pub fn context_aware_action_dispatcher(
             CameraMode::RTS => {
                 match event.action {
                     VirtualAction::Primary => {
+                        if build_state.is_active { continue; }
+
                         let Some(cursor_pos) = event.cursor_pos else { continue; };
                         let Ok((camera, cam_transform)) = queries.rts_camera.get_single() else { continue; };
                         
@@ -304,25 +302,36 @@ pub fn rts_navmesh_movement_system(
 pub fn player_movement_system(
     keys: Res<ButtonInput<KeyCode>>, 
     camera_mode: Res<State<CameraMode>>,
-    mut query: Query<(Entity, &BevyTransform, &mut LinearVelocity, &mut GravityScale, &mut Kcc), With<PlayerBody>>,
+    mut query: Query<(Entity, &mut BevyTransform, &mut LinearVelocity, &mut GravityScale, &mut Kcc), With<PlayerBody>>,
     spatial_query: SpatialQuery, 
 ) {
-    let Ok((entity, transform, mut lin_vel, mut gravity, mut kcc)) = query.get_single_mut() else { return; };
+    let Ok((entity, mut transform, mut lin_vel, mut gravity, mut kcc)) = query.get_single_mut() else { return; };
 
     let ray_start = transform.translation; 
     let hit = spatial_query.cast_ray(
         ray_start, 
         Dir3::NEG_Y, 
-        1.2, 
+        1.15, 
         true, 
         SpatialQueryFilter::from_excluded_entities([entity])
     );
     
     kcc.is_grounded = false;
     if let Some(hit_data) = hit {
-        if hit_data.time_of_impact <= 1.05 {
+        if hit_data.time_of_impact <= 1.15 {
             kcc.is_grounded = true;
         }
+    }
+
+    let ground_y = crate::terrain::get_terrain_height(transform.translation.x, transform.translation.z);
+    let player_half_height = 1.05; 
+    
+    if transform.translation.y <= ground_y + player_half_height {
+        transform.translation.y = ground_y + player_half_height;
+        if lin_vel.y < 0.0 {
+            lin_vel.y = 0.0;
+        }
+        kcc.is_grounded = true;
     }
 
     let mut move_dir = Vec3::ZERO;
@@ -336,27 +345,17 @@ pub fn player_movement_system(
     move_dir.y = 0.0;
     if move_dir != Vec3::ZERO { move_dir = move_dir.normalize(); }
 
-    let horizontal_speed = 6.0;
+    let horizontal_speed = 15.0; 
     
     if *camera_mode.get() == CameraMode::FPS {
         lin_vel.x = move_dir.x * horizontal_speed;
         lin_vel.z = move_dir.z * horizontal_speed;
     }
 
-    if kcc.is_grounded {
-        if *camera_mode.get() == CameraMode::FPS && keys.just_pressed(KeyCode::Space) { 
-            lin_vel.y = 7.0; 
-            gravity.0 = 2.5; 
-        } else {
-            if move_dir == Vec3::ZERO {
-                lin_vel.y = 0.0;
-                gravity.0 = 0.0; 
-            } else {
-                lin_vel.y = -1.0; 
-                gravity.0 = 2.5;
-            }
-        }
-    } else {
-        gravity.0 = 2.5; 
+    gravity.0 = 8.0; 
+
+    if kcc.is_grounded && *camera_mode.get() == CameraMode::FPS && keys.just_pressed(KeyCode::Space) { 
+        lin_vel.y = 10.0; 
+        kcc.is_grounded = false; 
     }
 }

@@ -8,14 +8,17 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod combat_event_table;
 pub mod combat_event_type;
+pub mod destroy_structure_reducer;
 pub mod fire_weapon_reducer;
 pub mod gather_loot_reducer;
 pub mod ground_loot_table;
 pub mod ground_loot_type;
 pub mod health_table;
 pub mod health_type;
+pub mod high_frequency_timer_type;
 pub mod hitbox_history_table;
 pub mod hitbox_history_type;
+pub mod low_frequency_timer_type;
 pub mod place_structure_reducer;
 pub mod player_perspective_table;
 pub mod player_perspective_type;
@@ -29,6 +32,7 @@ pub mod resource_node_type;
 pub mod resource_stockpile_table;
 pub mod resource_stockpile_type;
 pub mod set_camera_mode_reducer;
+pub mod set_interior_culling_reducer;
 pub mod snapshot_type;
 pub mod structure_table;
 pub mod structure_type;
@@ -38,14 +42,17 @@ pub mod transform_type;
 
 pub use combat_event_table::*;
 pub use combat_event_type::CombatEvent;
+pub use destroy_structure_reducer::destroy_structure;
 pub use fire_weapon_reducer::fire_weapon;
 pub use gather_loot_reducer::gather_loot;
 pub use ground_loot_table::*;
 pub use ground_loot_type::GroundLoot;
 pub use health_table::*;
 pub use health_type::Health;
+pub use high_frequency_timer_type::HighFrequencyTimer;
 pub use hitbox_history_table::*;
 pub use hitbox_history_type::HitboxHistory;
+pub use low_frequency_timer_type::LowFrequencyTimer;
 pub use place_structure_reducer::place_structure;
 pub use player_perspective_table::*;
 pub use player_perspective_type::PlayerPerspective;
@@ -59,6 +66,7 @@ pub use resource_node_type::ResourceNode;
 pub use resource_stockpile_table::*;
 pub use resource_stockpile_type::ResourceStockpile;
 pub use set_camera_mode_reducer::set_camera_mode;
+pub use set_interior_culling_reducer::set_interior_culling;
 pub use snapshot_type::Snapshot;
 pub use structure_table::*;
 pub use structure_type::Structure;
@@ -74,6 +82,9 @@ pub use transform_type::Transform;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    DestroyStructure {
+        target_structure_id: u64,
+    },
     FireWeapon {
         client_tick: u64,
         origin_x: f32,
@@ -87,6 +98,7 @@ pub enum Reducer {
         loot_id: u64,
     },
     PlaceStructure {
+        parent_id: Option<u64>,
         piece_type: String,
         x: f32,
         y: f32,
@@ -105,6 +117,9 @@ pub enum Reducer {
     SetCameraMode {
         mode: String,
     },
+    SetInteriorCulling {
+        is_inside: bool,
+    },
     SwingTool {
         px: f32,
         py: f32,
@@ -122,11 +137,13 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::DestroyStructure { .. } => "destroy_structure",
             Reducer::FireWeapon { .. } => "fire_weapon",
             Reducer::GatherLoot { .. } => "gather_loot",
             Reducer::PlaceStructure { .. } => "place_structure",
             Reducer::ProcessMovement { .. } => "process_movement",
             Reducer::SetCameraMode { .. } => "set_camera_mode",
+            Reducer::SetInteriorCulling { .. } => "set_interior_culling",
             Reducer::SwingTool { .. } => "swing_tool",
             _ => unreachable!(),
         }
@@ -134,6 +151,11 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
+            Reducer::DestroyStructure {
+                target_structure_id,
+            } => __sats::bsatn::to_vec(&destroy_structure_reducer::DestroyStructureArgs {
+                target_structure_id: target_structure_id.clone(),
+            }),
             Reducer::FireWeapon {
                 client_tick,
                 origin_x,
@@ -157,6 +179,7 @@ impl __sdk::Reducer for Reducer {
                 })
             }
             Reducer::PlaceStructure {
+                parent_id,
                 piece_type,
                 x,
                 y,
@@ -166,6 +189,7 @@ impl __sdk::Reducer for Reducer {
                 rot_z,
                 rot_w,
             } => __sats::bsatn::to_vec(&place_structure_reducer::PlaceStructureArgs {
+                parent_id: parent_id.clone(),
                 piece_type: piece_type.clone(),
                 x: x.clone(),
                 y: y.clone(),
@@ -189,6 +213,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetCameraMode { mode } => {
                 __sats::bsatn::to_vec(&set_camera_mode_reducer::SetCameraModeArgs {
                     mode: mode.clone(),
+                })
+            }
+            Reducer::SetInteriorCulling { is_inside } => {
+                __sats::bsatn::to_vec(&set_interior_culling_reducer::SetInteriorCullingArgs {
+                    is_inside: is_inside.clone(),
                 })
             }
             Reducer::SwingTool {

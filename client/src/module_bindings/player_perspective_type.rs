@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub struct PlayerPerspective {
     pub entity_id: u64,
     pub camera_mode: String,
+    pub in_interior: bool,
 }
 
 impl __sdk::InModule for PlayerPerspective {
@@ -21,6 +22,7 @@ impl __sdk::InModule for PlayerPerspective {
 pub struct PlayerPerspectiveCols {
     pub entity_id: __sdk::__query_builder::Col<PlayerPerspective, u64>,
     pub camera_mode: __sdk::__query_builder::Col<PlayerPerspective, String>,
+    pub in_interior: __sdk::__query_builder::Col<PlayerPerspective, bool>,
 }
 
 impl __sdk::__query_builder::HasCols for PlayerPerspective {
@@ -29,6 +31,7 @@ impl __sdk::__query_builder::HasCols for PlayerPerspective {
         PlayerPerspectiveCols {
             entity_id: __sdk::__query_builder::Col::new(table_name, "entity_id"),
             camera_mode: __sdk::__query_builder::Col::new(table_name, "camera_mode"),
+            in_interior: __sdk::__query_builder::Col::new(table_name, "in_interior"),
         }
     }
 }
