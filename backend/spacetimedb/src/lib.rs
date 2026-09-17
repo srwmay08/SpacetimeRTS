@@ -8,7 +8,7 @@ pub mod building; // Architectural Note: Registers modular building backend modu
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history};
-use crate::building::{structure, place_structure};
+// Architectural Note: Removed unused `crate::building::{structure, place_structure}` to resolve compiler warning.
 
 #[table(accessor = player, public)]
 #[derive(Clone)]

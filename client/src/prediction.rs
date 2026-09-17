@@ -3,6 +3,10 @@ use std::collections::VecDeque;
 use crate::network::SpacetimeConnection;
 use crate::core::NetworkTickTimer;
 
+// Architectural Note: Explicitly bringing the generated v2.x reducer trait into scope 
+// to resolve E0599 and enable the authoritative process_movement RPC call.
+use crate::module_bindings::process_movement_reducer::process_movement; 
+
 /// Tracks the client's current simulation tick.
 #[derive(Resource, Default)]
 pub struct ClientTick(pub u64);

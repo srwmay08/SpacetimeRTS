@@ -1,6 +1,7 @@
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table}; // Architectural Note: Added 'Table' trait to resolve .iter() scope error in SpacetimeDB v2.x.
 use crate::movement::player_session; // Architectural Note: v2.x requires explicitly bringing traits into scope.
 use crate::CombatEvent; // Architectural Note: Required to broadcast global damage confirmation packets.
+use crate::combat_event; // Architectural Note: Explicitly import v2.x generated table accessor trait.
 
 // Architectural Note: Defines a single frame of historical state for an entity.
 // We derive SpacetimeType explicitly here because it is an embedded struct, not a root table.

@@ -92,23 +92,30 @@ pub fn init_network_connection(
     });
 
     commands.spawn((
-        SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 25.0, 0.0)),
-        PlayerBody,
-        RigidBody::Dynamic, 
-        Collider::capsule(0.4, 1.2),
-        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Unit, GameLayer::Environment]),
-        LockedAxes::ROTATION_LOCKED,
-        GravityScale(2.5),
-        LinearVelocity::ZERO,
-        ExternalForce::default().with_persistence(false),
-        Kcc { is_grounded: false },
-        LogicalPosition(Vec3::new(0.0, 25.0, 0.0)),
-        LogicalRotation(Quat::IDENTITY),
-        Faction::Player,
-        Selectable, 
-        crate::prediction::InputBuffer::default(),
-        crate::prediction::AuthoritativeState::default(),
-        crate::prediction::LocalMovementTracker { last_position: Vec3::new(0.0, 25.0, 0.0) },
+        // Architectural Note: Bevy has a hard limit of 15 elements per tuple for implicit 
+        // Bundle derivation. To prevent E0277, we group the physics/logical components 
+        // and the prediction components into nested tuples. Bevy flattens them automatically.
+        (
+            SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 25.0, 0.0)),
+            PlayerBody,
+            RigidBody::Dynamic, 
+            Collider::capsule(0.4, 1.2),
+            CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Unit, GameLayer::Environment]),
+            LockedAxes::ROTATION_LOCKED,
+            GravityScale(2.5),
+            LinearVelocity::ZERO,
+            ExternalForce::default().with_persistence(false),
+            Kcc { is_grounded: false },
+            LogicalPosition(Vec3::new(0.0, 25.0, 0.0)),
+            LogicalRotation(Quat::IDENTITY),
+            Faction::Player,
+            Selectable, 
+        ),
+        (
+            crate::prediction::InputBuffer::default(),
+            crate::prediction::AuthoritativeState::default(),
+            crate::prediction::LocalMovementTracker { last_position: Vec3::new(0.0, 25.0, 0.0) },
+        )
     )).with_children(|parent| {
         parent.spawn((
             PbrBundle {
@@ -362,9 +369,6 @@ pub fn process_combat_events(
         if event.id > tracker.last_event_id {
             highest_id = highest_id.max(event.id);
             
-            // Architectural Note: Intercepting the new HitPlayer global damage confirmation packet.
-            // Spawns visceral red particle blocks to visually reinforce hit registration 
-            // across both the FPS and RTS camera perspectives.
             let color = match event.event_type.as_str() {
                 "HitTree" => Color::srgb(0.4, 0.2, 0.1), 
                 "HitRock" => Color::srgb(0.5, 0.5, 0.5), 
