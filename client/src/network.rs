@@ -205,7 +205,6 @@ pub fn wait_for_connection(
                     velocity.x = 0.0;
                     velocity.y = 0.0;
                     velocity.z = 0.0;
-                    // Architectural Note: Synchronized with the new heavy gravity profile.
                     gravity.0 = 8.0; 
                     tracker.last_position = transform.translation;
                     buffer.queue.clear();
@@ -235,18 +234,31 @@ pub fn update_spatial_subscriptions(
         let cz = culling_state.current_chunk.1;
         let rad = culling_state.radius;
 
-        let _handle = conn.db.subscription_builder().subscribe(vec![
+        let mut subscriptions = vec![
             "SELECT * FROM player".to_string(),
-            format!("SELECT * FROM transform WHERE chunk_x >= {} AND chunk_x <= {} AND chunk_z >= {} AND chunk_z <= {}", cx - rad, cx + rad, cz - rad, cz + rad),
             "SELECT * FROM resource_stockpile".to_string(),
             "SELECT * FROM ground_loot".to_string(),
             "SELECT * FROM resource_node".to_string(),
             "SELECT * FROM combat_event".to_string(),
-            "SELECT * FROM structure".to_string() 
-        ]);
+            "SELECT * FROM structure".to_string(),
+        ];
+
+        // Architectural Note: Network Interest Management.
+        // If the player is structurally occluded (inside a base), we intentionally omit 
+        // network subscriptions to external macro-level chunks, drastically conserving bandwidth.
+        if culling_state.in_interior {
+            subscriptions.push(format!("SELECT * FROM transform WHERE chunk_x = {} AND chunk_z = {}", cx, cz));
+        } else {
+            subscriptions.push(format!(
+                "SELECT * FROM transform WHERE chunk_x >= {} AND chunk_x <= {} AND chunk_z >= {} AND chunk_z <= {}",
+                cx - rad, cx + rad, cz - rad, cz + rad
+            ));
+        }
+
+        let _handle = conn.db.subscription_builder().subscribe(subscriptions);
 
         culling_state.needs_rebuild = false;
-        info!("Rebuilt SpacetimeDB spatial subscription for Chunk_ID ({}, {}) with radius {}", cx, cz, rad);
+        info!("Rebuilt SpacetimeDB spatial subscription for Chunk_ID ({}, {}) with radius {}. In Interior: {}", cx, cz, rad, culling_state.in_interior);
     }
 }
 

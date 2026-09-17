@@ -100,6 +100,7 @@ pub struct NetworkCullingState {
     pub current_chunk: (i32, i32),
     pub radius: i32,
     pub needs_rebuild: bool,
+    pub in_interior: bool, // Architectural Note: Tracks interior occlusion for macro-culling logic.
 }
 
 impl Default for NetworkCullingState {
@@ -108,6 +109,7 @@ impl Default for NetworkCullingState {
             current_chunk: (0, 0),
             radius: 1, // Default FPS 3x3 perimeter limit
             needs_rebuild: true,
+            in_interior: false,
         }
     }
 }

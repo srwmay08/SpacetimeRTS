@@ -70,6 +70,17 @@ pub struct Socket {
 #[derive(Component)]
 pub struct BuildHologram;
 
+// Architectural Note: Defines an Axis-Aligned Bounding Box (AABB) volume encompassing a player base.
+#[derive(Component)]
+pub struct BaseInteriorVolume {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+// Architectural Note: Marks highly detailed interior entities (furniture, workstations) for aggressive rendering culling.
+#[derive(Component)]
+pub struct InteriorProp;
+
 // ----------------------------------------------------------------------------
 // UI & VFX COMPONENTS
 // ----------------------------------------------------------------------------

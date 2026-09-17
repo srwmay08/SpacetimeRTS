@@ -39,7 +39,7 @@ fn main() {
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState { is_swinging: false, timer: Timer::from_seconds(0.3, TimerMode::Once) })
         .insert_resource(AmbientLight { color: Color::srgb(1.0, 0.95, 0.9), brightness: 400.0 })
-        .insert_resource(TelemetryTracker { last_frame_time: 0.0, frame_drop_threshold: 0.033 })
+        .insert_resource(TelemetryTracker { last_frame_time: 0.0, frame_drop_threshold: 0.1 })
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))
@@ -56,8 +56,12 @@ fn main() {
             player_movement_system,
         ).run_if(in_state(GameState::InGame)))
 
-        .add_systems(Update, context_aware_action_dispatcher.run_if(in_state(GameState::InGame)))
-        .add_systems(Update, update_infinite_terrain_chunks.run_if(in_state(GameState::InGame)))
+        // Architectural Note: Added interior_occlusion_culling_system to process volumetric AABB checks
+        .add_systems(Update, (
+            context_aware_action_dispatcher,
+            interior_occlusion_culling_system,
+            update_infinite_terrain_chunks
+        ).run_if(in_state(GameState::InGame)))
 
         .add_systems(Update, (
             sync_transforms, 
