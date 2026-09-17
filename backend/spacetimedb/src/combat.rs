@@ -1,5 +1,6 @@
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table}; // Architectural Note: Added 'Table' trait to resolve .iter() scope error in SpacetimeDB v2.x.
 use crate::movement::player_session; // Architectural Note: v2.x requires explicitly bringing traits into scope.
+use crate::CombatEvent; // Architectural Note: Required to broadcast global damage confirmation packets.
 
 // Architectural Note: Defines a single frame of historical state for an entity.
 // We derive SpacetimeType explicitly here because it is an embedded struct, not a root table.
@@ -47,6 +48,7 @@ pub fn fire_weapon(
 
     let mut hit_entity = None;
     let mut closest_dist = f32::MAX;
+    let mut hit_location = (0.0, 0.0, 0.0);
 
     // 1. Lag Compensation: Rewind and Intersect
     for history in ctx.db.hitbox_history().iter() {
@@ -76,18 +78,41 @@ pub fn fire_weapon(
                 if dist > 0.0 && dist < closest_dist {
                     closest_dist = dist;
                     hit_entity = Some(history.entity_id);
+                    // Architectural Note: Calculate the exact 3D coordinate of the impact
+                    // for the global damage confirmation packet.
+                    hit_location = (
+                        origin_x + dir_x * dist,
+                        origin_y + dir_y * dist,
+                        origin_z + dir_z * dist,
+                    );
                 }
             }
         }
     }
 
-    // 2. Authoritative Damage Application
+    // 2. Authoritative Damage Application & Global Sync
     if let Some(target_id) = hit_entity {
         if let Some(mut hp) = ctx.db.health().entity_id().find(target_id) {
             hp.current = (hp.current - 20.0).max(0.0);
             ctx.db.health().entity_id().update(hp.clone());
+            
+            // Architectural Note: Push the damage confirmation packet to the global CombatEvent table.
+            // This transactionally guarantees that if the health bar updates for the RTS view, 
+            // the micro-engagement view will simultaneously render the blood splatter/impact.
+            ctx.db.combat_event().insert(CombatEvent {
+                id: 0,
+                event_type: "HitPlayer".to_string(),
+                x: hit_location.0,
+                y: hit_location.1,
+                z: hit_location.2,
+            });
+            
             log::info!("Hit validated via Lag Compensation! Entity {} shot entity {}. HP remaining: {}", session.entity_id, target_id, hp.current);
         }
+    } else {
+        // Architectural Note: We purposely do NOT insert a CombatEvent on a miss.
+        // The client relies on its own immediate prediction to render the tracer, keeping
+        // server TeV costs completely minimal during suppression fire.
     }
 
     Ok(())

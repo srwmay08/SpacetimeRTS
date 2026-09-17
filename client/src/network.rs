@@ -12,7 +12,6 @@ use spacetimedb_sdk::{DbContext, Table};
 use crate::module_bindings::{self, *};
 use crate::core::*;
 use crate::components::*;
-use crate::module_bindings::process_movement_reducer::process_movement;
 
 const SPACETIMEDB_URI: &str = "http://localhost:3000";
 const DB_NAME: &str = "hybrid-backend";
@@ -49,7 +48,6 @@ pub fn init_network_connection(
         
         info!("Authenticated to SpacetimeDB with Identity: {}", identity.to_hex());
         
-        // Architectural Note: Added `structure` table subscription for modular building synchronization.
         let _handle = conn.subscription_builder().subscribe(vec![
             "SELECT * FROM player",
             "SELECT * FROM transform WHERE x > -50 AND x < 50 AND z > -50 AND z < 50",
@@ -108,6 +106,9 @@ pub fn init_network_connection(
         LogicalRotation(Quat::IDENTITY),
         Faction::Player,
         Selectable, 
+        crate::prediction::InputBuffer::default(),
+        crate::prediction::AuthoritativeState::default(),
+        crate::prediction::LocalMovementTracker { last_position: Vec3::new(0.0, 25.0, 0.0) },
     )).with_children(|parent| {
         parent.spawn((
             PbrBundle {
@@ -188,24 +189,6 @@ pub fn wait_for_connection(
     }
 }
 
-pub fn reconcile_local_transform(
-    mut query: Query<&mut BevyTransform, With<PlayerBody>>,
-    conn: Res<SpacetimeConnection>,
-) {
-    let Ok(mut transform) = query.get_single_mut() else { return; };
-    let Some(my_identity) = &conn.identity else { return; };
-    
-    let Some(my_player) = conn.db.db.player().identity().find(my_identity) else { return; };
-    let Some(server_transform) = conn.db.db.transform().entity_id().find(&my_player.entity_id) else { return; };
-
-    let server_pos = Vec3::new(server_transform.x, server_transform.y, server_transform.z);
-    
-    if transform.translation.distance(server_pos) > 20.0 {
-        warn!("Client desync detected. Hard reconciling to server authoritative position.");
-        transform.translation = server_pos;
-    }
-}
-
 pub fn sync_logical_components(
     time: Res<Time>,
     mut query: Query<(&LogicalPosition, &LogicalRotation, &mut BevyTransform), Without<PlayerBody>>
@@ -226,6 +209,7 @@ pub fn sync_transforms(
     mut commands: Commands, 
     conn: Res<SpacetimeConnection>, 
     mut query: Query<(&NetworkEntity, &mut LogicalPosition, &mut LogicalRotation)>,
+    mut player_query: Query<&mut crate::prediction::AuthoritativeState, With<PlayerBody>>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -246,7 +230,15 @@ pub fn sync_transforms(
     }
 
     for db_t in db_transforms {
-        if Some(db_t.entity_id) == my_entity_id { continue; }
+        if Some(db_t.entity_id) == my_entity_id { 
+            if let Ok(mut auth_state) = player_query.get_single_mut() {
+                if auth_state.last_processed_tick != db_t.last_processed_tick {
+                    auth_state.position = Vec3::new(db_t.x, db_t.y, db_t.z);
+                    auth_state.last_processed_tick = db_t.last_processed_tick;
+                }
+            }
+            continue; 
+        }
         
         if !spawned_ids.contains(&db_t.entity_id) {
             commands.spawn((
@@ -269,29 +261,6 @@ pub fn sync_transforms(
                 ));
             });
         }
-    }
-}
-
-pub fn send_movement_input(
-    mut timer: ResMut<NetworkTickTimer>, 
-    time: Res<Time>,
-    body_query: Query<&BevyTransform, With<PlayerBody>>,
-    conn: Res<SpacetimeConnection>,
-    mut last_pos: Local<Vec3>,
-    mut tick_counter: Local<u64>,
-) {
-    if !timer.0.tick(time.delta()).just_finished() { return; }
-
-    let Ok(body_transform) = body_query.get_single() else { return; };
-    let current_pos = body_transform.translation;
-    let delta = current_pos - *last_pos;
-
-    if delta.length_squared() > 0.0001 {
-        *tick_counter += 1;
-        let _ = conn.db.reducers.process_movement(
-            *tick_counter, delta.x, delta.y, delta.z
-        );
-        *last_pos = current_pos;
     }
 }
 
@@ -393,10 +362,14 @@ pub fn process_combat_events(
         if event.id > tracker.last_event_id {
             highest_id = highest_id.max(event.id);
             
+            // Architectural Note: Intercepting the new HitPlayer global damage confirmation packet.
+            // Spawns visceral red particle blocks to visually reinforce hit registration 
+            // across both the FPS and RTS camera perspectives.
             let color = match event.event_type.as_str() {
                 "HitTree" => Color::srgb(0.4, 0.2, 0.1), 
                 "HitRock" => Color::srgb(0.5, 0.5, 0.5), 
                 "HitBush" => Color::srgb(0.2, 0.6, 0.2), 
+                "HitPlayer" => Color::srgb(0.9, 0.1, 0.1), 
                 _ => Color::WHITE,
             };
 
@@ -412,7 +385,11 @@ pub fn process_combat_events(
                 commands.spawn((
                     PbrBundle {
                         mesh: meshes.add(Cuboid::new(0.1, 0.1, 0.1)),
-                        material: materials.add(color),
+                        material: materials.add(StandardMaterial {
+                            base_color: color,
+                            unlit: event.event_type == "HitPlayer",
+                            ..default()
+                        }),
                         transform: BevyTransform::from_xyz(event.x, event.y + 0.5, event.z),
                         ..default()
                     },

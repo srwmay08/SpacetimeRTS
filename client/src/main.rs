@@ -61,9 +61,9 @@ fn main() {
         .add_systems(Update, update_infinite_terrain_chunks.run_if(in_state(GameState::InGame)))
 
         .add_systems(Update, (
-            send_movement_input, 
+            // Architectural Note: Removed naive `send_movement_input` and `reconcile_local_transform`
+            // delegation functions in favor of the chained `PredictionPlugin` execution.
             sync_transforms, 
-            reconcile_local_transform, 
             sync_logical_components,
             sync_resource_nodes, 
             sync_ground_loot,

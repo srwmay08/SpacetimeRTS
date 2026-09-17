@@ -107,6 +107,8 @@ pub fn context_aware_action_dispatcher(
     mut selection_state: ResMut<SelectionState>,
     conn: Res<SpacetimeConnection>,
     tick: Res<ClientTick>,
+    mut meshes: ResMut<Assets<Mesh>>, // Architectural Note: Extracted for local visual hit prediction.
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let multi_select = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
 
@@ -124,41 +126,52 @@ pub fn context_aware_action_dispatcher(
                                 let hit = spatial_query.cast_ray(
                                     origin,
                                     dir.into(),
-                                    6.0,
+                                    50.0, // Architectural Note: Extended raycast range to support long-distance weapon prediction.
                                     true,
                                     SpatialQueryFilter::default(),
                                 );
 
-                                if let Some(hit_data) = hit {
-                                    let hit_entity = hit_data.entity;
+                                // Architectural Note: Evaluates context immediately. If pointing at a building
+                                // or resource within melee range, we swing the tool. If pointing at empty space,
+                                // terrain, or a player, we predict the weapon tracer and dispatch the hitscan RPC.
+                                let is_tool_context = hit.map_or(false, |hit_data| {
+                                    hit_data.time_of_impact < 6.0 && 
+                                    (queries.node.contains(hit_data.entity) || queries.structure.contains(hit_data.entity))
+                                });
 
-                                    if queries.node.contains(hit_entity) {
-                                        info!("Context Target: Resource Node. Invoking swing_tool.");
-                                        let _ = conn.db.reducers.swing_tool(
-                                            origin.x, origin.y, origin.z, 
-                                            dir.x, dir.y, dir.z
-                                        );
-                                    } else if queries.player.contains(hit_entity) {
-                                        info!("Context Target: Character/Player. Invoking fire_weapon.");
-                                        let _ = conn.db.reducers.fire_weapon(
-                                            tick.0, 
-                                            origin.x, origin.y, origin.z, 
-                                            dir.x, dir.y, dir.z
-                                        );
-                                    } else if queries.structure.contains(hit_entity) {
-                                        info!("Context Target: Structure. Invoking swing_tool.");
-                                        let _ = conn.db.reducers.swing_tool(
-                                            origin.x, origin.y, origin.z, 
-                                            dir.x, dir.y, dir.z
-                                        );
-                                    } else {
-                                        let _ = conn.db.reducers.swing_tool(
-                                            origin.x, origin.y, origin.z, 
-                                            dir.x, dir.y, dir.z
-                                        );
-                                    }
-                                } else {
+                                if is_tool_context {
+                                    info!("Context Target: Resource Node / Structure. Invoking swing_tool.");
                                     let _ = conn.db.reducers.swing_tool(
+                                        origin.x, origin.y, origin.z, 
+                                        dir.x, dir.y, dir.z
+                                    );
+                                } else {
+                                    info!("Context Target: Enemy / Terrain. Invoking fire_weapon with prediction.");
+                                    
+                                    // 1. Client-Side Instantaneous Tracer Prediction
+                                    let distance = hit.map_or(50.0, |h| h.time_of_impact);
+                                    let mid_point = origin + dir * (distance / 2.0);
+                                    let mut tracer_transform = BevyTransform::from_translation(mid_point)
+                                        .looking_at(origin + dir * distance, Vec3::Y);
+                                    tracer_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+                                    
+                                    commands.spawn((
+                                        PbrBundle {
+                                            mesh: meshes.add(Cylinder::new(0.02, distance)),
+                                            material: materials.add(StandardMaterial {
+                                                base_color: Color::srgb(1.0, 0.9, 0.5),
+                                                unlit: true,
+                                                ..default()
+                                            }),
+                                            transform: tracer_transform,
+                                            ..default()
+                                        },
+                                        Particle { timer: Timer::from_seconds(0.05, TimerMode::Once) },
+                                    ));
+
+                                    // 2. Dispatch Authoritative RPC for Server Rewind Protocol
+                                    let _ = conn.db.reducers.fire_weapon(
+                                        tick.0, 
                                         origin.x, origin.y, origin.z, 
                                         dir.x, dir.y, dir.z
                                     );
