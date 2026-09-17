@@ -1,4 +1,5 @@
 use bevy::prelude::{Transform as BevyTransform, *};
+use bevy::ecs::system::SystemParam; // Architectural Note: Required derive macro trait import for SystemParam structs.
 use bevy::window::PrimaryWindow;
 use avian3d::prelude::*;
 use tracing::info;
@@ -41,6 +42,23 @@ pub struct ActionEvent {
 }
 
 // ----------------------------------------------------------------------------
+// SYSTEM PARAM BUNDLING (Architectural Fix for Bevy Parameter Limits)
+// ----------------------------------------------------------------------------
+
+/// Bundles world interaction queries to keep system parameter counts within Bevy limits.
+#[derive(SystemParam)]
+pub struct ActionContextQueries<'w, 's> {
+    pub fps_camera: Query<'w, 's, &'static GlobalTransform, With<FpsCamera>>,
+    pub player: Query<'w, 's, (Entity, &'static BevyTransform), With<PlayerBody>>,
+    pub loot: Query<'w, 's, &'static GroundLootItem>,
+    pub node: Query<'w, 's, &'static ResourceNodeItem>,
+    pub structure: Query<'w, 's, &'static NetworkStructure>,
+    pub rts_camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<RtsCameraChild>>,
+    pub selectable: Query<'w, 's, (Entity, &'static BevyTransform), With<Selectable>>,
+    pub selected: Query<'w, 's, Entity, With<Selected>>,
+}
+
+// ----------------------------------------------------------------------------
 // INPUT ROUTING
 // ----------------------------------------------------------------------------
 
@@ -77,25 +95,15 @@ pub fn input_router_system(
 // ----------------------------------------------------------------------------
 
 /// Consumes `ActionEvent`s and applies context-aware logic depending on active targets and camera mode.
-/// Architectural Note: Performs raycast target inspection in FPS mode to dynamically route 
-/// player intent between resource harvesting (`swing_tool`) and combat (`fire_weapon`).
+/// Architectural Note: Utilizes bundled `ActionContextQueries` to bypass Bevy system parameter limits.
 pub fn context_aware_action_dispatcher(
     mut commands: Commands,
     mut action_events: EventReader<ActionEvent>,
     camera_mode: Res<State<CameraMode>>,
     keys: Res<ButtonInput<KeyCode>>,
-    
     mut swing_state: ResMut<SwingState>,
-    fps_camera_query: Query<&GlobalTransform, With<FpsCamera>>,
-    player_query: Query<(Entity, &BevyTransform), With<PlayerBody>>,
-    loot_query: Query<&GroundLootItem>,
-    node_query: Query<&ResourceNodeItem>, // Architectural Note: Identifies trees, rocks, and bushes.
-    structure_query: Query<&NetworkStructure>, // Architectural Note: Identifies player-built structures.
-    
-    rts_camera_query: Query<(&Camera, &GlobalTransform), With<RtsCameraChild>>,
+    queries: ActionContextQueries,
     spatial_query: SpatialQuery,
-    selected_query: Query<Entity, With<Selected>>,
-    selectable_query: Query<(Entity, &BevyTransform), With<Selectable>>,
     mut selection_state: ResMut<SelectionState>,
     conn: Res<SpacetimeConnection>,
     tick: Res<ClientTick>,
@@ -109,11 +117,10 @@ pub fn context_aware_action_dispatcher(
                     VirtualAction::Primary if event.state == ActionState::JustPressed => {
                         if !swing_state.is_swinging {
                             swing_state.is_swinging = true;
-                            if let Ok(cam_transform) = fps_camera_query.get_single() {
+                            if let Ok(cam_transform) = queries.fps_camera.get_single() {
                                 let origin = cam_transform.translation();
                                 let dir = cam_transform.forward();
                                 
-                                // Perform a raycast to inspect what the player is targeting within range (e.g., 6.0 units)
                                 let hit = spatial_query.cast_ray(
                                     origin,
                                     dir.into(),
@@ -125,41 +132,32 @@ pub fn context_aware_action_dispatcher(
                                 if let Some(hit_data) = hit {
                                     let hit_entity = hit_data.entity;
 
-                                    // 1. Target is a Resource Node (Tree, Rock, Bush) -> Gather / Swing Tool
-                                    if node_query.contains(hit_entity) {
+                                    if queries.node.contains(hit_entity) {
                                         info!("Context Target: Resource Node. Invoking swing_tool.");
                                         let _ = conn.db.reducers.swing_tool(
                                             origin.x, origin.y, origin.z, 
                                             dir.x, dir.y, dir.z
                                         );
-                                    } 
-                                    // 2. Target is a Player or NPC Character -> Combat / Fire Weapon
-                                    else if player_query.contains(hit_entity) {
+                                    } else if queries.player.contains(hit_entity) {
                                         info!("Context Target: Character/Player. Invoking fire_weapon.");
                                         let _ = conn.db.reducers.fire_weapon(
                                             tick.0, 
                                             origin.x, origin.y, origin.z, 
                                             dir.x, dir.y, dir.z
                                         );
-                                    }
-                                    // 3. Target is a Structure -> Future hook for repair or inspection
-                                    else if structure_query.contains(hit_entity) {
-                                        info!("Context Target: Structure. (Interaction hook available)");
-                                        // Optional: dispatch structure interaction or default swing
+                                    } else if queries.structure.contains(hit_entity) {
+                                        info!("Context Target: Structure. Invoking swing_tool.");
                                         let _ = conn.db.reducers.swing_tool(
                                             origin.x, origin.y, origin.z, 
                                             dir.x, dir.y, dir.z
                                         );
-                                    } 
-                                    // 4. Default fallback for terrain or unclassified objects
-                                    else {
+                                    } else {
                                         let _ = conn.db.reducers.swing_tool(
                                             origin.x, origin.y, origin.z, 
                                             dir.x, dir.y, dir.z
                                         );
                                     }
                                 } else {
-                                    // Hit nothing in range -> Default tool swing / empty attack
                                     let _ = conn.db.reducers.swing_tool(
                                         origin.x, origin.y, origin.z, 
                                         dir.x, dir.y, dir.z
@@ -169,7 +167,7 @@ pub fn context_aware_action_dispatcher(
                         }
                     }
                     VirtualAction::Interact if event.state == ActionState::JustPressed => {
-                        if let Ok((player_entity, player_transform)) = player_query.get_single() {
+                        if let Ok((player_entity, player_transform)) = queries.player.get_single() {
                             let intersections = spatial_query.shape_intersections(
                                 &Collider::sphere(3.5), 
                                 player_transform.translation, 
@@ -178,7 +176,7 @@ pub fn context_aware_action_dispatcher(
                             );
                             
                             for entity in intersections {
-                                if let Ok(loot) = loot_query.get(entity) {
+                                if let Ok(loot) = queries.loot.get(entity) {
                                     let _ = conn.db.reducers.gather_loot(loot.loot_id);
                                     break;
                                 }
@@ -192,7 +190,7 @@ pub fn context_aware_action_dispatcher(
                 match event.action {
                     VirtualAction::Primary => {
                         let Some(cursor_pos) = event.cursor_pos else { continue; };
-                        let Ok((camera, cam_transform)) = rts_camera_query.get_single() else { continue; };
+                        let Ok((camera, cam_transform)) = queries.rts_camera.get_single() else { continue; };
                         
                         match event.state {
                             ActionState::JustPressed => {
@@ -201,7 +199,7 @@ pub fn context_aware_action_dispatcher(
                                 selection_state.end_pos = Some(cursor_pos);
 
                                 if !multi_select {
-                                    for entity in selected_query.iter() {
+                                    for entity in queries.selected.iter() {
                                         commands.entity(entity).remove::<Selected>();
                                     }
                                 }
@@ -225,13 +223,13 @@ pub fn context_aware_action_dispatcher(
                                             true,
                                             SpatialQueryFilter::from_mask([GameLayer::Unit, GameLayer::Terrain, GameLayer::Environment]),
                                         ) {
-                                            if selectable_query.contains(hit.entity) {
+                                            if queries.selectable.contains(hit.entity) {
                                                 commands.entity(hit.entity).insert(Selected);
                                             } else {
                                                 let hit_point = ray.origin + ray.direction * hit.time_of_impact;
                                                 info!("RTS Target Acquired: Issuing NavMesh pathfinding move command to {}.", hit_point);
                                                 
-                                                for selected_entity in selected_query.iter() {
+                                                for selected_entity in queries.selected.iter() {
                                                     commands.entity(selected_entity).insert(NavTarget(hit_point));
                                                 }
                                             }
@@ -243,7 +241,7 @@ pub fn context_aware_action_dispatcher(
                                     let min_y = start.y.min(cursor_pos.y);
                                     let max_y = start.y.max(cursor_pos.y);
 
-                                    for (entity, transform) in selectable_query.iter() {
+                                    for (entity, transform) in queries.selectable.iter() {
                                         if let Some(screen_pos) = camera.world_to_viewport(cam_transform, transform.translation) {
                                             if screen_pos.x >= min_x && screen_pos.x <= max_x && screen_pos.y >= min_y && screen_pos.y <= max_y {
                                                 commands.entity(entity).insert(Selected);

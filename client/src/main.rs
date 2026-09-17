@@ -47,17 +47,18 @@ fn main() {
         .add_systems(OnEnter(CameraMode::FPS), enable_fps_perspective)
         .add_systems(OnEnter(CameraMode::RTS), enable_rts_perspective)
 
-        // Architectural Note: Grouped update systems into distinct tuples to prevent Bevy 
-        // macro trait bound limits on single massive tuple lists.
         .add_systems(Update, (
             track_telemetry_metrics,
             toggle_perspective,
             input_router_system, 
-            context_aware_action_dispatcher, 
             rts_navmesh_movement_system, 
             player_movement_system,
-            update_infinite_terrain_chunks,
         ).run_if(in_state(GameState::InGame)))
+
+        // Architectural Note: Registered complex and high-parameter systems individually 
+        // to bypass Bevy's internal system configuration tuple size limitations.
+        .add_systems(Update, context_aware_action_dispatcher.run_if(in_state(GameState::InGame)))
+        .add_systems(Update, update_infinite_terrain_chunks.run_if(in_state(GameState::InGame)))
 
         .add_systems(Update, (
             send_movement_input, 
