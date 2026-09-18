@@ -10,7 +10,7 @@ use tracing::{error, info, warn};
 use spacetimedb_sdk::{DbContext, Table}; 
 
 use crate::module_bindings::{self, *};
-use crate::module_bindings::peasant_table::PeasantTableAccess; // Architectural Note: Explicitly imported accessor to route unit spawning logic.
+use crate::module_bindings::peasant_table::PeasantTableAccess; 
 use crate::core::*;
 use crate::components::*;
 
@@ -30,51 +30,69 @@ pub fn init_network_connection(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Architectural Note: Replaced the hardcoded localhost URI with an environment variable 
-    // to seamlessly support both local development and remote multiplayer playtests without recompiling.
     let uri = std::env::var("SPACETIMEDB_URI").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    
     info!("Initializing SpacetimeDB connection to URI: {}", uri);
 
-    let mut builder = module_bindings::DbConnection::builder()
-        .with_uri(uri.as_str())
-        .with_database_name(DB_NAME);
+    // Architectural Helper: Encapsulates connection logic to allow seamless retries.
+    let try_connect = |token: Option<String>| {
+        let mut builder = module_bindings::DbConnection::builder()
+            .with_uri(uri.as_str())
+            .with_database_name(DB_NAME);
 
-    if let Ok(token) = std::fs::read_to_string("stdb_token.txt") { 
-        builder = builder.with_token(Some(token)); 
+        if let Some(t) = token {
+            builder = builder.with_token(Some(t));
+        }
+
+        let identity_store = Arc::new(Mutex::new(None));
+        let store_clone = Arc::clone(&identity_store);
+
+        let build_result = builder.on_connect(move |conn, identity, token| {
+            if let Err(e) = std::fs::write("stdb_token.txt", token.to_string()) {
+                warn!("Failed to persist SpacetimeDB token to disk: {}", e);
+            }
+            info!("Authenticated to SpacetimeDB with Identity: {}", identity.to_hex());
+            
+            let _handle = conn.subscription_builder().subscribe(vec![
+                "SELECT * FROM player".to_string(),
+                "SELECT * FROM transform WHERE chunk_x >= -1 AND chunk_x <= 1 AND chunk_z >= -1 AND chunk_z <= 1".to_string(),
+                "SELECT * FROM inventory".to_string(),
+                "SELECT * FROM resource_node".to_string(),
+                "SELECT * FROM combat_event".to_string(),
+                "SELECT * FROM structure".to_string(),
+                "SELECT * FROM peasant".to_string(), 
+            ]);
+
+            if let Ok(mut guard) = store_clone.lock() {
+                *guard = Some(identity.clone());
+            }
+        }).build();
+
+        (build_result, identity_store)
+    };
+
+    let token = std::fs::read_to_string("stdb_token.txt").ok();
+    let (mut build_result, mut identity_store) = try_connect(token.clone());
+
+    // Architectural Note: Stale Token Recovery
+    // If the server rejects the connection (401 Unauthorized), the local token is invalid 
+    // for this specific remote host. We automatically delete the stale token and retry to sync a new identity.
+    if let Err(ref e) = build_result {
+        if token.is_some() {
+            warn!("Connection rejected (Error: {}). Deleting potentially stale stdb_token.txt and retrying...", e);
+            let _ = std::fs::remove_file("stdb_token.txt");
+            let retry = try_connect(None);
+            build_result = retry.0;
+            identity_store = retry.1;
+        }
     }
-
-    let identity_store = Arc::new(Mutex::new(None));
-    let store_clone = Arc::clone(&identity_store);
-
-    let build_result = builder.on_connect(move |conn, identity, token| {
-        if let Err(e) = std::fs::write("stdb_token.txt", token.to_string()) {
-            warn!("Failed to persist SpacetimeDB token to disk: {}", e);
-        }
-        
-        info!("Authenticated to SpacetimeDB with Identity: {}", identity.to_hex());
-        
-        let _handle = conn.subscription_builder().subscribe(vec![
-            "SELECT * FROM player".to_string(),
-            "SELECT * FROM transform WHERE chunk_x >= -1 AND chunk_x <= 1 AND chunk_z >= -1 AND chunk_z <= 1".to_string(),
-            "SELECT * FROM inventory".to_string(),
-            "SELECT * FROM resource_node".to_string(),
-            "SELECT * FROM combat_event".to_string(),
-            "SELECT * FROM structure".to_string(),
-            "SELECT * FROM peasant".to_string(), // Architectural Note: Broadcast macro-AI FSM definitions.
-        ]);
-
-        match store_clone.lock() {
-            Ok(mut guard) => { *guard = Some(identity.clone()); },
-            Err(_) => { error!("Identity store lock poisoned during connection callback."); }
-        }
-    }).build();
 
     let db = match build_result {
         Ok(db) => db,
         Err(e) => {
-            error!("Failed to construct SpacetimeDB connection: {}", e);
-            return;
+            error!("FATAL: Could not connect to SpacetimeDB: {}", e);
+            // Architectural Note: Halts execution cleanly to prevent cascading ECS panics
+            // caused by missing SpacetimeConnection/IdentityStore resources.
+            std::process::exit(1); 
         }
     };
 
@@ -287,8 +305,6 @@ pub fn sync_transforms(
 
     let mut spawned_ids = std::collections::HashSet::with_capacity(query.iter().len());
 
-    // Architectural Note: Network Garbage Collection.
-    // If the DB drops an entity (e.g. killed peasant), gracefully despawn the Bevy mesh instantly.
     for (entity, net_entity, mut log_pos, _) in query.iter_mut() {
         spawned_ids.insert(net_entity.0);
         if let Some(db_t) = db_transforms_map.get(&net_entity.0) {
@@ -310,7 +326,6 @@ pub fn sync_transforms(
         }
         
         if !spawned_ids.contains(&id) {
-            // Architectural Note: Determines the correct client-side archetype for the spawned network entity.
             let is_peasant = conn.db.db.peasant().entity_id().find(&id).is_some();
             
             if is_peasant {
