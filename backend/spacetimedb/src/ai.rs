@@ -3,6 +3,7 @@ use crate::movement::{transform, player_session, Transform};
 use crate::inventory; 
 use crate::resource_node;
 use crate::respawn_bush_timer; 
+use crate::building::{structure, Structure}; // Architectural Note: Imported to expose custom player-built obstacle data to the AI.
 
 #[derive(SpacetimeType, Clone, Debug, PartialEq)]
 pub struct Position {
@@ -221,9 +222,6 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                         let dist_sq = dx * dx + dz * dz;
                         
                         if dist_sq < 16.0 { 
-                            // Architectural Note: Throttled Action Cooldown.
-                            // We repurpose the stuck counter to enforce a strict 1-second (10 ticks) attack speed.
-                            // This eliminates the 10Hz DB mutation packet storm that previously trapped the SpacetimeDB instance.
                             if peasant.consecutive_stuck_ticks >= 10 {
                                 peasant.consecutive_stuck_ticks = 0;
 
@@ -304,7 +302,6 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                 }
             }
             AiState::Deposit(stockpile_id) => {
-                // Architectural Note: Throttled Action Cooldown on deposits.
                 if peasant.consecutive_stuck_ticks >= 10 {
                     peasant.consecutive_stuck_ticks = 0;
 
@@ -334,6 +331,7 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
             let mut sep_z = 0.0;
             
             if peasant.consecutive_stuck_ticks < 5 {
+                // Architectural Note: Unit Separation Field
                 for other in &all_transforms {
                     if other.entity_id == peasant.entity_id { continue; }
                     let ox = transform.x - other.x;
@@ -344,6 +342,24 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                         let odist = odist_sq.sqrt().max(0.01);
                         sep_x += (ox / odist) * (3.0 - odist);
                         sep_z += (oz / odist) * (3.0 - odist);
+                    }
+                }
+
+                // Architectural Note: Vector Field Repulsion for Structures.
+                // Prevents peasants from ghosting through custom built walls and foundations.
+                // We purposefully add a tangential component (oz, -ox) to "swirl" the agent 
+                // around corners, preventing a dead-stop stall when hitting a flat wall.
+                for s in ctx.db.structure().iter() {
+                    let ox = transform.x - s.x;
+                    let oz = transform.z - s.z;
+                    let odist_sq = ox * ox + oz * oz;
+                    
+                    if odist_sq < 10.0 && odist_sq > 0.001 {
+                        let odist = odist_sq.sqrt().max(0.01);
+                        let push = (3.16 - odist) * 2.5; 
+                        
+                        sep_x += (ox / odist) * push + (oz / odist) * (push * 0.4);
+                        sep_z += (oz / odist) * push - (ox / odist) * (push * 0.4);
                     }
                 }
             }
@@ -381,8 +397,6 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
             transform.chunk_x = (transform.x / 50.0).floor() as i32;
             transform.chunk_z = (transform.z / 50.0).floor() as i32;
         } 
-        // Architectural Note: Removed the unconstrained `else { peasant.consecutive_stuck_ticks = 0 }` block 
-        // that previously wiped the variable when standing still, allowing us to accurately track the 1-second harvest cooldown.
 
         if peasant != initial_peasant {
             ctx.db.peasant().entity_id().update(peasant);

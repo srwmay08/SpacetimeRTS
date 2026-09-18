@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use bevy::render::render_resource::PrimitiveTopology;
+use bevy::render::render_asset::RenderAssetUsages;
 use avian3d::prelude::*;
 use tracing::info;
 use spacetimedb_sdk::Table; 
@@ -32,8 +34,6 @@ impl ModularPieceType {
         }
     }
 
-    // Architectural Note: Exposed the server-authoritative material costs directly to 
-    // the UI state to prevent silent placement failures from confusing the player.
     pub fn wood_cost(&self) -> u32 {
         match self {
             Self::Foundation => 20,
@@ -54,8 +54,12 @@ impl ModularPieceType {
                 Socket { name: "West".into(), local_offset: Vec3::new(-2.0, 2.0, 0.0), local_rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), is_occupied: false },
             ],
             Self::Wall => vec![
-                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 1.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
-                Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, -1.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                // Architectural Note: Added offset Edge sockets. This fixes the Roofs "splitting" the wall
+                // by allowing 4x4 roofs to snap exactly 2.0 units outwards from the center of the thin wall profile.
+                Socket { name: "TopCenter".into(), local_offset: Vec3::new(0.0, 1.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "TopForward".into(), local_offset: Vec3::new(0.0, 1.5, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "TopBackward".into(), local_offset: Vec3::new(0.0, 1.5, 2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "BottomCenter".into(), local_offset: Vec3::new(0.0, -1.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
             Self::Floor => vec![
                 Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 0.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
@@ -64,7 +68,9 @@ impl ModularPieceType {
                 Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, 0.0, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
             Self::Ramp => vec![
-                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 2.0, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                // Architectural Note: Aligned Ramp snap points to complement the custom sloped mesh bounds.
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 1.5, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, -1.5, 2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
         }
     }
@@ -83,6 +89,44 @@ impl Default for BuildModeState {
             selected_piece: ModularPieceType::Foundation,
         }
     }
+}
+
+// ----------------------------------------------------------------------------
+// PROCEDURAL MESH GENERATION
+// ----------------------------------------------------------------------------
+
+/// Architectural Note: Dynamically generates a true wedge geometry for the Ramp piece.
+/// This prevents us from having to rely on a generic 4x4 bounding block or importing an external GLTF.
+pub fn create_ramp_mesh() -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let positions = vec![
+        [-2.0, -1.5,  2.0], [ 2.0, -1.5,  2.0], [ 2.0, -1.5, -2.0], [-2.0, -1.5, -2.0], // Bottom Face
+        [ 2.0, -1.5, -2.0], [-2.0, -1.5, -2.0], [-2.0,  1.5, -2.0], [ 2.0,  1.5, -2.0], // Back Wall Face
+        [-2.0, -1.5,  2.0], [ 2.0, -1.5,  2.0], [ 2.0,  1.5, -2.0], [-2.0,  1.5, -2.0], // Sloped Face
+        [-2.0, -1.5,  2.0], [-2.0, -1.5, -2.0], [-2.0,  1.5, -2.0],                     // Left Triangle
+        [ 2.0, -1.5,  2.0], [ 2.0, -1.5, -2.0], [ 2.0,  1.5, -2.0],                     // Right Triangle
+    ];
+    
+    let normals = vec![
+        [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0],
+        [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0],
+        [0.0, 0.8, 0.6], [0.0, 0.8, 0.6], [0.0, 0.8, 0.6], [0.0, 0.8, 0.6],
+        [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0],
+    ];
+    
+    let indices = vec![
+        0, 2, 1,  0, 3, 2,       // Bottom
+        4, 6, 5,  4, 7, 6,       // Back
+        8, 9, 10,  8, 10, 11,    // Slope
+        12, 14, 13,              // Left
+        15, 16, 17,              // Right
+    ];
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
+    mesh
 }
 
 // ----------------------------------------------------------------------------
@@ -116,9 +160,6 @@ pub fn toggle_build_mode(
         };
         info!("Selected Modular Piece: {:?}", build_state.selected_piece);
         
-        // Architectural Note: Forcibly despawn the stale hologram entity.
-        // This guarantees `update_build_hologram` runs its `else` block on the next frame 
-        // to spawn the correct geometric bounds for the newly selected structure type.
         for entity in hologram_query.iter() {
             commands.entity(entity).despawn_recursive();
         }
@@ -155,7 +196,7 @@ pub fn update_build_hologram(
             ModularPieceType::Wall => meshes.add(Cuboid::new(4.0, 3.0, 0.4)),
             ModularPieceType::Floor => meshes.add(Cuboid::new(4.0, 0.2, 4.0)),
             ModularPieceType::Roof => meshes.add(Cuboid::new(4.0, 0.2, 4.0)),
-            ModularPieceType::Ramp => meshes.add(Cuboid::new(4.0, 2.0, 4.0)),
+            ModularPieceType::Ramp => meshes.add(create_ramp_mesh()), 
         };
 
         let material = materials.add(StandardMaterial {
@@ -268,7 +309,13 @@ pub fn sync_structures(
                 "Wall" => (meshes.add(Cuboid::new(4.0, 3.0, 0.4)), Color::srgb(0.6, 0.5, 0.4), Collider::cuboid(4.0, 3.0, 0.4)),
                 "Floor" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 0.2, 4.0)),
                 "Roof" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.4, 0.3, 0.2), Collider::cuboid(4.0, 0.2, 4.0)),
-                _ => (meshes.add(Cuboid::new(4.0, 2.0, 4.0)), Color::srgb(0.5, 0.5, 0.5), Collider::cuboid(4.0, 2.0, 4.0)),
+                _ => { 
+                    // Architectural Note: Ramps utilize the dynamically generated wedge mesh 
+                    // and apply `trimesh_from_mesh` so the physics colliders match the visual slopes.
+                    let ramp_mesh = create_ramp_mesh();
+                    let col = Collider::trimesh_from_mesh(&ramp_mesh).unwrap_or_else(|| Collider::cuboid(4.0, 2.0, 4.0));
+                    (meshes.add(ramp_mesh), Color::srgb(0.5, 0.5, 0.5), col)
+                },
             };
 
             let transform = Transform::from_xyz(s.x, s.y, s.z)
