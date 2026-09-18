@@ -14,7 +14,6 @@ use crate::module_bindings::peasant_table::PeasantTableAccess; // Architectural 
 use crate::core::*;
 use crate::components::*;
 
-const SPACETIMEDB_URI: &str = "http://localhost:3000";
 const DB_NAME: &str = "hybrid-backend";
 
 #[derive(Resource)] 
@@ -31,8 +30,14 @@ pub fn init_network_connection(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // Architectural Note: Replaced the hardcoded localhost URI with an environment variable 
+    // to seamlessly support both local development and remote multiplayer playtests without recompiling.
+    let uri = std::env::var("SPACETIMEDB_URI").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    
+    info!("Initializing SpacetimeDB connection to URI: {}", uri);
+
     let mut builder = module_bindings::DbConnection::builder()
-        .with_uri(SPACETIMEDB_URI)
+        .with_uri(uri.as_str())
         .with_database_name(DB_NAME);
 
     if let Ok(token) = std::fs::read_to_string("stdb_token.txt") { 
