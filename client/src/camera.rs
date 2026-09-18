@@ -3,7 +3,6 @@ use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use tracing::info; 
 
-// Note: Assuming `module_bindings` is exposed at the crate root.
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
@@ -14,10 +13,6 @@ use crate::module_bindings::set_interior_culling_reducer::set_interior_culling;
 // PERSPECTIVE TOGGLING & CULLING
 // ----------------------------------------------------------------------------
 
-/// Architectural Note: Handles dynamic spatial partitioning (network culling) per perspective.
-/// Dispatches network event to server logging view transition and forcibly rebuilds the SpacetimeDB SQL Subscription.
-/// In FPS Mode: Streams high-frequency micro-data in a tight 50m localized radius.
-/// In RTS Mode: Expands the streaming radius to 500m to populate the macro view.
 pub fn toggle_perspective(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<CameraMode>>,
@@ -79,10 +74,6 @@ pub fn enable_rts_perspective(
     for mut cam in &mut rts_cam { cam.is_active = true; }
 }
 
-/// Architectural Note: Implements the AABB visibility trigger system.
-/// Tracks the FPS camera against BaseInteriorVolumes. When crossing the volumetric threshold,
-/// it violently culls rendering of interior entities and dispatches an RPC to dynamically
-/// suspend AI macro-pathing subscriptions over the network.
 pub fn interior_occlusion_culling_system(
     camera_query: Query<&GlobalTransform, With<FpsCamera>>,
     volume_query: Query<&BaseInteriorVolume>,
@@ -91,7 +82,6 @@ pub fn interior_occlusion_culling_system(
     conn: Res<SpacetimeConnection>,
     camera_mode: Res<State<CameraMode>>,
 ) {
-    // Only perform interior culling calculations if we are in FPS mode.
     if *camera_mode.get() != CameraMode::FPS { return; }
 
     let Ok(cam_transform) = camera_query.get_single() else { return; };
@@ -111,10 +101,8 @@ pub fn interior_occlusion_culling_system(
         culling_state.in_interior = is_inside_any;
         culling_state.needs_rebuild = true; 
 
-        // Alert backend to suspend/resume external state transmission
         let _ = conn.db.reducers.set_interior_culling(is_inside_any);
 
-        // Toggle local GPU rendering for all associated interior geometry
         for mut vis in interior_props.iter_mut() {
             *vis = if is_inside_any { Visibility::Inherited } else { Visibility::Hidden };
         }
@@ -154,8 +142,12 @@ pub fn rts_camera_controller(
     if let Some(cursor_pos) = window.cursor_position() {
         let width = window.width();
         let height = window.height();
-        let margin_x = width * 0.05;
-        let margin_y = height * 0.05;
+        
+        // Architectural Note: Reduced panning margin from a massive 5% of the screen width 
+        // to a strict 5-pixel boundary. This prevents the camera from panning accidentally 
+        // when attempting to click the action bar UI at the bottom of the screen.
+        let margin_x = 5.0;
+        let margin_y = 5.0;
 
         if cursor_pos.x < margin_x { move_dir.x -= 1.0; }
         if cursor_pos.x > width - margin_x { move_dir.x += 1.0; }
@@ -200,15 +192,28 @@ pub fn fps_look(
     }
 
     if window.cursor.grab_mode == CursorGrabMode::Locked {
+        
+        // Architectural Note: Remote Desktop Protocol (RDP) / VNC mitigation.
+        // When playing remotely, the host OS sends absolute cursor positions, which winit
+        // translates into fake MouseMotion. If the invisible OS cursor hits the physical screen edge, 
+        // MouseMotion dies, causing the "180-degree spin limit". Forcing the cursor to the 
+        // center every frame prevents the absolute coordinates from ever hitting the bounds.
+        let center_x = window.width() / 2.0;
+        let center_y = window.height() / 2.0;
+        window.set_cursor_position(Some(Vec2::new(center_x, center_y)));
+
         for event in mouse_motion.read() {
             body_transform.rotate_y(-event.delta.x * 0.002);
             
-            let (yaw, mut pitch, roll) = head_transform.rotation.to_euler(EulerRot::YXZ);
+            // Architectural Note: Replaced `to_euler` yaw/pitch/roll extraction with pure 
+            // pitch logic. Rebuilding quaternions from Euler angles can suffer from gimbal 
+            // lock and floating point flipping at steep angles. We strictly enforce local X-axis rotation.
+            let mut current_pitch = head_transform.rotation.to_euler(EulerRot::YXZ).1;
             let min_pitch = -89.0_f32.to_radians();
             let max_pitch = 89.0_f32.to_radians();
             
-            pitch = (pitch - event.delta.y * 0.002).clamp(min_pitch, max_pitch); 
-            head_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
+            current_pitch = (current_pitch - event.delta.y * 0.002).clamp(min_pitch, max_pitch); 
+            head_transform.rotation = Quat::from_rotation_x(current_pitch);
         }
     }
 }

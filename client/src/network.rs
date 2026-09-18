@@ -33,7 +33,6 @@ pub fn init_network_connection(
     let uri = std::env::var("SPACETIMEDB_URI").unwrap_or_else(|_| "http://localhost:3000".to_string());
     info!("Initializing SpacetimeDB connection to URI: {}", uri);
 
-    // Architectural Helper: Encapsulates connection logic to allow seamless retries.
     let try_connect = |token: Option<String>| {
         let mut builder = module_bindings::DbConnection::builder()
             .with_uri(uri.as_str())
@@ -73,9 +72,6 @@ pub fn init_network_connection(
     let token = std::fs::read_to_string("stdb_token.txt").ok();
     let (mut build_result, mut identity_store) = try_connect(token.clone());
 
-    // Architectural Note: Stale Token Recovery
-    // If the server rejects the connection (401 Unauthorized), the local token is invalid 
-    // for this specific remote host. We automatically delete the stale token and retry to sync a new identity.
     if let Err(ref e) = build_result {
         if token.is_some() {
             warn!("Connection rejected (Error: {}). Deleting potentially stale stdb_token.txt and retrying...", e);
@@ -90,8 +86,6 @@ pub fn init_network_connection(
         Ok(db) => db,
         Err(e) => {
             error!("FATAL: Could not connect to SpacetimeDB: {}", e);
-            // Architectural Note: Halts execution cleanly to prevent cascading ECS panics
-            // caused by missing SpacetimeConnection/IdentityStore resources.
             std::process::exit(1); 
         }
     };
@@ -276,11 +270,18 @@ pub fn sync_logical_components(
     time: Res<Time>,
     mut query: Query<(&LogicalPosition, &LogicalRotation, &mut BevyTransform), Without<PlayerBody>>
 ) {
-    let dt = time.delta_seconds() * 15.0; 
+    // Architectural Note: Replaced naive linear interpolation with frame-rate independent 
+    // exponential decay. This eliminates the "jitter" caused by clients rendering at 
+    // 60-144+ FPS while the SpacetimeDB server AI strictly ticks at 10Hz.
+    let decay_factor = 1.0 - (-15.0_f32 * time.delta_seconds()).exp(); 
+    
     for (log_pos, log_rot, mut transform) in query.iter_mut() {
-        if transform.translation.distance(log_pos.0) > 5.0 { transform.translation = log_pos.0; } 
-        else { transform.translation = transform.translation.lerp(log_pos.0, dt); }
-        transform.rotation = transform.rotation.slerp(log_rot.0, dt);
+        if transform.translation.distance(log_pos.0) > 5.0 { 
+            transform.translation = log_pos.0; 
+        } else { 
+            transform.translation = transform.translation.lerp(log_pos.0, decay_factor); 
+        }
+        transform.rotation = transform.rotation.slerp(log_rot.0, decay_factor);
     }
 }
 
