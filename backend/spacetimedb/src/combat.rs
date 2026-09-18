@@ -1,10 +1,14 @@
-use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table}; // Architectural Note: Added 'Table' trait to resolve .iter() scope error in SpacetimeDB v2.x.
-use crate::movement::player_session; // Architectural Note: v2.x requires explicitly bringing traits into scope.
-use crate::CombatEvent; // Architectural Note: Required to broadcast global damage confirmation packets.
-use crate::combat_event; // Architectural Note: Explicitly import v2.x generated table accessor trait.
+use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
+use crate::movement::player_session;
+use crate::CombatEvent;
+use crate::combat_event;
+use crate::movement::transform;
+use crate::ai::{npc_brain, pet_component};
 
-// Architectural Note: Defines a single frame of historical state for an entity.
-// We derive SpacetimeType explicitly here because it is an embedded struct, not a root table.
+// ----------------------------------------------------------------------------
+// DATA STRUCTURES
+// ----------------------------------------------------------------------------
+
 #[derive(SpacetimeType, Clone)]
 pub struct Snapshot {
     pub tick_id: u64,
@@ -13,8 +17,6 @@ pub struct Snapshot {
     pub z: f32,
 }
 
-// Architectural Note: Stores the rolling 500ms lag compensation buffer per entity.
-// The `#[table]` macro automatically derives `SpacetimeType` for root schemas.
 #[derive(Clone)]
 #[table(accessor = hitbox_history, public)]
 pub struct HitboxHistory {
@@ -32,10 +34,75 @@ pub struct Health {
     pub max: f32,
 }
 
+/// Architectural Note: Defines the fundamental alignments for the threat system.
+#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+pub enum Faction {
+    Player,
+    Villager, 
+    Wildlife, 
+    Goblin,   
+}
+
+#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+pub enum FactionStanding {
+    Ally,
+    Neutral,
+    KillOnSight,
+}
+
+#[derive(Clone)]
+#[table(accessor = faction_component, public)]
+pub struct FactionComponent {
+    #[primary_key]
+    pub entity_id: u64,
+    pub faction: Faction,
+}
+
+// ----------------------------------------------------------------------------
+// CORE LOGIC & HELPERS
+// ----------------------------------------------------------------------------
+
+/// Architectural Note: Static relationship matrix. Evaluates how Faction A feels about Faction B.
+pub fn get_standing(a: &Faction, b: &Faction) -> FactionStanding {
+    match (a, b) {
+        (Faction::Player, Faction::Villager) => FactionStanding::Neutral, 
+        (Faction::Villager, Faction::Player) => FactionStanding::Neutral,
+        (Faction::Player, Faction::Goblin) => FactionStanding::KillOnSight,
+        (Faction::Goblin, Faction::Player) => FactionStanding::KillOnSight,
+        (Faction::Goblin, Faction::Villager) => FactionStanding::KillOnSight,
+        (Faction::Villager, Faction::Goblin) => FactionStanding::KillOnSight,
+        (Faction::Villager, Faction::Wildlife) => FactionStanding::Neutral,
+        (Faction::Wildlife, Faction::Villager) => FactionStanding::Neutral,
+        (Faction::Player, Faction::Wildlife) => FactionStanding::Neutral,
+        (Faction::Wildlife, Faction::Player) => FactionStanding::Neutral,
+        _ => FactionStanding::Neutral,
+    }
+}
+
+/// Architectural Note: Centralized authoritative damage application. 
+/// Automatically handles component cleanup and entity deletion when HP reaches 0.
+pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
+    if let Some(mut hp) = ctx.db.health().entity_id().find(target_id) {
+        hp.current = (hp.current - amount).max(0.0);
+        
+        if hp.current == 0.0 {
+            ctx.db.health().entity_id().delete(target_id);
+            ctx.db.transform().entity_id().delete(target_id);
+            ctx.db.faction_component().entity_id().delete(target_id);
+            ctx.db.npc_brain().entity_id().delete(target_id);
+            ctx.db.pet_component().entity_id().delete(target_id);
+            log::info!("Entity {} reached 0 HP and was removed from the world.", target_id);
+        } else {
+            ctx.db.health().entity_id().update(hp);
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// REDUCERS
+// ----------------------------------------------------------------------------
+
 /// Evaluates a client's hitscan weapon fire event against historical hitboxes.
-/// Architectural Note: By passing the client's local tick_id, the server can rewind the 
-/// physical state of all targets to exactly where the client saw them when they fired, 
-/// eliminating perceived latency while maintaining absolute server authority over hit registration.
 #[reducer]
 pub fn fire_weapon(
     ctx: &ReducerContext, 
@@ -43,7 +110,6 @@ pub fn fire_weapon(
     origin_x: f32, origin_y: f32, origin_z: f32, 
     dir_x: f32, dir_y: f32, dir_z: f32
 ) -> Result<(), String> {
-    // Authenticate the shooter
     let session = ctx.db.player_session().identity().find(ctx.sender())
         .ok_or("Unauthorized: No active session")?;
 
@@ -53,18 +119,14 @@ pub fn fire_weapon(
 
     // 1. Lag Compensation: Rewind and Intersect
     for history in ctx.db.hitbox_history().iter() {
-        if history.entity_id == session.entity_id { continue; } // Prevent self-damage
+        if history.entity_id == session.entity_id { continue; } 
 
-        // Find the server snapshot closest to the client's reported timestamp
         let closest_snapshot = history.snapshots.iter()
             .min_by_key(|s| (s.tick_id as i64 - client_tick as i64).abs());
 
         if let Some(snap) = closest_snapshot {
-            // Basic Ray-Sphere Intersection (Hitbox radius of 0.8 units)
-            // Architectural Note: This math is highly optimized to avoid unnecessary allocations, 
-            // protecting the compute energy (TeV) economy of the SpacetimeDB instance.
             let radius = 0.8_f32;
-            let cx = snap.x; let cy = snap.y + 1.0; let cz = snap.z; // Center of mass
+            let cx = snap.x; let cy = snap.y + 1.0; let cz = snap.z; 
             
             let ocx = origin_x - cx; 
             let ocy = origin_y - cy; 
@@ -79,8 +141,6 @@ pub fn fire_weapon(
                 if dist > 0.0 && dist < closest_dist {
                     closest_dist = dist;
                     hit_entity = Some(history.entity_id);
-                    // Architectural Note: Calculate the exact 3D coordinate of the impact
-                    // for the global damage confirmation packet.
                     hit_location = (
                         origin_x + dir_x * dist,
                         origin_y + dir_y * dist,
@@ -93,27 +153,17 @@ pub fn fire_weapon(
 
     // 2. Authoritative Damage Application & Global Sync
     if let Some(target_id) = hit_entity {
-        if let Some(mut hp) = ctx.db.health().entity_id().find(target_id) {
-            hp.current = (hp.current - 20.0).max(0.0);
-            ctx.db.health().entity_id().update(hp.clone());
-            
-            // Architectural Note: Push the damage confirmation packet to the global CombatEvent table.
-            // This transactionally guarantees that if the health bar updates for the RTS view, 
-            // the micro-engagement view will simultaneously render the blood splatter/impact.
-            ctx.db.combat_event().insert(CombatEvent {
-                id: 0,
-                event_type: "HitPlayer".to_string(),
-                x: hit_location.0,
-                y: hit_location.1,
-                z: hit_location.2,
-            });
-            
-            log::info!("Hit validated via Lag Compensation! Entity {} shot entity {}. HP remaining: {}", session.entity_id, target_id, hp.current);
-        }
-    } else {
-        // Architectural Note: We purposely do NOT insert a CombatEvent on a miss.
-        // The client relies on its own immediate prediction to render the tracer, keeping
-        // server TeV costs completely minimal during suppression fire.
+        apply_damage(ctx, target_id, 20.0);
+        
+        ctx.db.combat_event().insert(CombatEvent {
+            id: 0,
+            event_type: "HitPlayer".to_string(),
+            x: hit_location.0,
+            y: hit_location.1,
+            z: hit_location.2,
+        });
+        
+        log::info!("Hit validated via Lag Compensation! Entity {} shot entity {}.", session.entity_id, target_id);
     }
 
     Ok(())

@@ -8,7 +8,7 @@ pub mod building;
 pub mod ai; 
 
 use crate::movement::{transform, player_session};
-use crate::combat::{health, hitbox_history};
+use crate::combat::{health, hitbox_history, faction_component, Faction};
 
 #[table(accessor = high_frequency_timer, scheduled(high_frequency_tick))]
 #[derive(Clone)]
@@ -159,6 +159,9 @@ pub fn high_frequency_tick(_ctx: &ReducerContext, _timer: HighFrequencyTimer) {}
 #[reducer]
 pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
     crate::ai::process_ai_tick(ctx);
+    // Architectural Note: Evaluating macro-AI states (Threat, Fleeing, Roaming) 
+    // at a 10Hz tick preserves tremendous TeV compute overhead vs processing them per-frame.
+    crate::ai::process_npc_brain_tick(ctx, 0.1); 
 }
 
 #[spacetimedb::reducer(client_connected)]
@@ -231,6 +234,10 @@ pub fn client_connected(ctx: &ReducerContext) {
             entity_id, current: 100.0, max: 100.0,
         });
         
+        ctx.db.faction_component().insert(combat::FactionComponent {
+            entity_id, faction: Faction::Player,
+        });
+
         ctx.db.hitbox_history().insert(combat::HitboxHistory {
             entity_id, snapshots: Vec::new(),
         });
@@ -404,9 +411,6 @@ pub fn get_terrain_height(x: f32, z: f32) -> f32 {
         + noise_elevation.get([nx * 4.0, nz * 4.0]) * 0.1;
     
     elevation = (elevation + 1.0) * 0.5;
-    
-    // Architectural Note: Critical safety clamp. Ensures fractional exponents 
-    // never attempt to process negative bases, avoiding NaN propagation and subsequent WASM traps.
     elevation = elevation.max(0.001);
     
     let mut y = (elevation.powf(1.4)) as f32 * base_height_amp;

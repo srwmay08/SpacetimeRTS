@@ -3,7 +3,12 @@ use crate::movement::{transform, player_session, Transform};
 use crate::inventory; 
 use crate::resource_node;
 use crate::respawn_bush_timer; 
-use crate::building::{structure, Structure}; // Architectural Note: Imported to expose custom player-built obstacle data to the AI.
+use crate::building::{structure, Structure}; 
+use crate::combat::{health, faction_component, Faction, FactionStanding, get_standing};
+
+// ----------------------------------------------------------------------------
+// PEASANT AI STRUCTURES
+// ----------------------------------------------------------------------------
 
 #[derive(SpacetimeType, Clone, Debug, PartialEq)]
 pub struct Position {
@@ -35,6 +40,68 @@ pub struct Peasant {
     pub consecutive_stuck_ticks: u32,
     pub auto_gather_type: String, 
 }
+
+// ----------------------------------------------------------------------------
+// THREAT NPC & PET STRUCTURES
+// ----------------------------------------------------------------------------
+
+#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+pub enum AiType { Friendly, Deer, Boar, Goblin, Peasant }
+
+#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+pub enum BrainState { Idle, Fleeing, Chasing, Attacking, Warning }
+
+#[table(accessor = npc_brain, public)]
+#[derive(Clone, PartialEq)]
+pub struct NpcBrain {
+    #[primary_key]
+    pub entity_id: u64,
+    pub ai_type: AiType,
+    pub state: BrainState,
+    pub target_id: Option<u64>,
+    pub timer: f32, 
+}
+
+#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+pub enum PetStance { Stay, Follow, Aggressive, Defensive }
+
+#[table(accessor = pet_component, public)]
+#[derive(Clone, PartialEq)]
+pub struct PetComponent {
+    #[primary_key]
+    pub entity_id: u64,
+    pub owner_id: u64, 
+    pub stance: PetStance,
+}
+
+// ----------------------------------------------------------------------------
+// PET COMMAND REDUCERS
+// ----------------------------------------------------------------------------
+
+/// Architectural Note: Invoked by the client's Radial Menu. Validates ownership 
+/// strictly against the connection identity before updating the Pet's posture.
+#[reducer]
+pub fn change_pet_stance(ctx: &ReducerContext, pet_entity_id: u64, new_stance: PetStance) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or("Unauthorized: No active session")?;
+        
+    let mut pet = ctx.db.pet_component().entity_id().find(pet_entity_id)
+        .ok_or("Pet not found")?;
+    
+    if pet.owner_id != session.entity_id {
+        return Err("Not your pet".to_string());
+    }
+
+    pet.stance = new_stance;
+    ctx.db.pet_component().entity_id().update(pet);
+    
+    log::info!("Player {} updated Pet {} stance.", session.entity_id, pet_entity_id);
+    Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// PEASANT COMMAND REDUCERS
+// ----------------------------------------------------------------------------
 
 #[reducer]
 pub fn spawn_peasant(ctx: &ReducerContext) -> Result<(), String> {
@@ -99,8 +166,6 @@ pub fn command_peasant(
         return Err("Unauthorized: You do not own this unit.".into());
     }
 
-    log::info!("COMMAND ACCEPTED: Peasant {} assigned to Task: [{}]", peasant_entity_id, command_type);
-
     peasant.state = match command_type.as_str() {
         "MoveTo" => { 
             peasant.auto_gather_type = "None".to_string(); 
@@ -117,22 +182,10 @@ pub fn command_peasant(
             peasant.last_harvest_target = None;
             AiState::Return(session.entity_id) 
         },
-        "AutoTree" => { 
-            peasant.auto_gather_type = "Tree".to_string(); 
-            AiState::AutoGather("Tree".to_string()) 
-        },
-        "AutoRock" => { 
-            peasant.auto_gather_type = "Rock".to_string(); 
-            AiState::AutoGather("Rock".to_string()) 
-        },
-        "AutoBush" => { 
-            peasant.auto_gather_type = "Bush".to_string(); 
-            AiState::AutoGather("Bush".to_string()) 
-        },
-        "AutoAll"  => { 
-            peasant.auto_gather_type = "All".to_string(); 
-            AiState::AutoGather("All".to_string()) 
-        },
+        "AutoTree" => { peasant.auto_gather_type = "Tree".to_string(); AiState::AutoGather("Tree".to_string()) },
+        "AutoRock" => { peasant.auto_gather_type = "Rock".to_string(); AiState::AutoGather("Rock".to_string()) },
+        "AutoBush" => { peasant.auto_gather_type = "Bush".to_string(); AiState::AutoGather("Bush".to_string()) },
+        "AutoAll"  => { peasant.auto_gather_type = "All".to_string(); AiState::AutoGather("All".to_string()) },
         "Idle" | _ => { 
             peasant.auto_gather_type = "None".to_string(); 
             peasant.last_harvest_target = None;
@@ -142,6 +195,132 @@ pub fn command_peasant(
 
     ctx.db.peasant().entity_id().update(peasant);
     Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// SERVER TICK ROUTINES
+// ----------------------------------------------------------------------------
+
+/// Evaluates state machines for environmental threat mobs and NPCs.
+pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
+    let brains: Vec<NpcBrain> = ctx.db.npc_brain().iter().collect();
+    let all_transforms: Vec<Transform> = ctx.db.transform().iter().collect();
+    let all_factions: Vec<crate::combat::FactionComponent> = ctx.db.faction_component().iter().collect();
+
+    for mut brain in brains {
+        let initial_brain = brain.clone();
+        
+        let Some(transform) = ctx.db.transform().entity_id().find(brain.entity_id) else { continue; };
+        let hp = ctx.db.health().entity_id().find(brain.entity_id);
+        let my_faction = ctx.db.faction_component().entity_id().find(brain.entity_id)
+            .map(|f| f.faction)
+            .unwrap_or(Faction::Wildlife);
+
+        match brain.ai_type {
+            AiType::Friendly => {
+                if let Some(h) = hp {
+                    if h.current < h.max * 0.8 && brain.state != BrainState::Attacking {
+                        brain.state = BrainState::Attacking;
+                        // Architectural Note: Naive aggro - targets nearest entity. 
+                        // In production, you'd use a threat table generated by CombatEvents.
+                        let mut nearest = None;
+                        let mut min_d = f32::MAX;
+                        for t in &all_transforms {
+                            if t.entity_id == brain.entity_id { continue; }
+                            let dist = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
+                            if dist < min_d { min_d = dist; nearest = Some(t.entity_id); }
+                        }
+                        brain.target_id = nearest;
+                    }
+                }
+            }
+            AiType::Deer => {
+                if let Some(h) = hp {
+                    if h.current < h.max && brain.state != BrainState::Fleeing {
+                        brain.state = BrainState::Fleeing;
+                    }
+                }
+            }
+            AiType::Boar => {
+                let mut found_threat = false;
+                for t in &all_transforms {
+                    if t.entity_id == brain.entity_id { continue; }
+                    let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
+                    if dist_sq <= 100.0 { // 10 meter radius (squared)
+                        if let Some(other_faction) = all_factions.iter().find(|f| f.entity_id == t.entity_id) {
+                            if other_faction.faction == Faction::Player || other_faction.faction == Faction::Villager {
+                                found_threat = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if found_threat {
+                    if brain.state == BrainState::Idle {
+                        brain.state = BrainState::Warning;
+                        brain.timer = 0.0;
+                    } else if brain.state == BrainState::Warning {
+                        brain.timer += dt;
+                        if brain.timer > 3.0 {
+                            brain.state = BrainState::Attacking;
+                        }
+                    }
+                } else {
+                    brain.state = BrainState::Idle;
+                    brain.timer = 0.0;
+                }
+            }
+            AiType::Goblin => {
+                if brain.state == BrainState::Idle {
+                    let mut found_target = None;
+                    for t in &all_transforms {
+                        if t.entity_id == brain.entity_id { continue; }
+                        let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
+                        if dist_sq <= 400.0 { // 20m radius
+                            if let Some(other_faction) = all_factions.iter().find(|f| f.entity_id == t.entity_id) {
+                                if other_faction.faction == Faction::Player || other_faction.faction == Faction::Villager {
+                                    found_target = Some(t.entity_id);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(target) = found_target {
+                        brain.state = BrainState::Chasing;
+                        brain.target_id = Some(target);
+                    }
+                }
+            }
+            AiType::Peasant => {
+                let mut danger = false;
+                for other_brain in ctx.db.npc_brain().iter() {
+                    if other_brain.entity_id == brain.entity_id { continue; }
+                    let is_attacking = other_brain.state == BrainState::Attacking;
+                    let is_goblin = other_brain.ai_type == AiType::Goblin;
+                    
+                    if is_attacking || is_goblin {
+                        if let Some(t) = ctx.db.transform().entity_id().find(other_brain.entity_id) {
+                            let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
+                            if dist_sq < 400.0 {
+                                danger = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if danger && brain.state != BrainState::Fleeing {
+                    brain.state = BrainState::Fleeing;
+                } else if !danger && brain.state == BrainState::Fleeing {
+                    brain.state = BrainState::Idle;
+                }
+            }
+        }
+
+        if brain != initial_brain {
+            ctx.db.npc_brain().entity_id().update(brain);
+        }
+    }
 }
 
 pub fn process_ai_tick(ctx: &ReducerContext) {
@@ -331,7 +510,6 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
             let mut sep_z = 0.0;
             
             if peasant.consecutive_stuck_ticks < 5 {
-                // Architectural Note: Unit Separation Field
                 for other in &all_transforms {
                     if other.entity_id == peasant.entity_id { continue; }
                     let ox = transform.x - other.x;
@@ -345,10 +523,6 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                     }
                 }
 
-                // Architectural Note: Vector Field Repulsion for Structures.
-                // Prevents peasants from ghosting through custom built walls and foundations.
-                // We purposefully add a tangential component (oz, -ox) to "swirl" the agent 
-                // around corners, preventing a dead-stop stall when hitting a flat wall.
                 for s in ctx.db.structure().iter() {
                     let ox = transform.x - s.x;
                     let oz = transform.z - s.z;
