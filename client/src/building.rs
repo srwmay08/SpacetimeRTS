@@ -54,8 +54,6 @@ impl ModularPieceType {
                 Socket { name: "West".into(), local_offset: Vec3::new(-2.0, 2.0, 0.0), local_rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), is_occupied: false },
             ],
             Self::Wall => vec![
-                // Architectural Note: Added offset Edge sockets. This fixes the Roofs "splitting" the wall
-                // by allowing 4x4 roofs to snap exactly 2.0 units outwards from the center of the thin wall profile.
                 Socket { name: "TopCenter".into(), local_offset: Vec3::new(0.0, 1.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
                 Socket { name: "TopForward".into(), local_offset: Vec3::new(0.0, 1.5, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
                 Socket { name: "TopBackward".into(), local_offset: Vec3::new(0.0, 1.5, 2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
@@ -68,7 +66,6 @@ impl ModularPieceType {
                 Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, 0.0, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
             Self::Ramp => vec![
-                // Architectural Note: Aligned Ramp snap points to complement the custom sloped mesh bounds.
                 Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 1.5, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
                 Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, -1.5, 2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
@@ -80,6 +77,7 @@ impl ModularPieceType {
 pub struct BuildModeState {
     pub is_active: bool,
     pub selected_piece: ModularPieceType,
+    pub rotation_steps: u8, // Architectural Note: Tracks manual 90-degree rotations.
 }
 
 impl Default for BuildModeState {
@@ -87,6 +85,7 @@ impl Default for BuildModeState {
         Self {
             is_active: false,
             selected_piece: ModularPieceType::Foundation,
+            rotation_steps: 0,
         }
     }
 }
@@ -95,8 +94,6 @@ impl Default for BuildModeState {
 // PROCEDURAL MESH GENERATION
 // ----------------------------------------------------------------------------
 
-/// Architectural Note: Dynamically generates a true wedge geometry for the Ramp piece.
-/// This prevents us from having to rely on a generic 4x4 bounding block or importing an external GLTF.
 pub fn create_ramp_mesh() -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     let positions = vec![
@@ -150,18 +147,28 @@ pub fn toggle_build_mode(
         }
     }
 
-    if build_state.is_active && keys.just_pressed(KeyCode::KeyR) {
-        build_state.selected_piece = match build_state.selected_piece {
-            ModularPieceType::Foundation => ModularPieceType::Wall,
-            ModularPieceType::Wall => ModularPieceType::Floor,
-            ModularPieceType::Floor => ModularPieceType::Roof,
-            ModularPieceType::Roof => ModularPieceType::Ramp,
-            ModularPieceType::Ramp => ModularPieceType::Foundation,
-        };
-        info!("Selected Modular Piece: {:?}", build_state.selected_piece);
-        
-        for entity in hologram_query.iter() {
-            commands.entity(entity).despawn_recursive();
+    if build_state.is_active {
+        if keys.just_pressed(KeyCode::KeyR) {
+            build_state.selected_piece = match build_state.selected_piece {
+                ModularPieceType::Foundation => ModularPieceType::Wall,
+                ModularPieceType::Wall => ModularPieceType::Floor,
+                ModularPieceType::Floor => ModularPieceType::Roof,
+                ModularPieceType::Roof => ModularPieceType::Ramp,
+                ModularPieceType::Ramp => ModularPieceType::Foundation,
+            };
+            info!("Selected Modular Piece: {:?}", build_state.selected_piece);
+            
+            for entity in hologram_query.iter() {
+                commands.entity(entity).despawn_recursive();
+            }
+        }
+
+        // Architectural Note: Q and E allow rotating the hologram in 90-degree steps.
+        if keys.just_pressed(KeyCode::KeyQ) {
+            build_state.rotation_steps = (build_state.rotation_steps + 1) % 4;
+        }
+        if keys.just_pressed(KeyCode::KeyE) {
+            build_state.rotation_steps = (build_state.rotation_steps.wrapping_sub(1)) % 4;
         }
     }
 }
@@ -229,6 +236,9 @@ pub fn update_build_hologram(
     let mut target_parent_id = None;
     let mut snapped = false;
 
+    // Architectural Note: Calculate manual user rotation offset applied via Q/E
+    let manual_rotation_offset = Quat::from_rotation_y(build_state.rotation_steps as f32 * std::f32::consts::FRAC_PI_2);
+
     if let Some(hit) = ray_hit {
         if let Ok(net_struct) = structure_query.get(hit.entity) {
             target_parent_id = Some(net_struct.structure_id);
@@ -246,7 +256,8 @@ pub fn update_build_hologram(
                             closest_dist = dist;
                             target_transform.translation = socket_t.translation();
                             let (_, rotation, _) = socket_t.to_scale_rotation_translation();
-                            target_transform.rotation = rotation; 
+                            // Apply the manual Q/E rotation ON TOP OF the socket's defined rotation.
+                            target_transform.rotation = rotation * manual_rotation_offset; 
                             snapped = true;
                         }
                     }
@@ -263,10 +274,11 @@ pub fn update_build_hologram(
             let true_y = crate::terrain::get_terrain_height(snapped_x, snapped_z);
             
             target_transform.translation = Vec3::new(snapped_x, true_y, snapped_z);
-            target_transform.rotation = Quat::IDENTITY;
+            target_transform.rotation = Quat::IDENTITY * manual_rotation_offset;
         }
     } else {
         target_transform.translation = ray_origin + ray_dir * 5.0;
+        target_transform.rotation = Quat::IDENTITY * manual_rotation_offset;
     }
 
     if let Ok((_, mut transform)) = hologram_query.get_mut(hologram_entity) {
@@ -310,8 +322,6 @@ pub fn sync_structures(
                 "Floor" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 0.2, 4.0)),
                 "Roof" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.4, 0.3, 0.2), Collider::cuboid(4.0, 0.2, 4.0)),
                 _ => { 
-                    // Architectural Note: Ramps utilize the dynamically generated wedge mesh 
-                    // and apply `trimesh_from_mesh` so the physics colliders match the visual slopes.
                     let ramp_mesh = create_ramp_mesh();
                     let col = Collider::trimesh_from_mesh(&ramp_mesh).unwrap_or_else(|| Collider::cuboid(4.0, 2.0, 4.0));
                     (meshes.add(ramp_mesh), Color::srgb(0.5, 0.5, 0.5), col)

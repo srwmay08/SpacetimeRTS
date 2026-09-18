@@ -6,31 +6,111 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-pub mod drop_debug_loot_reducer;
-pub mod gather_loot_reducer;
-pub mod ground_loot_table;
-pub mod ground_loot_type;
-pub mod join_game_reducer;
-pub mod player_identity_table;
-pub mod player_identity_type;
+pub mod ai_state_type;
+pub mod ai_type_type;
+pub mod brain_state_type;
+pub mod change_pet_stance_reducer;
+pub mod combat_event_table;
+pub mod combat_event_type;
+pub mod command_peasant_reducer;
+pub mod destroy_structure_reducer;
+pub mod faction_component_table;
+pub mod faction_component_type;
+pub mod faction_type;
+pub mod fire_weapon_reducer;
+pub mod health_table;
+pub mod health_type;
+pub mod high_frequency_timer_type;
+pub mod hitbox_history_table;
+pub mod hitbox_history_type;
+pub mod interact_node_reducer;
+pub mod inventory_slot_type;
+pub mod inventory_table;
+pub mod inventory_type;
+pub mod low_frequency_timer_type;
+pub mod nav_event_table;
+pub mod nav_event_type;
+pub mod npc_brain_table;
+pub mod npc_brain_type;
+pub mod peasant_table;
+pub mod peasant_type;
+pub mod pet_component_table;
+pub mod pet_component_type;
+pub mod pet_stance_type;
+pub mod place_structure_reducer;
+pub mod player_perspective_table;
+pub mod player_perspective_type;
+pub mod player_session_table;
+pub mod player_session_type;
 pub mod player_table;
 pub mod player_type;
+pub mod position_type;
+pub mod process_movement_reducer;
+pub mod resource_node_table;
+pub mod resource_node_type;
+pub mod respawn_bush_timer_type;
+pub mod set_camera_mode_reducer;
+pub mod set_interior_culling_reducer;
+pub mod snapshot_type;
+pub mod spawn_peasant_reducer;
+pub mod structure_table;
+pub mod structure_type;
+pub mod swing_tool_reducer;
 pub mod transform_table;
 pub mod transform_type;
-pub mod update_transform_reducer;
 
-pub use drop_debug_loot_reducer::drop_debug_loot;
-pub use gather_loot_reducer::gather_loot;
-pub use ground_loot_table::*;
-pub use ground_loot_type::GroundLoot;
-pub use join_game_reducer::join_game;
-pub use player_identity_table::*;
-pub use player_identity_type::PlayerIdentity;
+pub use ai_state_type::AiState;
+pub use ai_type_type::AiType;
+pub use brain_state_type::BrainState;
+pub use change_pet_stance_reducer::change_pet_stance;
+pub use combat_event_table::*;
+pub use combat_event_type::CombatEvent;
+pub use command_peasant_reducer::command_peasant;
+pub use destroy_structure_reducer::destroy_structure;
+pub use faction_component_table::*;
+pub use faction_component_type::FactionComponent;
+pub use faction_type::Faction;
+pub use fire_weapon_reducer::fire_weapon;
+pub use health_table::*;
+pub use health_type::Health;
+pub use high_frequency_timer_type::HighFrequencyTimer;
+pub use hitbox_history_table::*;
+pub use hitbox_history_type::HitboxHistory;
+pub use interact_node_reducer::interact_node;
+pub use inventory_slot_type::InventorySlot;
+pub use inventory_table::*;
+pub use inventory_type::Inventory;
+pub use low_frequency_timer_type::LowFrequencyTimer;
+pub use nav_event_table::*;
+pub use nav_event_type::NavEvent;
+pub use npc_brain_table::*;
+pub use npc_brain_type::NpcBrain;
+pub use peasant_table::*;
+pub use peasant_type::Peasant;
+pub use pet_component_table::*;
+pub use pet_component_type::PetComponent;
+pub use pet_stance_type::PetStance;
+pub use place_structure_reducer::place_structure;
+pub use player_perspective_table::*;
+pub use player_perspective_type::PlayerPerspective;
+pub use player_session_table::*;
+pub use player_session_type::PlayerSession;
 pub use player_table::*;
 pub use player_type::Player;
+pub use position_type::Position;
+pub use process_movement_reducer::process_movement;
+pub use resource_node_table::*;
+pub use resource_node_type::ResourceNode;
+pub use respawn_bush_timer_type::RespawnBushTimer;
+pub use set_camera_mode_reducer::set_camera_mode;
+pub use set_interior_culling_reducer::set_interior_culling;
+pub use snapshot_type::Snapshot;
+pub use spawn_peasant_reducer::spawn_peasant;
+pub use structure_table::*;
+pub use structure_type::Structure;
+pub use swing_tool_reducer::swing_tool;
 pub use transform_table::*;
 pub use transform_type::Transform;
-pub use update_transform_reducer::update_transform;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -40,21 +120,64 @@ pub use update_transform_reducer::update_transform;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
-    DropDebugLoot {
+    ChangePetStance {
+        pet_entity_id: u64,
+        new_stance: PetStance,
+    },
+    CommandPeasant {
+        peasant_entity_id: u64,
+        command_type: String,
+        target_x: f32,
+        target_y: f32,
+        target_z: f32,
+        target_id: u64,
+    },
+    DestroyStructure {
+        target_structure_id: u64,
+    },
+    FireWeapon {
+        client_tick: u64,
+        origin_x: f32,
+        origin_y: f32,
+        origin_z: f32,
+        dir_x: f32,
+        dir_y: f32,
+        dir_z: f32,
+    },
+    InteractNode {
+        node_id: u64,
+    },
+    PlaceStructure {
+        parent_id: Option<u64>,
+        piece_type: String,
         x: f32,
         y: f32,
         z: f32,
+        rot_x: f32,
+        rot_y: f32,
+        rot_z: f32,
+        rot_w: f32,
     },
-    GatherLoot {
-        loot_id: u64,
+    ProcessMovement {
+        tick_id: u64,
+        delta_x: f32,
+        delta_y: f32,
+        delta_z: f32,
     },
-    JoinGame,
-    UpdateTransform {
-        x: f32,
-        y: f32,
-        z: f32,
-        yaw: f32,
-        pitch: f32,
+    SetCameraMode {
+        mode: String,
+    },
+    SetInteriorCulling {
+        is_inside: bool,
+    },
+    SpawnPeasant,
+    SwingTool {
+        px: f32,
+        py: f32,
+        pz: f32,
+        dx: f32,
+        dy: f32,
+        dz: f32,
     },
 }
 
@@ -65,41 +188,131 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
-            Reducer::DropDebugLoot { .. } => "drop_debug_loot",
-            Reducer::GatherLoot { .. } => "gather_loot",
-            Reducer::JoinGame => "join_game",
-            Reducer::UpdateTransform { .. } => "update_transform",
+            Reducer::ChangePetStance { .. } => "change_pet_stance",
+            Reducer::CommandPeasant { .. } => "command_peasant",
+            Reducer::DestroyStructure { .. } => "destroy_structure",
+            Reducer::FireWeapon { .. } => "fire_weapon",
+            Reducer::InteractNode { .. } => "interact_node",
+            Reducer::PlaceStructure { .. } => "place_structure",
+            Reducer::ProcessMovement { .. } => "process_movement",
+            Reducer::SetCameraMode { .. } => "set_camera_mode",
+            Reducer::SetInteriorCulling { .. } => "set_interior_culling",
+            Reducer::SpawnPeasant => "spawn_peasant",
+            Reducer::SwingTool { .. } => "swing_tool",
             _ => unreachable!(),
         }
     }
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
-            Reducer::DropDebugLoot { x, y, z } => {
-                __sats::bsatn::to_vec(&drop_debug_loot_reducer::DropDebugLootArgs {
-                    x: x.clone(),
-                    y: y.clone(),
-                    z: z.clone(),
+            Reducer::ChangePetStance {
+                pet_entity_id,
+                new_stance,
+            } => __sats::bsatn::to_vec(&change_pet_stance_reducer::ChangePetStanceArgs {
+                pet_entity_id: pet_entity_id.clone(),
+                new_stance: new_stance.clone(),
+            }),
+            Reducer::CommandPeasant {
+                peasant_entity_id,
+                command_type,
+                target_x,
+                target_y,
+                target_z,
+                target_id,
+            } => __sats::bsatn::to_vec(&command_peasant_reducer::CommandPeasantArgs {
+                peasant_entity_id: peasant_entity_id.clone(),
+                command_type: command_type.clone(),
+                target_x: target_x.clone(),
+                target_y: target_y.clone(),
+                target_z: target_z.clone(),
+                target_id: target_id.clone(),
+            }),
+            Reducer::DestroyStructure {
+                target_structure_id,
+            } => __sats::bsatn::to_vec(&destroy_structure_reducer::DestroyStructureArgs {
+                target_structure_id: target_structure_id.clone(),
+            }),
+            Reducer::FireWeapon {
+                client_tick,
+                origin_x,
+                origin_y,
+                origin_z,
+                dir_x,
+                dir_y,
+                dir_z,
+            } => __sats::bsatn::to_vec(&fire_weapon_reducer::FireWeaponArgs {
+                client_tick: client_tick.clone(),
+                origin_x: origin_x.clone(),
+                origin_y: origin_y.clone(),
+                origin_z: origin_z.clone(),
+                dir_x: dir_x.clone(),
+                dir_y: dir_y.clone(),
+                dir_z: dir_z.clone(),
+            }),
+            Reducer::InteractNode { node_id } => {
+                __sats::bsatn::to_vec(&interact_node_reducer::InteractNodeArgs {
+                    node_id: node_id.clone(),
                 })
             }
-            Reducer::GatherLoot { loot_id } => {
-                __sats::bsatn::to_vec(&gather_loot_reducer::GatherLootArgs {
-                    loot_id: loot_id.clone(),
-                })
-            }
-            Reducer::JoinGame => __sats::bsatn::to_vec(&join_game_reducer::JoinGameArgs {}),
-            Reducer::UpdateTransform {
+            Reducer::PlaceStructure {
+                parent_id,
+                piece_type,
                 x,
                 y,
                 z,
-                yaw,
-                pitch,
-            } => __sats::bsatn::to_vec(&update_transform_reducer::UpdateTransformArgs {
+                rot_x,
+                rot_y,
+                rot_z,
+                rot_w,
+            } => __sats::bsatn::to_vec(&place_structure_reducer::PlaceStructureArgs {
+                parent_id: parent_id.clone(),
+                piece_type: piece_type.clone(),
                 x: x.clone(),
                 y: y.clone(),
                 z: z.clone(),
-                yaw: yaw.clone(),
-                pitch: pitch.clone(),
+                rot_x: rot_x.clone(),
+                rot_y: rot_y.clone(),
+                rot_z: rot_z.clone(),
+                rot_w: rot_w.clone(),
+            }),
+            Reducer::ProcessMovement {
+                tick_id,
+                delta_x,
+                delta_y,
+                delta_z,
+            } => __sats::bsatn::to_vec(&process_movement_reducer::ProcessMovementArgs {
+                tick_id: tick_id.clone(),
+                delta_x: delta_x.clone(),
+                delta_y: delta_y.clone(),
+                delta_z: delta_z.clone(),
+            }),
+            Reducer::SetCameraMode { mode } => {
+                __sats::bsatn::to_vec(&set_camera_mode_reducer::SetCameraModeArgs {
+                    mode: mode.clone(),
+                })
+            }
+            Reducer::SetInteriorCulling { is_inside } => {
+                __sats::bsatn::to_vec(&set_interior_culling_reducer::SetInteriorCullingArgs {
+                    is_inside: is_inside.clone(),
+                })
+            }
+            Reducer::SpawnPeasant => {
+                __sats::bsatn::to_vec(&spawn_peasant_reducer::SpawnPeasantArgs {})
+            }
+            Reducer::SwingTool {
+                px,
+                py,
+                pz,
+                dx,
+                dy,
+                dz,
+            } => __sats::bsatn::to_vec(&swing_tool_reducer::SwingToolArgs {
+                px: px.clone(),
+                py: py.clone(),
+                pz: pz.clone(),
+                dx: dx.clone(),
+                dy: dy.clone(),
+                dz: dz.clone(),
             }),
             _ => unreachable!(),
         }
@@ -110,9 +323,20 @@ impl __sdk::Reducer for Reducer {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
-    ground_loot: __sdk::TableUpdate<GroundLoot>,
+    combat_event: __sdk::TableUpdate<CombatEvent>,
+    faction_component: __sdk::TableUpdate<FactionComponent>,
+    health: __sdk::TableUpdate<Health>,
+    hitbox_history: __sdk::TableUpdate<HitboxHistory>,
+    inventory: __sdk::TableUpdate<Inventory>,
+    nav_event: __sdk::TableUpdate<NavEvent>,
+    npc_brain: __sdk::TableUpdate<NpcBrain>,
+    peasant: __sdk::TableUpdate<Peasant>,
+    pet_component: __sdk::TableUpdate<PetComponent>,
     player: __sdk::TableUpdate<Player>,
-    player_identity: __sdk::TableUpdate<PlayerIdentity>,
+    player_perspective: __sdk::TableUpdate<PlayerPerspective>,
+    player_session: __sdk::TableUpdate<PlayerSession>,
+    resource_node: __sdk::TableUpdate<ResourceNode>,
+    structure: __sdk::TableUpdate<Structure>,
     transform: __sdk::TableUpdate<Transform>,
 }
 
@@ -122,15 +346,48 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
-                "ground_loot" => db_update
-                    .ground_loot
-                    .append(ground_loot_table::parse_table_update(table_update)?),
+                "combat_event" => db_update
+                    .combat_event
+                    .append(combat_event_table::parse_table_update(table_update)?),
+                "faction_component" => db_update
+                    .faction_component
+                    .append(faction_component_table::parse_table_update(table_update)?),
+                "health" => db_update
+                    .health
+                    .append(health_table::parse_table_update(table_update)?),
+                "hitbox_history" => db_update
+                    .hitbox_history
+                    .append(hitbox_history_table::parse_table_update(table_update)?),
+                "inventory" => db_update
+                    .inventory
+                    .append(inventory_table::parse_table_update(table_update)?),
+                "nav_event" => db_update
+                    .nav_event
+                    .append(nav_event_table::parse_table_update(table_update)?),
+                "npc_brain" => db_update
+                    .npc_brain
+                    .append(npc_brain_table::parse_table_update(table_update)?),
+                "peasant" => db_update
+                    .peasant
+                    .append(peasant_table::parse_table_update(table_update)?),
+                "pet_component" => db_update
+                    .pet_component
+                    .append(pet_component_table::parse_table_update(table_update)?),
                 "player" => db_update
                     .player
                     .append(player_table::parse_table_update(table_update)?),
-                "player_identity" => db_update
-                    .player_identity
-                    .append(player_identity_table::parse_table_update(table_update)?),
+                "player_perspective" => db_update
+                    .player_perspective
+                    .append(player_perspective_table::parse_table_update(table_update)?),
+                "player_session" => db_update
+                    .player_session
+                    .append(player_session_table::parse_table_update(table_update)?),
+                "resource_node" => db_update
+                    .resource_node
+                    .append(resource_node_table::parse_table_update(table_update)?),
+                "structure" => db_update
+                    .structure
+                    .append(structure_table::parse_table_update(table_update)?),
                 "transform" => db_update
                     .transform
                     .append(transform_table::parse_table_update(table_update)?),
@@ -160,18 +417,54 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
-        diff.ground_loot = cache
-            .apply_diff_to_table::<GroundLoot>("ground_loot", &self.ground_loot)
-            .with_updates_by_pk(|row| &row.loot_id);
+        diff.combat_event = cache
+            .apply_diff_to_table::<CombatEvent>("combat_event", &self.combat_event)
+            .with_updates_by_pk(|row| &row.id);
+        diff.faction_component = cache
+            .apply_diff_to_table::<FactionComponent>("faction_component", &self.faction_component)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.health = cache
+            .apply_diff_to_table::<Health>("health", &self.health)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.hitbox_history = cache
+            .apply_diff_to_table::<HitboxHistory>("hitbox_history", &self.hitbox_history)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.inventory = cache
+            .apply_diff_to_table::<Inventory>("inventory", &self.inventory)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.nav_event = cache
+            .apply_diff_to_table::<NavEvent>("nav_event", &self.nav_event)
+            .with_updates_by_pk(|row| &row.id);
+        diff.npc_brain = cache
+            .apply_diff_to_table::<NpcBrain>("npc_brain", &self.npc_brain)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.peasant = cache
+            .apply_diff_to_table::<Peasant>("peasant", &self.peasant)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.pet_component = cache
+            .apply_diff_to_table::<PetComponent>("pet_component", &self.pet_component)
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.player = cache
             .apply_diff_to_table::<Player>("player", &self.player)
-            .with_updates_by_pk(|row| &row.player_id);
-        diff.player_identity = cache
-            .apply_diff_to_table::<PlayerIdentity>("player_identity", &self.player_identity)
-            .with_updates_by_pk(|row| &row.id);
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.player_perspective = cache
+            .apply_diff_to_table::<PlayerPerspective>(
+                "player_perspective",
+                &self.player_perspective,
+            )
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.player_session = cache
+            .apply_diff_to_table::<PlayerSession>("player_session", &self.player_session)
+            .with_updates_by_pk(|row| &row.identity);
+        diff.resource_node = cache
+            .apply_diff_to_table::<ResourceNode>("resource_node", &self.resource_node)
+            .with_updates_by_pk(|row| &row.node_id);
+        diff.structure = cache
+            .apply_diff_to_table::<Structure>("structure", &self.structure)
+            .with_updates_by_pk(|row| &row.structure_id);
         diff.transform = cache
             .apply_diff_to_table::<Transform>("transform", &self.transform)
-            .with_updates_by_pk(|row| &row.player_id);
+            .with_updates_by_pk(|row| &row.entity_id);
 
         diff
     }
@@ -179,14 +472,47 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
-                "ground_loot" => db_update
-                    .ground_loot
+                "combat_event" => db_update
+                    .combat_event
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "faction_component" => db_update
+                    .faction_component
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "health" => db_update
+                    .health
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "hitbox_history" => db_update
+                    .hitbox_history
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "inventory" => db_update
+                    .inventory
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "nav_event" => db_update
+                    .nav_event
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "npc_brain" => db_update
+                    .npc_brain
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "peasant" => db_update
+                    .peasant
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "pet_component" => db_update
+                    .pet_component
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player" => db_update
                     .player
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "player_identity" => db_update
-                    .player_identity
+                "player_perspective" => db_update
+                    .player_perspective
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "player_session" => db_update
+                    .player_session
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "resource_node" => db_update
+                    .resource_node
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "structure" => db_update
+                    .structure
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "transform" => db_update
                     .transform
@@ -204,14 +530,47 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
-                "ground_loot" => db_update
-                    .ground_loot
+                "combat_event" => db_update
+                    .combat_event
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "faction_component" => db_update
+                    .faction_component
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "health" => db_update
+                    .health
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "hitbox_history" => db_update
+                    .hitbox_history
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "inventory" => db_update
+                    .inventory
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "nav_event" => db_update
+                    .nav_event
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "npc_brain" => db_update
+                    .npc_brain
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "peasant" => db_update
+                    .peasant
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "pet_component" => db_update
+                    .pet_component
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "player" => db_update
                     .player
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "player_identity" => db_update
-                    .player_identity
+                "player_perspective" => db_update
+                    .player_perspective
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "player_session" => db_update
+                    .player_session
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "resource_node" => db_update
+                    .resource_node
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "structure" => db_update
+                    .structure
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "transform" => db_update
                     .transform
@@ -231,9 +590,20 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
-    ground_loot: __sdk::TableAppliedDiff<'r, GroundLoot>,
+    combat_event: __sdk::TableAppliedDiff<'r, CombatEvent>,
+    faction_component: __sdk::TableAppliedDiff<'r, FactionComponent>,
+    health: __sdk::TableAppliedDiff<'r, Health>,
+    hitbox_history: __sdk::TableAppliedDiff<'r, HitboxHistory>,
+    inventory: __sdk::TableAppliedDiff<'r, Inventory>,
+    nav_event: __sdk::TableAppliedDiff<'r, NavEvent>,
+    npc_brain: __sdk::TableAppliedDiff<'r, NpcBrain>,
+    peasant: __sdk::TableAppliedDiff<'r, Peasant>,
+    pet_component: __sdk::TableAppliedDiff<'r, PetComponent>,
     player: __sdk::TableAppliedDiff<'r, Player>,
-    player_identity: __sdk::TableAppliedDiff<'r, PlayerIdentity>,
+    player_perspective: __sdk::TableAppliedDiff<'r, PlayerPerspective>,
+    player_session: __sdk::TableAppliedDiff<'r, PlayerSession>,
+    resource_node: __sdk::TableAppliedDiff<'r, ResourceNode>,
+    structure: __sdk::TableAppliedDiff<'r, Structure>,
     transform: __sdk::TableAppliedDiff<'r, Transform>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
@@ -248,13 +618,48 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
-        callbacks.invoke_table_row_callbacks::<GroundLoot>("ground_loot", &self.ground_loot, event);
-        callbacks.invoke_table_row_callbacks::<Player>("player", &self.player, event);
-        callbacks.invoke_table_row_callbacks::<PlayerIdentity>(
-            "player_identity",
-            &self.player_identity,
+        callbacks.invoke_table_row_callbacks::<CombatEvent>(
+            "combat_event",
+            &self.combat_event,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<FactionComponent>(
+            "faction_component",
+            &self.faction_component,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Health>("health", &self.health, event);
+        callbacks.invoke_table_row_callbacks::<HitboxHistory>(
+            "hitbox_history",
+            &self.hitbox_history,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Inventory>("inventory", &self.inventory, event);
+        callbacks.invoke_table_row_callbacks::<NavEvent>("nav_event", &self.nav_event, event);
+        callbacks.invoke_table_row_callbacks::<NpcBrain>("npc_brain", &self.npc_brain, event);
+        callbacks.invoke_table_row_callbacks::<Peasant>("peasant", &self.peasant, event);
+        callbacks.invoke_table_row_callbacks::<PetComponent>(
+            "pet_component",
+            &self.pet_component,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Player>("player", &self.player, event);
+        callbacks.invoke_table_row_callbacks::<PlayerPerspective>(
+            "player_perspective",
+            &self.player_perspective,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<PlayerSession>(
+            "player_session",
+            &self.player_session,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<ResourceNode>(
+            "resource_node",
+            &self.resource_node,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Structure>("structure", &self.structure, event);
         callbacks.invoke_table_row_callbacks::<Transform>("transform", &self.transform, event);
     }
 }
@@ -916,11 +1321,37 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
-        ground_loot_table::register_table(client_cache);
+        combat_event_table::register_table(client_cache);
+        faction_component_table::register_table(client_cache);
+        health_table::register_table(client_cache);
+        hitbox_history_table::register_table(client_cache);
+        inventory_table::register_table(client_cache);
+        nav_event_table::register_table(client_cache);
+        npc_brain_table::register_table(client_cache);
+        peasant_table::register_table(client_cache);
+        pet_component_table::register_table(client_cache);
         player_table::register_table(client_cache);
-        player_identity_table::register_table(client_cache);
+        player_perspective_table::register_table(client_cache);
+        player_session_table::register_table(client_cache);
+        resource_node_table::register_table(client_cache);
+        structure_table::register_table(client_cache);
         transform_table::register_table(client_cache);
     }
-    const ALL_TABLE_NAMES: &'static [&'static str] =
-        &["ground_loot", "player", "player_identity", "transform"];
+    const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "combat_event",
+        "faction_component",
+        "health",
+        "hitbox_history",
+        "inventory",
+        "nav_event",
+        "npc_brain",
+        "peasant",
+        "pet_component",
+        "player",
+        "player_perspective",
+        "player_session",
+        "resource_node",
+        "structure",
+        "transform",
+    ];
 }

@@ -6,52 +6,46 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct DropDebugLootArgs {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+pub(super) struct DestroyStructureArgs {
+    pub target_structure_id: u64,
 }
 
-impl From<DropDebugLootArgs> for super::Reducer {
-    fn from(args: DropDebugLootArgs) -> Self {
-        Self::DropDebugLoot {
-            x: args.x,
-            y: args.y,
-            z: args.z,
+impl From<DestroyStructureArgs> for super::Reducer {
+    fn from(args: DestroyStructureArgs) -> Self {
+        Self::DestroyStructure {
+            target_structure_id: args.target_structure_id,
         }
     }
 }
 
-impl __sdk::InModule for DropDebugLootArgs {
+impl __sdk::InModule for DestroyStructureArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `drop_debug_loot`.
+/// Extension trait for access to the reducer `destroy_structure`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait drop_debug_loot {
-    /// Request that the remote module invoke the reducer `drop_debug_loot` to run as soon as possible.
+pub trait destroy_structure {
+    /// Request that the remote module invoke the reducer `destroy_structure` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`drop_debug_loot:drop_debug_loot_then`] to run a callback after the reducer completes.
-    fn drop_debug_loot(&self, x: f32, y: f32, z: f32) -> __sdk::Result<()> {
-        self.drop_debug_loot_then(x, y, z, |_, _| {})
+    /// /// Use [`destroy_structure:destroy_structure_then`] to run a callback after the reducer completes.
+    fn destroy_structure(&self, target_structure_id: u64) -> __sdk::Result<()> {
+        self.destroy_structure_then(target_structure_id, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `drop_debug_loot` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `destroy_structure` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn drop_debug_loot_then(
+    fn destroy_structure_then(
         &self,
-        x: f32,
-        y: f32,
-        z: f32,
+        target_structure_id: u64,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -59,18 +53,20 @@ pub trait drop_debug_loot {
     ) -> __sdk::Result<()>;
 }
 
-impl drop_debug_loot for super::RemoteReducers {
-    fn drop_debug_loot_then(
+impl destroy_structure for super::RemoteReducers {
+    fn destroy_structure_then(
         &self,
-        x: f32,
-        y: f32,
-        z: f32,
+        target_structure_id: u64,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(DropDebugLootArgs { x, y, z }, callback)
+        self.imp.invoke_reducer_with_callback(
+            DestroyStructureArgs {
+                target_structure_id,
+            },
+            callback,
+        )
     }
 }

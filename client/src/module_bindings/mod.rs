@@ -7,10 +7,16 @@
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod ai_state_type;
+pub mod ai_type_type;
+pub mod brain_state_type;
+pub mod change_pet_stance_reducer;
 pub mod combat_event_table;
 pub mod combat_event_type;
 pub mod command_peasant_reducer;
 pub mod destroy_structure_reducer;
+pub mod faction_component_table;
+pub mod faction_component_type;
+pub mod faction_type;
 pub mod fire_weapon_reducer;
 pub mod health_table;
 pub mod health_type;
@@ -24,8 +30,13 @@ pub mod inventory_type;
 pub mod low_frequency_timer_type;
 pub mod nav_event_table;
 pub mod nav_event_type;
+pub mod npc_brain_table;
+pub mod npc_brain_type;
 pub mod peasant_table;
 pub mod peasant_type;
+pub mod pet_component_table;
+pub mod pet_component_type;
+pub mod pet_stance_type;
 pub mod place_structure_reducer;
 pub mod player_perspective_table;
 pub mod player_perspective_type;
@@ -49,10 +60,16 @@ pub mod transform_table;
 pub mod transform_type;
 
 pub use ai_state_type::AiState;
+pub use ai_type_type::AiType;
+pub use brain_state_type::BrainState;
+pub use change_pet_stance_reducer::change_pet_stance;
 pub use combat_event_table::*;
 pub use combat_event_type::CombatEvent;
 pub use command_peasant_reducer::command_peasant;
 pub use destroy_structure_reducer::destroy_structure;
+pub use faction_component_table::*;
+pub use faction_component_type::FactionComponent;
+pub use faction_type::Faction;
 pub use fire_weapon_reducer::fire_weapon;
 pub use health_table::*;
 pub use health_type::Health;
@@ -66,8 +83,13 @@ pub use inventory_type::Inventory;
 pub use low_frequency_timer_type::LowFrequencyTimer;
 pub use nav_event_table::*;
 pub use nav_event_type::NavEvent;
+pub use npc_brain_table::*;
+pub use npc_brain_type::NpcBrain;
 pub use peasant_table::*;
 pub use peasant_type::Peasant;
+pub use pet_component_table::*;
+pub use pet_component_type::PetComponent;
+pub use pet_stance_type::PetStance;
 pub use place_structure_reducer::place_structure;
 pub use player_perspective_table::*;
 pub use player_perspective_type::PlayerPerspective;
@@ -98,6 +120,10 @@ pub use transform_type::Transform;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    ChangePetStance {
+        pet_entity_id: u64,
+        new_stance: PetStance,
+    },
     CommandPeasant {
         peasant_entity_id: u64,
         command_type: String,
@@ -162,6 +188,7 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::ChangePetStance { .. } => "change_pet_stance",
             Reducer::CommandPeasant { .. } => "command_peasant",
             Reducer::DestroyStructure { .. } => "destroy_structure",
             Reducer::FireWeapon { .. } => "fire_weapon",
@@ -178,6 +205,13 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
+            Reducer::ChangePetStance {
+                pet_entity_id,
+                new_stance,
+            } => __sats::bsatn::to_vec(&change_pet_stance_reducer::ChangePetStanceArgs {
+                pet_entity_id: pet_entity_id.clone(),
+                new_stance: new_stance.clone(),
+            }),
             Reducer::CommandPeasant {
                 peasant_entity_id,
                 command_type,
@@ -290,11 +324,14 @@ impl __sdk::Reducer for Reducer {
 #[doc(hidden)]
 pub struct DbUpdate {
     combat_event: __sdk::TableUpdate<CombatEvent>,
+    faction_component: __sdk::TableUpdate<FactionComponent>,
     health: __sdk::TableUpdate<Health>,
     hitbox_history: __sdk::TableUpdate<HitboxHistory>,
     inventory: __sdk::TableUpdate<Inventory>,
     nav_event: __sdk::TableUpdate<NavEvent>,
+    npc_brain: __sdk::TableUpdate<NpcBrain>,
     peasant: __sdk::TableUpdate<Peasant>,
+    pet_component: __sdk::TableUpdate<PetComponent>,
     player: __sdk::TableUpdate<Player>,
     player_perspective: __sdk::TableUpdate<PlayerPerspective>,
     player_session: __sdk::TableUpdate<PlayerSession>,
@@ -312,6 +349,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "combat_event" => db_update
                     .combat_event
                     .append(combat_event_table::parse_table_update(table_update)?),
+                "faction_component" => db_update
+                    .faction_component
+                    .append(faction_component_table::parse_table_update(table_update)?),
                 "health" => db_update
                     .health
                     .append(health_table::parse_table_update(table_update)?),
@@ -324,9 +364,15 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "nav_event" => db_update
                     .nav_event
                     .append(nav_event_table::parse_table_update(table_update)?),
+                "npc_brain" => db_update
+                    .npc_brain
+                    .append(npc_brain_table::parse_table_update(table_update)?),
                 "peasant" => db_update
                     .peasant
                     .append(peasant_table::parse_table_update(table_update)?),
+                "pet_component" => db_update
+                    .pet_component
+                    .append(pet_component_table::parse_table_update(table_update)?),
                 "player" => db_update
                     .player
                     .append(player_table::parse_table_update(table_update)?),
@@ -374,6 +420,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.combat_event = cache
             .apply_diff_to_table::<CombatEvent>("combat_event", &self.combat_event)
             .with_updates_by_pk(|row| &row.id);
+        diff.faction_component = cache
+            .apply_diff_to_table::<FactionComponent>("faction_component", &self.faction_component)
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.health = cache
             .apply_diff_to_table::<Health>("health", &self.health)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -386,8 +435,14 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.nav_event = cache
             .apply_diff_to_table::<NavEvent>("nav_event", &self.nav_event)
             .with_updates_by_pk(|row| &row.id);
+        diff.npc_brain = cache
+            .apply_diff_to_table::<NpcBrain>("npc_brain", &self.npc_brain)
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.peasant = cache
             .apply_diff_to_table::<Peasant>("peasant", &self.peasant)
+            .with_updates_by_pk(|row| &row.entity_id);
+        diff.pet_component = cache
+            .apply_diff_to_table::<PetComponent>("pet_component", &self.pet_component)
             .with_updates_by_pk(|row| &row.entity_id);
         diff.player = cache
             .apply_diff_to_table::<Player>("player", &self.player)
@@ -420,6 +475,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "combat_event" => db_update
                     .combat_event
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "faction_component" => db_update
+                    .faction_component
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "health" => db_update
                     .health
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -432,8 +490,14 @@ impl __sdk::DbUpdate for DbUpdate {
                 "nav_event" => db_update
                     .nav_event
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "npc_brain" => db_update
+                    .npc_brain
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "peasant" => db_update
                     .peasant
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "pet_component" => db_update
+                    .pet_component
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player" => db_update
                     .player
@@ -469,6 +533,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "combat_event" => db_update
                     .combat_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "faction_component" => db_update
+                    .faction_component
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "health" => db_update
                     .health
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -481,8 +548,14 @@ impl __sdk::DbUpdate for DbUpdate {
                 "nav_event" => db_update
                     .nav_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "npc_brain" => db_update
+                    .npc_brain
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "peasant" => db_update
                     .peasant
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "pet_component" => db_update
+                    .pet_component
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "player" => db_update
                     .player
@@ -518,11 +591,14 @@ impl __sdk::DbUpdate for DbUpdate {
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
     combat_event: __sdk::TableAppliedDiff<'r, CombatEvent>,
+    faction_component: __sdk::TableAppliedDiff<'r, FactionComponent>,
     health: __sdk::TableAppliedDiff<'r, Health>,
     hitbox_history: __sdk::TableAppliedDiff<'r, HitboxHistory>,
     inventory: __sdk::TableAppliedDiff<'r, Inventory>,
     nav_event: __sdk::TableAppliedDiff<'r, NavEvent>,
+    npc_brain: __sdk::TableAppliedDiff<'r, NpcBrain>,
     peasant: __sdk::TableAppliedDiff<'r, Peasant>,
+    pet_component: __sdk::TableAppliedDiff<'r, PetComponent>,
     player: __sdk::TableAppliedDiff<'r, Player>,
     player_perspective: __sdk::TableAppliedDiff<'r, PlayerPerspective>,
     player_session: __sdk::TableAppliedDiff<'r, PlayerSession>,
@@ -547,6 +623,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.combat_event,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<FactionComponent>(
+            "faction_component",
+            &self.faction_component,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Health>("health", &self.health, event);
         callbacks.invoke_table_row_callbacks::<HitboxHistory>(
             "hitbox_history",
@@ -555,7 +636,13 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<Inventory>("inventory", &self.inventory, event);
         callbacks.invoke_table_row_callbacks::<NavEvent>("nav_event", &self.nav_event, event);
+        callbacks.invoke_table_row_callbacks::<NpcBrain>("npc_brain", &self.npc_brain, event);
         callbacks.invoke_table_row_callbacks::<Peasant>("peasant", &self.peasant, event);
+        callbacks.invoke_table_row_callbacks::<PetComponent>(
+            "pet_component",
+            &self.pet_component,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Player>("player", &self.player, event);
         callbacks.invoke_table_row_callbacks::<PlayerPerspective>(
             "player_perspective",
@@ -1235,11 +1322,14 @@ impl __sdk::SpacetimeModule for RemoteModule {
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         combat_event_table::register_table(client_cache);
+        faction_component_table::register_table(client_cache);
         health_table::register_table(client_cache);
         hitbox_history_table::register_table(client_cache);
         inventory_table::register_table(client_cache);
         nav_event_table::register_table(client_cache);
+        npc_brain_table::register_table(client_cache);
         peasant_table::register_table(client_cache);
+        pet_component_table::register_table(client_cache);
         player_table::register_table(client_cache);
         player_perspective_table::register_table(client_cache);
         player_session_table::register_table(client_cache);
@@ -1249,11 +1339,14 @@ impl __sdk::SpacetimeModule for RemoteModule {
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "combat_event",
+        "faction_component",
         "health",
         "hitbox_history",
         "inventory",
         "nav_event",
+        "npc_brain",
         "peasant",
+        "pet_component",
         "player",
         "player_perspective",
         "player_session",

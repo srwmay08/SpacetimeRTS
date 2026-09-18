@@ -6,58 +6,69 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct UpdateTransformArgs {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub yaw: f32,
-    pub pitch: f32,
+pub(super) struct SwingToolArgs {
+    pub px: f32,
+    pub py: f32,
+    pub pz: f32,
+    pub dx: f32,
+    pub dy: f32,
+    pub dz: f32,
 }
 
-impl From<UpdateTransformArgs> for super::Reducer {
-    fn from(args: UpdateTransformArgs) -> Self {
-        Self::UpdateTransform {
-            x: args.x,
-            y: args.y,
-            z: args.z,
-            yaw: args.yaw,
-            pitch: args.pitch,
+impl From<SwingToolArgs> for super::Reducer {
+    fn from(args: SwingToolArgs) -> Self {
+        Self::SwingTool {
+            px: args.px,
+            py: args.py,
+            pz: args.pz,
+            dx: args.dx,
+            dy: args.dy,
+            dz: args.dz,
         }
     }
 }
 
-impl __sdk::InModule for UpdateTransformArgs {
+impl __sdk::InModule for SwingToolArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `update_transform`.
+/// Extension trait for access to the reducer `swing_tool`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait update_transform {
-    /// Request that the remote module invoke the reducer `update_transform` to run as soon as possible.
+pub trait swing_tool {
+    /// Request that the remote module invoke the reducer `swing_tool` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`update_transform:update_transform_then`] to run a callback after the reducer completes.
-    fn update_transform(&self, x: f32, y: f32, z: f32, yaw: f32, pitch: f32) -> __sdk::Result<()> {
-        self.update_transform_then(x, y, z, yaw, pitch, |_, _| {})
+    /// /// Use [`swing_tool:swing_tool_then`] to run a callback after the reducer completes.
+    fn swing_tool(
+        &self,
+        px: f32,
+        py: f32,
+        pz: f32,
+        dx: f32,
+        dy: f32,
+        dz: f32,
+    ) -> __sdk::Result<()> {
+        self.swing_tool_then(px, py, pz, dx, dy, dz, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `update_transform` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `swing_tool` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn update_transform_then(
+    fn swing_tool_then(
         &self,
-        x: f32,
-        y: f32,
-        z: f32,
-        yaw: f32,
-        pitch: f32,
+        px: f32,
+        py: f32,
+        pz: f32,
+        dx: f32,
+        dy: f32,
+        dz: f32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -65,26 +76,28 @@ pub trait update_transform {
     ) -> __sdk::Result<()>;
 }
 
-impl update_transform for super::RemoteReducers {
-    fn update_transform_then(
+impl swing_tool for super::RemoteReducers {
+    fn swing_tool_then(
         &self,
-        x: f32,
-        y: f32,
-        z: f32,
-        yaw: f32,
-        pitch: f32,
+        px: f32,
+        py: f32,
+        pz: f32,
+        dx: f32,
+        dy: f32,
+        dz: f32,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp.invoke_reducer_with_callback(
-            UpdateTransformArgs {
-                x,
-                y,
-                z,
-                yaw,
-                pitch,
+            SwingToolArgs {
+                px,
+                py,
+                pz,
+                dx,
+                dy,
+                dz,
             },
             callback,
         )

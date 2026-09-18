@@ -164,30 +164,30 @@ impl<'ctx> __sdk::WithUpdate for PlayerTableHandle<'ctx> {
     }
 }
 
-/// Access to the `player_id` unique index on the table `player`,
+/// Access to the `entity_id` unique index on the table `player`,
 /// which allows point queries on the field of the same name
-/// via the [`PlayerPlayerIdUnique::find`] method.
+/// via the [`PlayerEntityIdUnique::find`] method.
 ///
 /// Users are encouraged not to explicitly reference this type,
 /// but to directly chain method calls,
-/// like `ctx.db.player().player_id().find(...)`.
-pub struct PlayerPlayerIdUnique<'ctx> {
+/// like `ctx.db.player().entity_id().find(...)`.
+pub struct PlayerEntityIdUnique<'ctx> {
     imp: __sdk::UniqueConstraintHandle<Player, u64>,
     phantom: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 impl<'ctx> PlayerTableHandle<'ctx> {
-    /// Get a handle on the `player_id` unique index on the table `player`.
-    pub fn player_id(&self) -> PlayerPlayerIdUnique<'ctx> {
-        PlayerPlayerIdUnique {
-            imp: self.imp.get_unique_constraint::<u64>("player_id"),
+    /// Get a handle on the `entity_id` unique index on the table `player`.
+    pub fn entity_id(&self) -> PlayerEntityIdUnique<'ctx> {
+        PlayerEntityIdUnique {
+            imp: self.imp.get_unique_constraint::<u64>("entity_id"),
             phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<'ctx> PlayerPlayerIdUnique<'ctx> {
-    /// Find the subscribed row whose `player_id` column value is equal to `col_val`,
+impl<'ctx> PlayerEntityIdUnique<'ctx> {
+    /// Find the subscribed row whose `entity_id` column value is equal to `col_val`,
     /// if such a row is present in the client cache.
     pub fn find(&self, col_val: &u64) -> Option<Player> {
         self.imp.find(col_val)
@@ -229,7 +229,7 @@ impl<'ctx> PlayerIdentityUnique<'ctx> {
 #[doc(hidden)]
 pub(super) fn register_table(client_cache: &mut __sdk::ClientCache<super::RemoteModule>) {
     let _table = client_cache.get_or_make_table::<Player>("player");
-    _table.add_unique_constraint::<u64>("player_id", |row| &row.player_id);
+    _table.add_unique_constraint::<u64>("entity_id", |row| &row.entity_id);
     _table.add_unique_constraint::<__sdk::Identity>("identity", |row| &row.identity);
 }
 

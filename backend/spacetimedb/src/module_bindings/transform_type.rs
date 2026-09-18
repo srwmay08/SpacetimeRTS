@@ -7,13 +7,13 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub struct Transform {
-    pub player_id: u64,
+    pub entity_id: u64,
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    pub yaw: f32,
-    pub pitch: f32,
-    pub timestamp: u64,
+    pub chunk_x: i32,
+    pub chunk_z: i32,
+    pub last_processed_tick: u64,
 }
 
 impl __sdk::InModule for Transform {
@@ -24,26 +24,29 @@ impl __sdk::InModule for Transform {
 ///
 /// Provides typed access to columns for query building.
 pub struct TransformCols {
-    pub player_id: __sdk::__query_builder::Col<Transform, u64>,
+    pub entity_id: __sdk::__query_builder::Col<Transform, u64>,
     pub x: __sdk::__query_builder::Col<Transform, f32>,
     pub y: __sdk::__query_builder::Col<Transform, f32>,
     pub z: __sdk::__query_builder::Col<Transform, f32>,
-    pub yaw: __sdk::__query_builder::Col<Transform, f32>,
-    pub pitch: __sdk::__query_builder::Col<Transform, f32>,
-    pub timestamp: __sdk::__query_builder::Col<Transform, u64>,
+    pub chunk_x: __sdk::__query_builder::Col<Transform, i32>,
+    pub chunk_z: __sdk::__query_builder::Col<Transform, i32>,
+    pub last_processed_tick: __sdk::__query_builder::Col<Transform, u64>,
 }
 
 impl __sdk::__query_builder::HasCols for Transform {
     type Cols = TransformCols;
     fn cols(table_name: &'static str) -> Self::Cols {
         TransformCols {
-            player_id: __sdk::__query_builder::Col::new(table_name, "player_id"),
+            entity_id: __sdk::__query_builder::Col::new(table_name, "entity_id"),
             x: __sdk::__query_builder::Col::new(table_name, "x"),
             y: __sdk::__query_builder::Col::new(table_name, "y"),
             z: __sdk::__query_builder::Col::new(table_name, "z"),
-            yaw: __sdk::__query_builder::Col::new(table_name, "yaw"),
-            pitch: __sdk::__query_builder::Col::new(table_name, "pitch"),
-            timestamp: __sdk::__query_builder::Col::new(table_name, "timestamp"),
+            chunk_x: __sdk::__query_builder::Col::new(table_name, "chunk_x"),
+            chunk_z: __sdk::__query_builder::Col::new(table_name, "chunk_z"),
+            last_processed_tick: __sdk::__query_builder::Col::new(
+                table_name,
+                "last_processed_tick",
+            ),
         }
     }
 }
@@ -52,14 +55,14 @@ impl __sdk::__query_builder::HasCols for Transform {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct TransformIxCols {
-    pub player_id: __sdk::__query_builder::IxCol<Transform, u64>,
+    pub entity_id: __sdk::__query_builder::IxCol<Transform, u64>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Transform {
     type IxCols = TransformIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         TransformIxCols {
-            player_id: __sdk::__query_builder::IxCol::new(table_name, "player_id"),
+            entity_id: __sdk::__query_builder::IxCol::new(table_name, "entity_id"),
         }
     }
 }

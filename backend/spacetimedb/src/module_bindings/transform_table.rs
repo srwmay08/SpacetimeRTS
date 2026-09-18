@@ -164,30 +164,30 @@ impl<'ctx> __sdk::WithUpdate for TransformTableHandle<'ctx> {
     }
 }
 
-/// Access to the `player_id` unique index on the table `transform`,
+/// Access to the `entity_id` unique index on the table `transform`,
 /// which allows point queries on the field of the same name
-/// via the [`TransformPlayerIdUnique::find`] method.
+/// via the [`TransformEntityIdUnique::find`] method.
 ///
 /// Users are encouraged not to explicitly reference this type,
 /// but to directly chain method calls,
-/// like `ctx.db.transform().player_id().find(...)`.
-pub struct TransformPlayerIdUnique<'ctx> {
+/// like `ctx.db.transform().entity_id().find(...)`.
+pub struct TransformEntityIdUnique<'ctx> {
     imp: __sdk::UniqueConstraintHandle<Transform, u64>,
     phantom: std::marker::PhantomData<&'ctx super::RemoteTables>,
 }
 
 impl<'ctx> TransformTableHandle<'ctx> {
-    /// Get a handle on the `player_id` unique index on the table `transform`.
-    pub fn player_id(&self) -> TransformPlayerIdUnique<'ctx> {
-        TransformPlayerIdUnique {
-            imp: self.imp.get_unique_constraint::<u64>("player_id"),
+    /// Get a handle on the `entity_id` unique index on the table `transform`.
+    pub fn entity_id(&self) -> TransformEntityIdUnique<'ctx> {
+        TransformEntityIdUnique {
+            imp: self.imp.get_unique_constraint::<u64>("entity_id"),
             phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<'ctx> TransformPlayerIdUnique<'ctx> {
-    /// Find the subscribed row whose `player_id` column value is equal to `col_val`,
+impl<'ctx> TransformEntityIdUnique<'ctx> {
+    /// Find the subscribed row whose `entity_id` column value is equal to `col_val`,
     /// if such a row is present in the client cache.
     pub fn find(&self, col_val: &u64) -> Option<Transform> {
         self.imp.find(col_val)
@@ -197,7 +197,7 @@ impl<'ctx> TransformPlayerIdUnique<'ctx> {
 #[doc(hidden)]
 pub(super) fn register_table(client_cache: &mut __sdk::ClientCache<super::RemoteModule>) {
     let _table = client_cache.get_or_make_table::<Transform>("transform");
-    _table.add_unique_constraint::<u64>("player_id", |row| &row.player_id);
+    _table.add_unique_constraint::<u64>("entity_id", |row| &row.entity_id);
 }
 
 #[doc(hidden)]

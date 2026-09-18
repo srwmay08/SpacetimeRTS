@@ -9,6 +9,8 @@ pub mod ai;
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history, faction_component, Faction};
+use crate::ai::{npc_brain, AiType, BrainState, pet_component, PetComponent, PetStance};
+use crate::building::{structure, Structure};
 
 #[table(accessor = high_frequency_timer, scheduled(high_frequency_tick))]
 #[derive(Clone)]
@@ -159,8 +161,6 @@ pub fn high_frequency_tick(_ctx: &ReducerContext, _timer: HighFrequencyTimer) {}
 #[reducer]
 pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
     crate::ai::process_ai_tick(ctx);
-    // Architectural Note: Evaluating macro-AI states (Threat, Fleeing, Roaming) 
-    // at a 10Hz tick preserves tremendous TeV compute overhead vs processing them per-frame.
     crate::ai::process_npc_brain_tick(ctx, 0.1); 
 }
 
@@ -209,6 +209,138 @@ pub fn client_connected(ctx: &ReducerContext) {
                 });
             }
         }
+
+        let base_x = 0.0;
+        let base_z = 20.0; 
+        let base_y = get_terrain_height(base_x, base_z) + 1.0; 
+        let mut struct_id_counter = 1;
+
+        let qy = 0.70710677; 
+        let qw = 0.70710677; 
+
+        for ix in -1..=1 {
+            for iz in -1..=1 {
+                let fx = base_x + (ix as f32) * 4.0;
+                let fz = base_z + (iz as f32) * 4.0;
+                
+                ctx.db.structure().insert(Structure {
+                    structure_id: struct_id_counter, parent_id: None, piece_type: "Foundation".into(),
+                    stability: 100, is_grounded: true, x: fx, y: base_y, z: fz,
+                    rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
+                });
+                struct_id_counter += 1;
+
+                ctx.db.structure().insert(Structure {
+                    structure_id: struct_id_counter, parent_id: None, piece_type: "Roof".into(),
+                    stability: 80, is_grounded: false, x: fx, y: base_y + 3.0, z: fz,
+                    rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
+                });
+                struct_id_counter += 1;
+
+                if ix == -1 {
+                    ctx.db.structure().insert(Structure {
+                        structure_id: struct_id_counter, parent_id: None, piece_type: "Wall".into(),
+                        stability: 90, is_grounded: false, x: fx - 2.0, y: base_y + 1.5, z: fz,
+                        rot_x: 0.0, rot_y: qy, rot_z: 0.0, rot_w: qw, owner_id: 0,
+                    });
+                    struct_id_counter += 1;
+                }
+                if ix == 1 {
+                    ctx.db.structure().insert(Structure {
+                        structure_id: struct_id_counter, parent_id: None, piece_type: "Wall".into(),
+                        stability: 90, is_grounded: false, x: fx + 2.0, y: base_y + 1.5, z: fz,
+                        rot_x: 0.0, rot_y: qy, rot_z: 0.0, rot_w: qw, owner_id: 0,
+                    });
+                    struct_id_counter += 1;
+                }
+                if iz == 1 {
+                    ctx.db.structure().insert(Structure {
+                        structure_id: struct_id_counter, parent_id: None, piece_type: "Wall".into(),
+                        stability: 90, is_grounded: false, x: fx, y: base_y + 1.5, z: fz + 2.0,
+                        rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
+                    });
+                    struct_id_counter += 1;
+                }
+                if iz == -1 {
+                    if ix == 0 {
+                        ctx.db.structure().insert(Structure {
+                            structure_id: struct_id_counter, parent_id: None, piece_type: "Ramp".into(),
+                            stability: 100, is_grounded: true, x: fx, y: base_y - 0.5, z: fz - 4.0,
+                            rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
+                        });
+                        struct_id_counter += 1;
+                    } else {
+                        ctx.db.structure().insert(Structure {
+                            structure_id: struct_id_counter, parent_id: None, piece_type: "Wall".into(),
+                            stability: 90, is_grounded: false, x: fx, y: base_y + 1.5, z: fz - 2.0,
+                            rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
+                        });
+                        struct_id_counter += 1;
+                    }
+                }
+            }
+        }
+
+        let mut npc_id = ctx.timestamp.to_micros_since_unix_epoch() as u64 + 10000;
+        
+        for i in 0..3 {
+            let nx = base_x + (i as f32 - 1.0) * 2.0;
+            let nz = base_z + 2.0;
+            ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: base_y + 1.5, z: nz, chunk_x: 0, chunk_z: 0, last_processed_tick: 0 });
+            ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 50.0, max: 50.0 });
+            ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Villager });
+            ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
+                entity_id: npc_id, ai_type: AiType::Friendly, state: BrainState::Idle, target_id: None, timer: 0.0,
+                home_x: nx, home_z: nz, wander_x: nx, wander_z: nz 
+            });
+            npc_id += 1;
+        }
+
+        for _ in 0..20 {
+            let nx = (prng(&mut seed) * 400.0) - 200.0;
+            let nz = (prng(&mut seed) * 400.0) - 200.0;
+            if nx.abs() < 50.0 && nz.abs() < 50.0 { continue; } 
+            
+            let ny = get_terrain_height(nx, nz) + 1.5;
+            ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
+            ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 40.0, max: 40.0 });
+            ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Goblin });
+            ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
+                entity_id: npc_id, ai_type: AiType::Goblin, state: BrainState::Idle, target_id: None, timer: 0.0,
+                home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
+            });
+            npc_id += 1;
+        }
+
+        for _ in 0..15 {
+            let nx = (prng(&mut seed) * 400.0) - 200.0;
+            let nz = (prng(&mut seed) * 400.0) - 200.0;
+            let ny = get_terrain_height(nx, nz) + 1.5;
+            
+            ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
+            ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 30.0, max: 30.0 });
+            ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
+            ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
+                entity_id: npc_id, ai_type: AiType::Deer, state: BrainState::Idle, target_id: None, timer: 0.0,
+                home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
+            });
+            npc_id += 1;
+        }
+
+        for _ in 0..10 {
+            let nx = (prng(&mut seed) * 400.0) - 200.0;
+            let nz = (prng(&mut seed) * 400.0) - 200.0;
+            let ny = get_terrain_height(nx, nz) + 1.5;
+            
+            ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
+            ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 60.0, max: 60.0 });
+            ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
+            ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
+                entity_id: npc_id, ai_type: AiType::Boar, state: BrainState::Idle, target_id: None, timer: 0.0,
+                home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
+            });
+            npc_id += 1;
+        }
     }
 
     if let Some(mut player) = ctx.db.player().identity().find(sender) {
@@ -252,6 +384,20 @@ pub fn client_connected(ctx: &ReducerContext) {
         
         ctx.db.player_perspective().insert(PlayerPerspective {
             entity_id, camera_mode: "FPS".to_string(), in_interior: false,
+        });
+
+        let pet_id = entity_id + 99999;
+        ctx.db.transform().insert(movement::Transform {
+            entity_id: pet_id, x: 2.0, y: spawn_y, z: -2.0, chunk_x: 0, chunk_z: 0, last_processed_tick: 0,
+        });
+        ctx.db.health().insert(combat::Health {
+            entity_id: pet_id, current: 80.0, max: 80.0,
+        });
+        ctx.db.faction_component().insert(combat::FactionComponent {
+            entity_id: pet_id, faction: Faction::Player,
+        });
+        ctx.db.pet_component().insert(PetComponent {
+            entity_id: pet_id, owner_id: entity_id, stance: PetStance::Follow,
         });
     }
 }
@@ -343,8 +489,10 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
     });
 
     let mut hit_node = None;
+    let mut hit_entity = None;
     let mut min_dist = 12.0_f32; 
 
+    // 1. Check against Environment Nodes
     for node in ctx.db.resource_node().iter() {
         let dist_x = node.x - px; 
         let dist_y = node.y - py; 
@@ -358,6 +506,36 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
                 hit_node = Some(node);
             }
         }
+    }
+
+    // 2. Check against Living Entities
+    for t in ctx.db.transform().iter() {
+        if t.entity_id == player.entity_id { continue; } // Skip self
+        if ctx.db.health().entity_id().find(t.entity_id).is_none() { continue; } // Target must be alive
+
+        let dist_x = t.x - px; 
+        let dist_y = t.y - py; 
+        let dist_z = t.z - pz;
+        let dist = (dist_x * dist_x + dist_y * dist_y + dist_z * dist_z).sqrt();
+
+        if dist < min_dist {
+            let dot = (dist_x / dist) * dx + (dist_y / dist) * dy + (dist_z / dist) * dz;
+            if dot > 0.5 { 
+                min_dist = dist;
+                hit_entity = Some(t);
+                hit_node = None; // Override node hit if the entity is physically closer
+            }
+        }
+    }
+
+    // Architectural Note: Prioritize damage to the living entity.
+    if let Some(target) = hit_entity {
+        crate::combat::apply_damage(ctx, target.entity_id, 20.0);
+        ctx.db.combat_event().insert(CombatEvent {
+            id: 0, event_type: "HitPlayer".into(), // Triggers blood/impact FX on the client
+            x: target.x, y: target.y + 1.0, z: target.z
+        });
+        return; 
     }
 
     if let Some(node) = hit_node {
@@ -428,7 +606,8 @@ pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     y
 }
 
-fn prng(seed: &mut u64) -> f32 {
+// Architectural Note: Exposed to allow AI scripts deterministic random coordinate selection.
+pub fn prng(seed: &mut u64) -> f32 {
     *seed ^= *seed << 13; 
     *seed ^= *seed >> 7; 
     *seed ^= *seed << 17;

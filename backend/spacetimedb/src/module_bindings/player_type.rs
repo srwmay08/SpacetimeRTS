@@ -7,11 +7,9 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub struct Player {
-    pub player_id: u64,
+    pub entity_id: u64,
     pub identity: __sdk::Identity,
-    pub wood: u32,
-    pub stone: u32,
-    pub food: u32,
+    pub is_online: bool,
 }
 
 impl __sdk::InModule for Player {
@@ -22,22 +20,18 @@ impl __sdk::InModule for Player {
 ///
 /// Provides typed access to columns for query building.
 pub struct PlayerCols {
-    pub player_id: __sdk::__query_builder::Col<Player, u64>,
+    pub entity_id: __sdk::__query_builder::Col<Player, u64>,
     pub identity: __sdk::__query_builder::Col<Player, __sdk::Identity>,
-    pub wood: __sdk::__query_builder::Col<Player, u32>,
-    pub stone: __sdk::__query_builder::Col<Player, u32>,
-    pub food: __sdk::__query_builder::Col<Player, u32>,
+    pub is_online: __sdk::__query_builder::Col<Player, bool>,
 }
 
 impl __sdk::__query_builder::HasCols for Player {
     type Cols = PlayerCols;
     fn cols(table_name: &'static str) -> Self::Cols {
         PlayerCols {
-            player_id: __sdk::__query_builder::Col::new(table_name, "player_id"),
+            entity_id: __sdk::__query_builder::Col::new(table_name, "entity_id"),
             identity: __sdk::__query_builder::Col::new(table_name, "identity"),
-            wood: __sdk::__query_builder::Col::new(table_name, "wood"),
-            stone: __sdk::__query_builder::Col::new(table_name, "stone"),
-            food: __sdk::__query_builder::Col::new(table_name, "food"),
+            is_online: __sdk::__query_builder::Col::new(table_name, "is_online"),
         }
     }
 }
@@ -46,16 +40,16 @@ impl __sdk::__query_builder::HasCols for Player {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct PlayerIxCols {
+    pub entity_id: __sdk::__query_builder::IxCol<Player, u64>,
     pub identity: __sdk::__query_builder::IxCol<Player, __sdk::Identity>,
-    pub player_id: __sdk::__query_builder::IxCol<Player, u64>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Player {
     type IxCols = PlayerIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         PlayerIxCols {
+            entity_id: __sdk::__query_builder::IxCol::new(table_name, "entity_id"),
             identity: __sdk::__query_builder::IxCol::new(table_name, "identity"),
-            player_id: __sdk::__query_builder::IxCol::new(table_name, "player_id"),
         }
     }
 }

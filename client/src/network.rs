@@ -11,6 +11,8 @@ use spacetimedb_sdk::{DbContext, Table};
 
 use crate::module_bindings::{self, *};
 use crate::module_bindings::peasant_table::PeasantTableAccess; 
+use crate::module_bindings::npc_brain_table::NpcBrainTableAccess; 
+use crate::module_bindings::pet_component_table::PetComponentTableAccess; 
 use crate::core::*;
 use crate::components::*;
 
@@ -59,6 +61,10 @@ pub fn init_network_connection(
                 "SELECT * FROM combat_event".to_string(),
                 "SELECT * FROM structure".to_string(),
                 "SELECT * FROM peasant".to_string(), 
+                "SELECT * FROM npc_brain".to_string(),
+                "SELECT * FROM pet_component".to_string(),
+                "SELECT * FROM faction_component".to_string(),
+                "SELECT * FROM health".to_string(),
             ]);
 
             if let Ok(mut guard) = store_clone.lock() {
@@ -123,7 +129,7 @@ pub fn init_network_connection(
             Kcc { is_grounded: false },
             LogicalPosition(Vec3::new(0.0, 25.0, 0.0)),
             LogicalRotation(Quat::IDENTITY),
-            Faction::Player,
+            crate::components::Faction::Player, 
             Selectable, 
         ),
         (
@@ -136,7 +142,7 @@ pub fn init_network_connection(
         parent.spawn((
             PbrBundle {
                 mesh: meshes.add(Cylinder::new(0.5, 2.0)),
-                material: materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.8, 0.2), ..default() }),
+                material: materials.add(StandardMaterial { base_color: Color::srgb(0.8, 0.1, 0.1), ..default() }),
                 ..default()
             },
             RenderLayers::layer(2), 
@@ -250,6 +256,10 @@ pub fn update_spatial_subscriptions(
             "SELECT * FROM combat_event".to_string(),
             "SELECT * FROM structure".to_string(),
             "SELECT * FROM peasant".to_string(),
+            "SELECT * FROM npc_brain".to_string(),
+            "SELECT * FROM pet_component".to_string(),
+            "SELECT * FROM faction_component".to_string(),
+            "SELECT * FROM health".to_string(),
         ];
 
         if culling_state.in_interior {
@@ -270,9 +280,6 @@ pub fn sync_logical_components(
     time: Res<Time>,
     mut query: Query<(&LogicalPosition, &LogicalRotation, &mut BevyTransform), Without<PlayerBody>>
 ) {
-    // Architectural Note: Replaced naive linear interpolation with frame-rate independent 
-    // exponential decay. This eliminates the "jitter" caused by clients rendering at 
-    // 60-144+ FPS while the SpacetimeDB server AI strictly ticks at 10Hz.
     let decay_factor = 1.0 - (-15.0_f32 * time.delta_seconds()).exp(); 
     
     for (log_pos, log_rot, mut transform) in query.iter_mut() {
@@ -328,52 +335,85 @@ pub fn sync_transforms(
         
         if !spawned_ids.contains(&id) {
             let is_peasant = conn.db.db.peasant().entity_id().find(&id).is_some();
+            let is_pet = conn.db.db.pet_component().entity_id().find(&id).is_some();
+            let npc_brain = conn.db.db.npc_brain().entity_id().find(&id);
             
-            if is_peasant {
-                commands.spawn((
-                    NetworkEntity(id),
-                    SpatialBundle::from_transform(BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)),
-                    LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
-                    LogicalRotation(Quat::IDENTITY),
-                    Faction::Player,
-                    Selectable,
-                    PeasantUnit { entity_id: id },
-                )).with_children(|parent| {
-                    parent.spawn((
-                        PbrBundle {
-                            mesh: meshes.add(Capsule3d::new(0.3, 1.0)),
-                            material: materials.add(StandardMaterial { base_color: Color::srgb(0.8, 0.8, 0.2), ..default() }),
-                            ..default()
-                        },
-                        RenderLayers::from_layers(&[0, 1, 2]), RTSProxy,
-                    ));
-                    parent.spawn((
-                        PbrBundle {
-                            mesh: meshes.add(Torus::new(0.4, 0.05)),
-                            material: materials.add(StandardMaterial { base_color: Color::srgb(0.0, 1.0, 0.0), unlit: true, ..default() }),
-                            transform: BevyTransform::from_xyz(0.0, -0.4, 0.0), visibility: Visibility::Hidden, ..default()
-                        },
-                        RenderLayers::layer(2), SelectionRing,
-                    ));
-                });
-            } else {
-                commands.spawn((
-                    NetworkEntity(id),
-                    SpatialBundle::from_transform(BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)),
-                    LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
-                    LogicalRotation(Quat::IDENTITY),
-                    Faction::Player,
-                )).with_children(|parent| {
-                    parent.spawn((
-                        PbrBundle {
-                            mesh: meshes.add(Capsule3d::new(0.4, 1.8)),
-                            material: materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.4, 0.8), ..default() }),
-                            ..default()
-                        },
-                        RenderLayers::from_layers(&[0, 1, 2]), FPSMesh,
-                    ));
-                });
+            let mut color = Color::srgb(0.8, 0.1, 0.1); 
+            let mut mesh_handle = meshes.add(Capsule3d::new(0.4, 1.8));
+            let mut visual_transform = BevyTransform::default();
+            
+            // Architectural Note: Default entity interaction collider for client-side raycasts
+            let mut root_collider = Collider::capsule(0.4, 1.8);
+
+            if is_pet {
+                color = Color::srgb(0.9, 0.5, 0.1); 
+                mesh_handle = meshes.add(Sphere::new(0.6).mesh());
+                root_collider = Collider::sphere(0.6);
+            } else if let Some(brain) = npc_brain {
+                match brain.ai_type {
+                    crate::module_bindings::AiType::Boar => {
+                        color = Color::srgb(0.1, 0.1, 0.1); 
+                        mesh_handle = meshes.add(Cylinder::new(0.5, 1.5));
+                        visual_transform.rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+                        root_collider = Collider::sphere(0.8);
+                    }
+                    crate::module_bindings::AiType::Deer => {
+                        color = Color::srgb(0.4, 0.2, 0.1); 
+                        mesh_handle = meshes.add(Cylinder::new(0.5, 1.5));
+                        visual_transform.rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+                        root_collider = Collider::sphere(0.8);
+                    }
+                    crate::module_bindings::AiType::Goblin => {
+                        color = Color::srgb(0.1, 0.8, 0.1); 
+                        mesh_handle = meshes.add(Capsule3d::new(0.4, 1.5));
+                        root_collider = Collider::capsule(0.4, 1.5);
+                    }
+                    crate::module_bindings::AiType::Friendly | crate::module_bindings::AiType::Peasant => {
+                        color = Color::srgb(0.1, 0.3, 0.9); 
+                        mesh_handle = meshes.add(Capsule3d::new(0.4, 1.8));
+                    }
+                }
+            } else if is_peasant {
+                color = Color::srgb(0.1, 0.3, 0.9); 
+                mesh_handle = meshes.add(Capsule3d::new(0.4, 1.8));
             }
+
+            let mut entity_cmds = commands.spawn((
+                NetworkEntity(id),
+                SpatialBundle::from_transform(BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)),
+                LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
+                LogicalRotation(Quat::IDENTITY),
+                Selectable, 
+                // Architectural Note: Assigning colliders strictly binds entities to the client's 
+                // SpatialQuery system, enabling tactile UI right-clicks and crosshair hit registration.
+                RigidBody::Kinematic, 
+                root_collider,
+                CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment]),
+            ));
+
+            if is_peasant {
+                entity_cmds.insert(PeasantUnit { entity_id: id });
+            }
+
+            entity_cmds.with_children(|parent| {
+                parent.spawn((
+                    PbrBundle {
+                        mesh: mesh_handle,
+                        material: materials.add(StandardMaterial { base_color: color, ..default() }),
+                        transform: visual_transform,
+                        ..default()
+                    },
+                    RenderLayers::from_layers(&[0, 1, 2]), RTSProxy,
+                ));
+                parent.spawn((
+                    PbrBundle {
+                        mesh: meshes.add(Torus::new(0.6, 0.05)),
+                        material: materials.add(StandardMaterial { base_color: Color::srgb(0.0, 1.0, 0.0), unlit: true, ..default() }),
+                        transform: BevyTransform::from_xyz(0.0, -0.4, 0.0), visibility: Visibility::Hidden, ..default()
+                    },
+                    RenderLayers::layer(2), SelectionRing,
+                ));
+            });
         }
     }
 }
