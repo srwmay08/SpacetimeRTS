@@ -6,46 +6,41 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct GatherLootArgs {
-    pub loot_id: u64,
-}
+pub(super) struct SpawnPeasantArgs {}
 
-impl From<GatherLootArgs> for super::Reducer {
-    fn from(args: GatherLootArgs) -> Self {
-        Self::GatherLoot {
-            loot_id: args.loot_id,
-        }
+impl From<SpawnPeasantArgs> for super::Reducer {
+    fn from(args: SpawnPeasantArgs) -> Self {
+        Self::SpawnPeasant
     }
 }
 
-impl __sdk::InModule for GatherLootArgs {
+impl __sdk::InModule for SpawnPeasantArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `gather_loot`.
+/// Extension trait for access to the reducer `spawn_peasant`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait gather_loot {
-    /// Request that the remote module invoke the reducer `gather_loot` to run as soon as possible.
+pub trait spawn_peasant {
+    /// Request that the remote module invoke the reducer `spawn_peasant` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`gather_loot:gather_loot_then`] to run a callback after the reducer completes.
-    fn gather_loot(&self, loot_id: u64) -> __sdk::Result<()> {
-        self.gather_loot_then(loot_id, |_, _| {})
+    /// /// Use [`spawn_peasant:spawn_peasant_then`] to run a callback after the reducer completes.
+    fn spawn_peasant(&self) -> __sdk::Result<()> {
+        self.spawn_peasant_then(|_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `gather_loot` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `spawn_peasant` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn gather_loot_then(
+    fn spawn_peasant_then(
         &self,
-        loot_id: u64,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -53,16 +48,15 @@ pub trait gather_loot {
     ) -> __sdk::Result<()>;
 }
 
-impl gather_loot for super::RemoteReducers {
-    fn gather_loot_then(
+impl spawn_peasant for super::RemoteReducers {
+    fn spawn_peasant_then(
         &self,
-        loot_id: u64,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(GatherLootArgs { loot_id }, callback)
+            .invoke_reducer_with_callback(SpawnPeasantArgs {}, callback)
     }
 }

@@ -10,6 +10,7 @@ use tracing::{error, info, warn};
 use spacetimedb_sdk::{DbContext, Table}; 
 
 use crate::module_bindings::{self, *};
+use crate::module_bindings::peasant_table::PeasantTableAccess; // Architectural Note: Explicitly imported accessor to route unit spawning logic.
 use crate::core::*;
 use crate::components::*;
 
@@ -51,11 +52,11 @@ pub fn init_network_connection(
         let _handle = conn.subscription_builder().subscribe(vec![
             "SELECT * FROM player".to_string(),
             "SELECT * FROM transform WHERE chunk_x >= -1 AND chunk_x <= 1 AND chunk_z >= -1 AND chunk_z <= 1".to_string(),
-            "SELECT * FROM resource_stockpile".to_string(),
-            "SELECT * FROM ground_loot".to_string(),
+            "SELECT * FROM inventory".to_string(),
             "SELECT * FROM resource_node".to_string(),
             "SELECT * FROM combat_event".to_string(),
-            "SELECT * FROM structure".to_string() 
+            "SELECT * FROM structure".to_string(),
+            "SELECT * FROM peasant".to_string(), // Architectural Note: Broadcast macro-AI FSM definitions.
         ]);
 
         match store_clone.lock() {
@@ -81,8 +82,7 @@ pub fn init_network_connection(
     )).with_children(|rig| {
         rig.spawn((
             Camera3dBundle {
-                transform: BevyTransform::from_xyz(0.0, 40.0, 25.0)
-                    .looking_at(Vec3::ZERO, Vec3::Y),
+                transform: BevyTransform::from_xyz(0.0, 40.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
                 camera: Camera { is_active: false, ..default() },
                 ..default()
             },
@@ -129,11 +129,7 @@ pub fn init_network_connection(
         parent.spawn((
             PbrBundle {
                 mesh: meshes.add(Torus::new(0.6, 0.05)),
-                material: materials.add(StandardMaterial { 
-                    base_color: Color::srgb(0.0, 1.0, 0.0), 
-                    unlit: true, 
-                    ..default() 
-                }),
+                material: materials.add(StandardMaterial { base_color: Color::srgb(0.0, 1.0, 0.0), unlit: true, ..default() }),
                 transform: BevyTransform::from_xyz(0.0, -0.9, 0.0), 
                 visibility: Visibility::Hidden,
                 ..default()
@@ -157,9 +153,7 @@ pub fn init_network_connection(
                 PbrBundle {
                     mesh: meshes.add(Capsule3d::new(0.08, 0.4)),
                     material: materials.add(StandardMaterial {
-                        base_color: Color::srgb(0.9, 0.7, 0.6), 
-                        perceptual_roughness: 1.0,
-                        ..default()
+                        base_color: Color::srgb(0.9, 0.7, 0.6), perceptual_roughness: 1.0, ..default()
                     }),
                     transform: BevyTransform::from_xyz(0.3, -0.3, -0.5).with_rotation(Quat::from_rotation_x(1.0)),
                     ..default()
@@ -202,9 +196,7 @@ pub fn wait_for_connection(
                 
                 if let Ok((mut transform, mut velocity, mut gravity, mut tracker, mut buffer)) = player_query.get_single_mut() {
                     transform.translation = Vec3::new(0.0, spawn_y, 0.0);
-                    velocity.x = 0.0;
-                    velocity.y = 0.0;
-                    velocity.z = 0.0;
+                    velocity.x = 0.0; velocity.y = 0.0; velocity.z = 0.0;
                     gravity.0 = 8.0; 
                     tracker.last_position = transform.translation;
                     buffer.queue.clear();
@@ -236,16 +228,13 @@ pub fn update_spatial_subscriptions(
 
         let mut subscriptions = vec![
             "SELECT * FROM player".to_string(),
-            "SELECT * FROM resource_stockpile".to_string(),
-            "SELECT * FROM ground_loot".to_string(),
+            "SELECT * FROM inventory".to_string(),
             "SELECT * FROM resource_node".to_string(),
             "SELECT * FROM combat_event".to_string(),
             "SELECT * FROM structure".to_string(),
+            "SELECT * FROM peasant".to_string(),
         ];
 
-        // Architectural Note: Network Interest Management.
-        // If the player is structurally occluded (inside a base), we intentionally omit 
-        // network subscriptions to external macro-level chunks, drastically conserving bandwidth.
         if culling_state.in_interior {
             subscriptions.push(format!("SELECT * FROM transform WHERE chunk_x = {} AND chunk_z = {}", cx, cz));
         } else {
@@ -256,9 +245,7 @@ pub fn update_spatial_subscriptions(
         }
 
         let _handle = conn.db.subscription_builder().subscribe(subscriptions);
-
         culling_state.needs_rebuild = false;
-        info!("Rebuilt SpacetimeDB spatial subscription for Chunk_ID ({}, {}) with radius {}. In Interior: {}", cx, cz, rad, culling_state.in_interior);
     }
 }
 
@@ -267,13 +254,9 @@ pub fn sync_logical_components(
     mut query: Query<(&LogicalPosition, &LogicalRotation, &mut BevyTransform), Without<PlayerBody>>
 ) {
     let dt = time.delta_seconds() * 15.0; 
-    
     for (log_pos, log_rot, mut transform) in query.iter_mut() {
-        if transform.translation.distance(log_pos.0) > 5.0 {
-            transform.translation = log_pos.0; 
-        } else {
-            transform.translation = transform.translation.lerp(log_pos.0, dt);
-        }
+        if transform.translation.distance(log_pos.0) > 5.0 { transform.translation = log_pos.0; } 
+        else { transform.translation = transform.translation.lerp(log_pos.0, dt); }
         transform.rotation = transform.rotation.slerp(log_rot.0, dt);
     }
 }
@@ -281,7 +264,7 @@ pub fn sync_logical_components(
 pub fn sync_transforms(
     mut commands: Commands, 
     conn: Res<SpacetimeConnection>, 
-    mut query: Query<(&NetworkEntity, &mut LogicalPosition, &mut LogicalRotation)>,
+    mut query: Query<(Entity, &NetworkEntity, &mut LogicalPosition, &mut LogicalRotation)>,
     mut player_query: Query<&mut crate::prediction::AuthoritativeState, With<PlayerBody>>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -292,18 +275,26 @@ pub fn sync_transforms(
         .and_then(|id| conn.db.db.player().identity().find(id))
         .map(|p| p.entity_id);
 
-    let db_transforms: Vec<_> = conn.db.db.transform().iter().collect();
+    let db_transforms_map: std::collections::HashMap<_, _> = conn.db.db.transform()
+        .iter()
+        .map(|t| (t.entity_id, t.clone()))
+        .collect();
+
     let mut spawned_ids = std::collections::HashSet::with_capacity(query.iter().len());
 
-    for (net_entity, mut log_pos, _) in query.iter_mut() {
+    // Architectural Note: Network Garbage Collection.
+    // If the DB drops an entity (e.g. killed peasant), gracefully despawn the Bevy mesh instantly.
+    for (entity, net_entity, mut log_pos, _) in query.iter_mut() {
         spawned_ids.insert(net_entity.0);
-        if let Some(db_t) = db_transforms.iter().find(|t| t.entity_id == net_entity.0) {
+        if let Some(db_t) = db_transforms_map.get(&net_entity.0) {
             log_pos.0 = Vec3::new(db_t.x, db_t.y, db_t.z);
+        } else {
+            commands.entity(entity).despawn_recursive();
         }
     }
 
-    for db_t in db_transforms {
-        if Some(db_t.entity_id) == my_entity_id { 
+    for (id, db_t) in db_transforms_map {
+        if Some(id) == my_entity_id { 
             if let Ok(mut auth_state) = player_query.get_single_mut() {
                 if auth_state.last_processed_tick != db_t.last_processed_tick {
                     auth_state.position = Vec3::new(db_t.x, db_t.y, db_t.z);
@@ -313,26 +304,55 @@ pub fn sync_transforms(
             continue; 
         }
         
-        if !spawned_ids.contains(&db_t.entity_id) {
-            commands.spawn((
-                NetworkEntity(db_t.entity_id),
-                SpatialBundle::from_transform(
-                    BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)
-                ),
-                LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
-                LogicalRotation(Quat::IDENTITY),
-                Faction::Player,
-            )).with_children(|parent| {
-                parent.spawn((
-                    PbrBundle {
-                        mesh: meshes.add(Capsule3d::new(0.4, 1.8)),
-                        material: materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.4, 0.8), ..default() }),
-                        ..default()
-                    },
-                    RenderLayers::from_layers(&[0, 1, 2]),
-                    FPSMesh,
-                ));
-            });
+        if !spawned_ids.contains(&id) {
+            // Architectural Note: Determines the correct client-side archetype for the spawned network entity.
+            let is_peasant = conn.db.db.peasant().entity_id().find(&id).is_some();
+            
+            if is_peasant {
+                commands.spawn((
+                    NetworkEntity(id),
+                    SpatialBundle::from_transform(BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)),
+                    LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
+                    LogicalRotation(Quat::IDENTITY),
+                    Faction::Player,
+                    Selectable,
+                    PeasantUnit { entity_id: id },
+                )).with_children(|parent| {
+                    parent.spawn((
+                        PbrBundle {
+                            mesh: meshes.add(Capsule3d::new(0.3, 1.0)),
+                            material: materials.add(StandardMaterial { base_color: Color::srgb(0.8, 0.8, 0.2), ..default() }),
+                            ..default()
+                        },
+                        RenderLayers::from_layers(&[0, 1, 2]), RTSProxy,
+                    ));
+                    parent.spawn((
+                        PbrBundle {
+                            mesh: meshes.add(Torus::new(0.4, 0.05)),
+                            material: materials.add(StandardMaterial { base_color: Color::srgb(0.0, 1.0, 0.0), unlit: true, ..default() }),
+                            transform: BevyTransform::from_xyz(0.0, -0.4, 0.0), visibility: Visibility::Hidden, ..default()
+                        },
+                        RenderLayers::layer(2), SelectionRing,
+                    ));
+                });
+            } else {
+                commands.spawn((
+                    NetworkEntity(id),
+                    SpatialBundle::from_transform(BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)),
+                    LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
+                    LogicalRotation(Quat::IDENTITY),
+                    Faction::Player,
+                )).with_children(|parent| {
+                    parent.spawn((
+                        PbrBundle {
+                            mesh: meshes.add(Capsule3d::new(0.4, 1.8)),
+                            material: materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.4, 0.8), ..default() }),
+                            ..default()
+                        },
+                        RenderLayers::from_layers(&[0, 1, 2]), FPSMesh,
+                    ));
+                });
+            }
         }
     }
 }
@@ -346,10 +366,15 @@ pub fn sync_resource_nodes(
 ) {
     let mut db_node_ids = std::collections::HashSet::new();
 
+    let mut local_nodes = std::collections::HashSet::new();
+    for (_, n) in node_query.iter() {
+        local_nodes.insert(n.node_id);
+    }
+
     for node in conn.db.db.resource_node().iter() {
         db_node_ids.insert(node.node_id);
         
-        if !node_query.iter().any(|(_, n)| n.node_id == node.node_id) {
+        if !local_nodes.contains(&node.node_id) {
             let (mesh, color, collider, y_offset) = match node.node_type.as_str() {
                 "Tree" => (meshes.add(Cylinder::new(0.5, 4.0)), Color::srgb(0.3, 0.2, 0.1), Collider::cylinder(0.5, 4.0), 2.0),
                 "Rock" => (meshes.add(Cuboid::new(1.5, 1.2, 1.5)), Color::srgb(0.5, 0.5, 0.5), Collider::cuboid(1.5, 1.2, 1.5), 0.6),
@@ -360,18 +385,36 @@ pub fn sync_resource_nodes(
             commands.spawn((
                 PbrBundle {
                     mesh, 
-                    material: materials.add(StandardMaterial {
-                        base_color: color,
-                        perceptual_roughness: 0.9,
-                        reflectance: 0.05,
-                        ..default()
-                    }),
-                    transform: BevyTransform::from_xyz(node.x, node.y + y_offset + 0.05, node.z),
+                    material: materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.9, reflectance: 0.05, ..default() }),
+                    transform: BevyTransform::from_xyz(node.x, node.y + (y_offset * node.scale) + 0.05, node.z)
+                        .with_scale(Vec3::splat(node.scale)),
                     ..default()
                 },
                 ResourceNodeItem { node_id: node.node_id },
                 RigidBody::Static, collider,
-            ));
+                CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
+            )).with_children(|parent| {
+                if node.node_type == "Bush" {
+                    let offsets = [
+                        Vec3::new(0.6, 0.2, 0.0), Vec3::new(-0.4, 0.5, 0.5), 
+                        Vec3::new(0.0, -0.3, 0.6), Vec3::new(0.5, -0.5, -0.5), 
+                        Vec3::new(-0.5, 0.1, -0.5),
+                    ];
+                    
+                    let red_material = materials.add(StandardMaterial { base_color: Color::srgb(0.8, 0.1, 0.1), ..default() });
+                    for offset in offsets {
+                        parent.spawn((
+                            PbrBundle {
+                                mesh: meshes.add(Sphere::new(0.15).mesh()),
+                                material: red_material.clone(),
+                                transform: BevyTransform::from_translation(offset),
+                                ..default()
+                            },
+                            BerryVisual { node_id: node.node_id }
+                        ));
+                    }
+                }
+            });
         }
     }
 
@@ -380,45 +423,14 @@ pub fn sync_resource_nodes(
     }
 }
 
-pub fn sync_ground_loot(
-    mut commands: Commands, 
-    mut meshes: ResMut<Assets<Mesh>>, 
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    loot_query: Query<(Entity, &GroundLootItem)>, 
+pub fn update_berry_visuals(
     conn: Res<SpacetimeConnection>,
+    mut query: Query<(&mut Visibility, &BerryVisual)>,
 ) {
-    let mut db_loot_ids = std::collections::HashSet::new();
-
-    for loot in conn.db.db.ground_loot().iter() {
-        db_loot_ids.insert(loot.loot_id);
-        
-        if !loot_query.iter().any(|(_, l)| l.loot_id == loot.loot_id) {
-            let color = match loot.item_type.as_str() {
-                "Wood" | "Branch" => Color::srgb(0.4, 0.2, 0.1),
-                "Berry" => Color::srgb(0.8, 0.2, 0.2), 
-                _ => Color::srgb(0.5, 0.5, 0.5)                 
-            };
-
-            commands.spawn((
-                PbrBundle {
-                    mesh: meshes.add(Sphere::new(0.3).mesh()), 
-                    material: materials.add(StandardMaterial {
-                        base_color: color,
-                        perceptual_roughness: 0.85,
-                        reflectance: 0.05,
-                        ..default()
-                    }),
-                    transform: BevyTransform::from_xyz(loot.x, loot.y + 0.2, loot.z),
-                    ..default()
-                },
-                GroundLootItem { loot_id: loot.loot_id },
-                RigidBody::Dynamic, Collider::sphere(0.3),
-            ));
+    for (mut vis, berry) in query.iter_mut() {
+        if let Some(node) = conn.db.db.resource_node().node_id().find(&berry.node_id) {
+            *vis = if node.health > 0 { Visibility::Inherited } else { Visibility::Hidden };
         }
-    }
-
-    for (entity, loot_item) in loot_query.iter() {
-        if !db_loot_ids.contains(&loot_item.loot_id) { commands.entity(entity).despawn_recursive(); }
     }
 }
 
@@ -444,28 +456,19 @@ pub fn process_combat_events(
             };
 
             let velocities = [
-                Vec3::new(1.0, 3.0, 1.0),
-                Vec3::new(-1.0, 3.5, 0.5),
-                Vec3::new(0.5, 2.5, -1.0),
-                Vec3::new(-0.5, 4.0, -0.5),
-                Vec3::new(0.0, 3.0, 0.0),
+                Vec3::new(1.0, 3.0, 1.0), Vec3::new(-1.0, 3.5, 0.5), Vec3::new(0.5, 2.5, -1.0),
+                Vec3::new(-0.5, 4.0, -0.5), Vec3::new(0.0, 3.0, 0.0),
             ];
 
             for vel in velocities {
                 commands.spawn((
                     PbrBundle {
                         mesh: meshes.add(Cuboid::new(0.1, 0.1, 0.1)),
-                        material: materials.add(StandardMaterial {
-                            base_color: color,
-                            unlit: event.event_type == "HitPlayer",
-                            ..default()
-                        }),
+                        material: materials.add(StandardMaterial { base_color: color, unlit: event.event_type == "HitPlayer", ..default() }),
                         transform: BevyTransform::from_xyz(event.x, event.y + 0.5, event.z),
                         ..default()
                     },
-                    RigidBody::Dynamic,
-                    Collider::cuboid(0.1, 0.1, 0.1),
-                    LinearVelocity(vel),
+                    RigidBody::Dynamic, Collider::cuboid(0.1, 0.1, 0.1), LinearVelocity(vel),
                     Particle { timer: Timer::from_seconds(0.5, TimerMode::Once) }, 
                 ));
             }

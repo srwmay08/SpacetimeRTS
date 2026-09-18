@@ -51,8 +51,8 @@ pub struct TerrainChunk {
 #[derive(Component)] pub struct PlayerHead;
 #[derive(Component)] pub struct ViewModelArm;
 #[derive(Component)] pub struct Kcc { pub is_grounded: bool }
-#[derive(Component)] pub struct GroundLootItem { pub loot_id: u64 }
 #[derive(Component)] pub struct ResourceNodeItem { pub node_id: u64 } 
+#[derive(Component)] pub struct PeasantUnit { pub entity_id: u64 } // Architectural Note: Added to identify AI entities for RTS right-click routing.
 
 // ----------------------------------------------------------------------------
 // MODULAR BUILDING & SOCKET COMPONENTS
@@ -63,6 +63,7 @@ pub struct TerrainChunk {
 pub struct Socket {
     #[allow(dead_code)] pub name: String,
     pub local_offset: Vec3,
+    pub local_rotation: Quat, 
     pub is_occupied: bool,
 }
 
@@ -70,14 +71,12 @@ pub struct Socket {
 #[derive(Component)]
 pub struct BuildHologram;
 
-// Architectural Note: Defines an Axis-Aligned Bounding Box (AABB) volume encompassing a player base.
 #[derive(Component)]
 pub struct BaseInteriorVolume {
     pub min: Vec3,
     pub max: Vec3,
 }
 
-// Architectural Note: Marks highly detailed interior entities (furniture, workstations) for aggressive rendering culling.
 #[derive(Component)]
 pub struct InteriorProp;
 
@@ -86,11 +85,19 @@ pub struct InteriorProp;
 // ----------------------------------------------------------------------------
 
 #[derive(Component)] pub struct InventoryUiRoot; 
-#[derive(Component)] pub struct WoodText;
-#[derive(Component)] pub struct OreText;
-#[derive(Component)] pub struct FoodText;
+#[derive(Component)] pub struct InventorySlotName(pub usize);
+#[derive(Component)] pub struct InventorySlotCount(pub usize);
+
 #[derive(Component)] pub struct HealthBarUI;
 #[derive(Component)] pub struct BuildUIText;
+
+#[derive(Component)] pub struct ActionBarUiRoot;
+#[derive(Component)] pub struct ActionBarButton(pub String);
+
+#[derive(Component)] 
+pub struct BerryVisual {
+    pub node_id: u64
+}
 
 #[derive(Component)] 
 pub struct Particle { 

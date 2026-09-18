@@ -1,10 +1,10 @@
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
 use crate::movement::player_session;
-use crate::resource_stockpile; 
-use crate::CombatEvent; // Architectural Note: Required to broadcast collapse visual effects.
+use crate::inventory; 
+use crate::CombatEvent; 
 use crate::combat_event; 
+use crate::nav_event;
 
-/// Defines a localized snap point on a modular piece for server-side validation.
 #[derive(SpacetimeType, Clone, Debug)]
 pub struct SocketDef {
     pub name: String,
@@ -13,20 +13,13 @@ pub struct SocketDef {
     pub offset_z: f32,
 }
 
-/// Authoritative database table storing all placed player structures.
 #[table(accessor = structure, public)]
 #[derive(Clone)]
 pub struct Structure {
     #[primary_key] #[auto_inc]
     pub structure_id: u64,
-    
-    // Architectural Note: Establishes a strict parent-child stability graph. 
-    // If a piece loses its parent, it triggers a recursive physical collapse.
     pub parent_id: Option<u64>, 
-    
     pub piece_type: String,
-    
-    // Architectural Note: Load-bearing calculations to prevent floating geometry.
     pub stability: u32,         
     pub is_grounded: bool,      
     
@@ -40,8 +33,6 @@ pub struct Structure {
     pub owner_id: u64,
 }
 
-/// Authoritative reducer to validate material costs, structural integrity, and persist structures.
-/// Architectural Note: Signature updated to require `parent_id` from the client's socket raycast.
 #[reducer]
 pub fn place_structure(
     ctx: &ReducerContext,
@@ -50,16 +41,14 @@ pub fn place_structure(
     x: f32, y: f32, z: f32,
     rot_x: f32, rot_y: f32, rot_z: f32, rot_w: f32,
 ) -> Result<(), String> {
-    // Authenticate builder session
     let session = ctx.db.player_session().identity().find(ctx.sender())
         .ok_or("Unauthorized: No active session")?;
 
-    let mut stockpile = ctx.db.resource_stockpile().entity_id().find(session.entity_id)
-        .ok_or("Stockpile not found")?;
+    let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .unwrap_or_else(|| crate::Inventory { entity_id: session.entity_id, slots: vec![] });
 
-    // Architectural Note: Hardcoded material costs and structural decay penalties.
     let (wood_cost, decay_penalty) = match piece_type.as_str() {
-        "Foundation" => (20, 0),   // Foundations are grounded, no inherited decay.
+        "Foundation" => (20, 0),   
         "Wall"       => (10, 20),
         "Floor"      => (15, 25),
         "Roof"       => (15, 30),
@@ -67,21 +56,22 @@ pub fn place_structure(
         _ => return Err(format!("Unknown piece type: {}", piece_type)),
     };
 
-    if stockpile.wood < wood_cost {
-        return Err("Not enough wood in stockpile to build structure".to_string());
+    if !crate::remove_item(&mut inv, "Wood", wood_cost) {
+        return Err("Not enough wood in inventory to build structure".to_string());
     }
 
-    // Architectural Note: Structural Integrity & Physics Validation
-    let mut stability = 0;
-    let mut is_grounded = false;
+    // Architectural Note: Removed the unused assignment warning by strictly binding the types 
+    // and relying on exhaustive assignment inside the physical validation branches.
+    let stability: u32;
+    let is_grounded: bool;
 
-    if piece_type == "Foundation" && parent_id.is_none() {
+    if (piece_type == "Foundation" || piece_type == "Ramp") && parent_id.is_none() {
         let ground_y = crate::get_terrain_height(x, z);
-        if (y - ground_y).abs() < 2.5 { 
+        if (y - ground_y).abs() < 3.0 { 
             is_grounded = true;
-            stability = 100; // Max structural integrity for grounded units.
+            stability = 100; 
         } else {
-            return Err("Foundations must be physically anchored to the terrain mesh.".to_string());
+            return Err("Foundations and Ramps must be physically anchored to the terrain mesh.".to_string());
         }
     } else if let Some(pid) = parent_id {
         let parent = ctx.db.structure().structure_id().find(pid)
@@ -91,13 +81,16 @@ pub fn place_structure(
             return Err("Structural integrity depleted. Cannot support additional mass.".to_string());
         }
         stability = parent.stability - decay_penalty;
+        is_grounded = false;
     } else {
         return Err("Piece must be grounded to terrain or snapped to a valid parent structure.".to_string());
     }
 
-    // Deduct resources and insert authoritative record
-    stockpile.wood -= wood_cost;
-    ctx.db.resource_stockpile().entity_id().update(stockpile);
+    if ctx.db.inventory().entity_id().find(session.entity_id).is_some() {
+        ctx.db.inventory().entity_id().update(inv);
+    } else {
+        ctx.db.inventory().insert(inv);
+    }
 
     ctx.db.structure().insert(Structure {
         structure_id: 0,
@@ -110,13 +103,16 @@ pub fn place_structure(
         owner_id: session.entity_id,
     });
 
+    ctx.db.nav_event().insert(crate::NavEvent {
+        id: 0,
+        min_x: x - 3.0, min_y: y - 3.0, min_z: z - 3.0,
+        max_x: x + 3.0, max_y: y + 3.0, max_z: z + 3.0,
+    });
+
     log::info!("Player {} placed {}. Stability: {}/100", session.entity_id, piece_type, stability);
     Ok(())
 }
 
-/// Processes explosive or manual destruction and enforces physical collapse.
-/// Architectural Note: Implements an iterative DFS traversal to find and destroy all child geometry 
-/// structurally dependent on the destroyed root piece without risking a Wasm stack overflow.
 #[reducer]
 pub fn destroy_structure(
     ctx: &ReducerContext,
@@ -128,28 +124,30 @@ pub fn destroy_structure(
     let mut collapse_queue = vec![target_structure_id];
     let mut index = 0;
 
-    // Traverse the stability graph to identify all orphaned children
     while index < collapse_queue.len() {
         let current_id = collapse_queue[index];
-        
         for child in ctx.db.structure().iter().filter(|s| s.parent_id == Some(current_id)) {
             collapse_queue.push(child.structure_id);
         }
         index += 1;
     }
 
-    // Process the physical collapse cascade
     for id in collapse_queue.iter() {
         if let Some(structure) = ctx.db.structure().structure_id().find(*id) {
             ctx.db.structure().structure_id().delete(*id);
             
-            // Generate visual combat event for the collapse for clients to render debris
             ctx.db.combat_event().insert(CombatEvent { 
                 id: 0,
                 event_type: "StructureCollapse".to_string(),
                 x: structure.x,
                 y: structure.y,
                 z: structure.z,
+            });
+
+            ctx.db.nav_event().insert(crate::NavEvent {
+                id: 0,
+                min_x: structure.x - 3.0, min_y: structure.y - 3.0, min_z: structure.z - 3.0,
+                max_x: structure.x + 3.0, max_y: structure.y + 3.0, max_z: structure.z + 3.0,
             });
         }
     }

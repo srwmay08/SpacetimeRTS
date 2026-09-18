@@ -32,7 +32,8 @@ impl ModularPieceType {
         }
     }
 
-    #[allow(dead_code)]
+    // Architectural Note: Exposed the server-authoritative material costs directly to 
+    // the UI state to prevent silent placement failures from confusing the player.
     pub fn wood_cost(&self) -> u32 {
         match self {
             Self::Foundation => 20,
@@ -46,24 +47,24 @@ impl ModularPieceType {
     pub fn default_sockets(&self) -> Vec<Socket> {
         match self {
             Self::Foundation => vec![
-                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 1.0, 0.0), is_occupied: false },
-                Socket { name: "North".into(), local_offset: Vec3::new(0.0, 0.0, -2.0), is_occupied: false },
-                Socket { name: "South".into(), local_offset: Vec3::new(0.0, 0.0, 2.0), is_occupied: false },
-                Socket { name: "East".into(), local_offset: Vec3::new(2.0, 0.0, 0.0), is_occupied: false },
-                Socket { name: "West".into(), local_offset: Vec3::new(-2.0, 0.0, 0.0), is_occupied: false },
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 1.0, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "North".into(), local_offset: Vec3::new(0.0, 2.0, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "South".into(), local_offset: Vec3::new(0.0, 2.0, 2.0), local_rotation: Quat::from_rotation_y(std::f32::consts::PI), is_occupied: false },
+                Socket { name: "East".into(), local_offset: Vec3::new(2.0, 2.0, 0.0), local_rotation: Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2), is_occupied: false },
+                Socket { name: "West".into(), local_offset: Vec3::new(-2.0, 2.0, 0.0), local_rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), is_occupied: false },
             ],
             Self::Wall => vec![
-                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 3.0, 0.0), is_occupied: false },
-                Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, 0.0, 0.0), is_occupied: false },
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 1.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, -1.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
             Self::Floor => vec![
-                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 0.5, 0.0), is_occupied: false },
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 0.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
             Self::Roof => vec![
-                Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, 0.0, 0.0), is_occupied: false },
+                Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, 0.0, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
             Self::Ramp => vec![
-                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 2.0, -2.0), is_occupied: false },
+                Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 2.0, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
         }
     }
@@ -114,6 +115,13 @@ pub fn toggle_build_mode(
             ModularPieceType::Ramp => ModularPieceType::Foundation,
         };
         info!("Selected Modular Piece: {:?}", build_state.selected_piece);
+        
+        // Architectural Note: Forcibly despawn the stale hologram entity.
+        // This guarantees `update_build_hologram` runs its `else` block on the next frame 
+        // to spawn the correct geometric bounds for the newly selected structure type.
+        for entity in hologram_query.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
     }
 }
 
@@ -163,9 +171,6 @@ pub fn update_build_hologram(
         )).id()
     };
 
-    // Architectural Note: Crucial raycast fix. We MUST exclude the player's own 
-    // collider physics volume to prevent the raycast from hitting the camera 
-    // origin at `time_of_impact = 0.0` and stranding the hologram in mid-air.
     let mut filter = SpatialQueryFilter::default();
     if let Ok(player_entity) = player_query.get_single() {
         filter = filter.with_excluded_entities([player_entity]);
@@ -190,7 +195,6 @@ pub fn update_build_hologram(
 
         if let Ok(children) = children_query.get(hit.entity) {
             let hit_point = ray_origin + ray_dir * hit.time_of_impact;
-            // Limit snap targeting to sockets within a 4-meter spherical radius.
             let mut closest_dist = 16.0; 
             
             for &child in children.iter() {
@@ -201,7 +205,7 @@ pub fn update_build_hologram(
                             closest_dist = dist;
                             target_transform.translation = socket_t.translation();
                             let (_, rotation, _) = socket_t.to_scale_rotation_translation();
-                            target_transform.rotation = rotation;
+                            target_transform.rotation = rotation; 
                             snapped = true;
                         }
                     }
@@ -215,7 +219,9 @@ pub fn update_build_hologram(
             let grid_size = 4.0;
             let snapped_x = (hit_point.x / grid_size).round() * grid_size;
             let snapped_z = (hit_point.z / grid_size).round() * grid_size;
-            target_transform.translation = Vec3::new(snapped_x, hit_point.y, snapped_z);
+            let true_y = crate::terrain::get_terrain_height(snapped_x, snapped_z);
+            
+            target_transform.translation = Vec3::new(snapped_x, true_y, snapped_z);
             target_transform.rotation = Quat::IDENTITY;
         }
     } else {
@@ -234,10 +240,7 @@ pub fn update_build_hologram(
         info!("Dispatching place_structure reducer for {} at {:?}", piece_name, pos);
         
         let _ = conn.db.reducers.place_structure(
-            target_parent_id,
-            piece_name,
-            pos.x, pos.y, pos.z,
-            rot.x, rot.y, rot.z, rot.w,
+            target_parent_id, piece_name, pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, rot.w,
         );
     }
 }
@@ -251,7 +254,6 @@ pub fn sync_structures(
 ) {
     let _ = conn.db.frame_tick();
     let db_structures: Vec<_> = conn.db.db.structure().iter().collect();
-    
     let mut spawned_ids = std::collections::HashSet::with_capacity(existing_structures.iter().len());
 
     for (_entity, net_struct) in existing_structures.iter() {
@@ -261,9 +263,6 @@ pub fn sync_structures(
     for s in db_structures {
         if !spawned_ids.contains(&s.structure_id) {
             
-            // Architectural Note: Generating geometrically accurate colliders. 
-            // Previous hardcoded Cuboid(4.0, 1.0, 4.0) caused walls to project massive
-            // invisible physics boundaries, blinding the socket raycaster.
             let (mesh, color, collider) = match s.piece_type.as_str() {
                 "Foundation" => (meshes.add(Cuboid::new(4.0, 1.0, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 1.0, 4.0)),
                 "Wall" => (meshes.add(Cuboid::new(4.0, 3.0, 0.4)), Color::srgb(0.6, 0.5, 0.4), Collider::cuboid(4.0, 3.0, 0.4)),
@@ -296,7 +295,10 @@ pub fn sync_structures(
             )).with_children(|parent| {
                 for socket in sockets {
                     parent.spawn((
-                        SpatialBundle::from_transform(Transform::from_translation(socket.local_offset)),
+                        SpatialBundle::from_transform(
+                            Transform::from_translation(socket.local_offset)
+                                      .with_rotation(socket.local_rotation)
+                        ),
                         socket,
                     ));
                 }

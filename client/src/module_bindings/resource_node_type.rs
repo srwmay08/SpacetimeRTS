@@ -13,6 +13,8 @@ pub struct ResourceNode {
     pub y: f32,
     pub z: f32,
     pub health: u32,
+    pub scale: f32,
+    pub required_tool: String,
 }
 
 impl __sdk::InModule for ResourceNode {
@@ -29,6 +31,8 @@ pub struct ResourceNodeCols {
     pub y: __sdk::__query_builder::Col<ResourceNode, f32>,
     pub z: __sdk::__query_builder::Col<ResourceNode, f32>,
     pub health: __sdk::__query_builder::Col<ResourceNode, u32>,
+    pub scale: __sdk::__query_builder::Col<ResourceNode, f32>,
+    pub required_tool: __sdk::__query_builder::Col<ResourceNode, String>,
 }
 
 impl __sdk::__query_builder::HasCols for ResourceNode {
@@ -41,6 +45,8 @@ impl __sdk::__query_builder::HasCols for ResourceNode {
             y: __sdk::__query_builder::Col::new(table_name, "y"),
             z: __sdk::__query_builder::Col::new(table_name, "z"),
             health: __sdk::__query_builder::Col::new(table_name, "health"),
+            scale: __sdk::__query_builder::Col::new(table_name, "scale"),
+            required_tool: __sdk::__query_builder::Col::new(table_name, "required_tool"),
         }
     }
 }

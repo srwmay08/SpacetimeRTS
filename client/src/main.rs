@@ -11,7 +11,6 @@ mod building;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
-use tracing::warn;
 
 use crate::core::*;
 use crate::network::*;
@@ -56,7 +55,6 @@ fn main() {
             player_movement_system,
         ).run_if(in_state(GameState::InGame)))
 
-        // Architectural Note: Added interior_occlusion_culling_system to process volumetric AABB checks
         .add_systems(Update, (
             context_aware_action_dispatcher,
             interior_occlusion_culling_system,
@@ -68,7 +66,7 @@ fn main() {
             update_spatial_subscriptions, 
             sync_logical_components,
             sync_resource_nodes, 
-            sync_ground_loot,
+            update_berry_visuals, 
             sync_structures, 
         ).run_if(in_state(GameState::InGame)))
 
@@ -81,7 +79,9 @@ fn main() {
             toggle_inventory_ui,
             process_combat_events, 
             tick_particles,
-            visualize_selection 
+            visualize_selection,
+            action_bar_interaction,       // Architectural Note: Registers the RTS command bar click responder.
+            toggle_action_bar_visibility  // Architectural Note: Hides the command bar when switching to FPS culling mode.
         ).run_if(in_state(GameState::InGame)))    
 
         .add_systems(Update, fps_look.run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
@@ -95,9 +95,5 @@ fn main() {
 }
 
 fn track_telemetry_metrics(time: Res<Time>, mut telemetry: ResMut<TelemetryTracker>) {
-    let delta = time.delta_seconds_f64();
-    if delta > telemetry.frame_drop_threshold {
-        warn!("ECS Frame Drop Detected! Frame took {:.2}ms", delta * 1000.0);
-    }
     telemetry.last_frame_time = time.elapsed_seconds_f64();
 }
