@@ -3,7 +3,10 @@ use crate::movement::player_session;
 use crate::CombatEvent;
 use crate::combat_event;
 use crate::movement::transform;
-use crate::ai::{npc_brain, pet_component};
+
+// Architectural Note: Imported `peasant` trait to resolve E0599 compiler error. 
+// SpacetimeDB v2.x generates table accessors as traits that must be explicitly brought into scope.
+use crate::ai::{npc_brain, pet_component, peasant};
 
 // ----------------------------------------------------------------------------
 // DATA STRUCTURES
@@ -71,27 +74,49 @@ pub fn get_standing(a: &Faction, b: &Faction) -> FactionStanding {
         (Faction::Goblin, Faction::Player) => FactionStanding::KillOnSight,
         (Faction::Goblin, Faction::Villager) => FactionStanding::KillOnSight,
         (Faction::Villager, Faction::Goblin) => FactionStanding::KillOnSight,
-        (Faction::Villager, Faction::Wildlife) => FactionStanding::Neutral,
-        (Faction::Wildlife, Faction::Villager) => FactionStanding::Neutral,
+        
+        (Faction::Wildlife, Faction::Player) => FactionStanding::KillOnSight,
+        (Faction::Wildlife, Faction::Villager) => FactionStanding::KillOnSight,
         (Faction::Player, Faction::Wildlife) => FactionStanding::Neutral,
-        (Faction::Wildlife, Faction::Player) => FactionStanding::Neutral,
+        (Faction::Villager, Faction::Wildlife) => FactionStanding::Neutral,
+        
         _ => FactionStanding::Neutral,
     }
 }
 
 /// Architectural Note: Centralized authoritative damage application. 
-/// Automatically handles component cleanup and entity deletion when HP reaches 0.
+/// Automatically handles component cleanup, entity deletion, and authoritative player respawns.
 pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
     if let Some(mut hp) = ctx.db.health().entity_id().find(target_id) {
         hp.current = (hp.current - amount).max(0.0);
         
         if hp.current == 0.0 {
-            ctx.db.health().entity_id().delete(target_id);
-            ctx.db.transform().entity_id().delete(target_id);
-            ctx.db.faction_component().entity_id().delete(target_id);
-            ctx.db.npc_brain().entity_id().delete(target_id);
-            ctx.db.pet_component().entity_id().delete(target_id);
-            log::info!("Entity {} reached 0 HP and was removed from the world.", target_id);
+            // Architectural Note: Check if the dying entity is tied to an active player session.
+            if ctx.db.player_session().entity_id().find(target_id).is_some() {
+                hp.current = hp.max;
+                ctx.db.health().entity_id().update(hp);
+
+                if let Some(mut transform) = ctx.db.transform().entity_id().find(target_id) {
+                    transform.x = 0.0;
+                    transform.z = 0.0;
+                    transform.y = crate::get_terrain_height(0.0, 0.0) + 10.0;
+                    ctx.db.transform().entity_id().update(transform);
+                }
+                
+                log::info!("Player {} died and respawned at the origin.", target_id);
+            } else {
+                ctx.db.health().entity_id().delete(target_id);
+                ctx.db.transform().entity_id().delete(target_id);
+                ctx.db.faction_component().entity_id().delete(target_id);
+                ctx.db.npc_brain().entity_id().delete(target_id);
+                ctx.db.pet_component().entity_id().delete(target_id);
+                
+                if ctx.db.peasant().entity_id().find(target_id).is_some() {
+                    ctx.db.peasant().entity_id().delete(target_id);
+                }
+                
+                log::info!("Entity {} reached 0 HP and was removed from the world.", target_id);
+            }
         } else {
             ctx.db.health().entity_id().update(hp);
         }

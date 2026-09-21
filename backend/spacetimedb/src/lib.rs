@@ -9,7 +9,7 @@ pub mod ai;
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history, faction_component, Faction};
-use crate::ai::{npc_brain, AiType, BrainState, pet_component, PetComponent, PetStance};
+use crate::ai::{npc_brain, AiType, BrainState, pet_component, PetComponent, PetStance, harvestable_corpse};
 use crate::building::{structure, Structure};
 
 #[table(accessor = high_frequency_timer, scheduled(high_frequency_tick))]
@@ -286,6 +286,7 @@ pub fn client_connected(ctx: &ReducerContext) {
         for i in 0..3 {
             let nx = base_x + (i as f32 - 1.0) * 2.0;
             let nz = base_z + 2.0;
+            spawned_positions.push((nx, nz));
             ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: base_y + 1.5, z: nz, chunk_x: 0, chunk_z: 0, last_processed_tick: 0 });
             ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 50.0, max: 50.0 });
             ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Villager });
@@ -297,55 +298,120 @@ pub fn client_connected(ctx: &ReducerContext) {
         }
 
         for _ in 0..20 {
-            let nx = (prng(&mut seed) * 400.0) - 200.0;
-            let nz = (prng(&mut seed) * 400.0) - 200.0;
-            if nx.abs() < 50.0 && nz.abs() < 50.0 { continue; } 
-            
-            let ny = get_terrain_height(nx, nz) + 1.5;
-            ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
-            ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 40.0, max: 40.0 });
-            ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Goblin });
-            ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
-                entity_id: npc_id, ai_type: AiType::Goblin, state: BrainState::Idle, target_id: None, timer: 0.0,
-                home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
-            });
-            npc_id += 1;
+            let mut nx = 0.0; let mut nz = 0.0;
+            let mut valid = false;
+            for _ in 0..10 {
+                nx = (prng(&mut seed) * 400.0) - 200.0;
+                nz = (prng(&mut seed) * 400.0) - 200.0;
+                if nx.abs() < 50.0 && nz.abs() < 50.0 { continue; } 
+                
+                // Architectural Note: NPC Spawn Overlap Evaluation.
+                // Evaluates goblin random positions against all existing environment elements and previously spawned entities
+                // to completely eliminate the Avian3D `narrow_phase` spawn warnings caused by coordinate stacking.
+                let mut overlaps = false;
+                for (px, pz) in &spawned_positions {
+                    if (px - nx) * (px - nx) + (pz - nz) * (pz - nz) < 9.0 { overlaps = true; break; }
+                }
+                if !overlaps { valid = true; break; }
+            }
+            if valid {
+                spawned_positions.push((nx, nz));
+                let ny = get_terrain_height(nx, nz) + 1.5;
+                ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
+                ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 40.0, max: 40.0 });
+                ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Goblin });
+                ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
+                    entity_id: npc_id, ai_type: AiType::Goblin, state: BrainState::Idle, target_id: None, timer: 0.0,
+                    home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
+                });
+                npc_id += 1;
+            }
         }
 
         for _ in 0..15 {
-            let nx = (prng(&mut seed) * 400.0) - 200.0;
-            let nz = (prng(&mut seed) * 400.0) - 200.0;
-            let ny = get_terrain_height(nx, nz) + 1.5;
-            
-            ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
-            ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 30.0, max: 30.0 });
-            ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
-            ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
-                entity_id: npc_id, ai_type: AiType::Deer, state: BrainState::Idle, target_id: None, timer: 0.0,
-                home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
-            });
-            npc_id += 1;
+            let mut nx = 0.0; let mut nz = 0.0;
+            let mut valid = false;
+            for _ in 0..10 {
+                nx = (prng(&mut seed) * 400.0) - 200.0;
+                nz = (prng(&mut seed) * 400.0) - 200.0;
+                let mut overlaps = false;
+                for (px, pz) in &spawned_positions {
+                    if (px - nx) * (px - nx) + (pz - nz) * (pz - nz) < 9.0 { overlaps = true; break; }
+                }
+                if !overlaps { valid = true; break; }
+            }
+            if valid {
+                spawned_positions.push((nx, nz));
+                let ny = get_terrain_height(nx, nz) + 1.5;
+                ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
+                ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 30.0, max: 30.0 });
+                ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
+                ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
+                    entity_id: npc_id, ai_type: AiType::Deer, state: BrainState::Idle, target_id: None, timer: 0.0,
+                    home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
+                });
+                npc_id += 1;
+            }
         }
 
         for _ in 0..10 {
-            let nx = (prng(&mut seed) * 400.0) - 200.0;
-            let nz = (prng(&mut seed) * 400.0) - 200.0;
-            let ny = get_terrain_height(nx, nz) + 1.5;
-            
-            ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
-            ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 60.0, max: 60.0 });
-            ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
-            ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
-                entity_id: npc_id, ai_type: AiType::Boar, state: BrainState::Idle, target_id: None, timer: 0.0,
-                home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
-            });
-            npc_id += 1;
+            let mut nx = 0.0; let mut nz = 0.0;
+            let mut valid = false;
+            for _ in 0..10 {
+                nx = (prng(&mut seed) * 400.0) - 200.0;
+                nz = (prng(&mut seed) * 400.0) - 200.0;
+                let mut overlaps = false;
+                for (px, pz) in &spawned_positions {
+                    if (px - nx) * (px - nx) + (pz - nz) * (pz - nz) < 9.0 { overlaps = true; break; }
+                }
+                if !overlaps { valid = true; break; }
+            }
+            if valid {
+                spawned_positions.push((nx, nz));
+                let ny = get_terrain_height(nx, nz) + 1.5;
+                ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
+                ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 60.0, max: 60.0 });
+                ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
+                ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
+                    entity_id: npc_id, ai_type: AiType::Boar, state: BrainState::Idle, target_id: None, timer: 0.0,
+                    home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
+                });
+                npc_id += 1;
+            }
         }
     }
 
     if let Some(mut player) = ctx.db.player().identity().find(sender) {
         player.is_online = true;
+        let entity_id = player.entity_id;
         ctx.db.player().entity_id().update(player);
+        
+        if ctx.db.transform().entity_id().find(entity_id).is_none() {
+            let spawn_y = get_terrain_height(0.0, 0.0) + 10.0;
+            ctx.db.transform().insert(movement::Transform {
+                entity_id, x: 0.0, y: spawn_y, z: 0.0, chunk_x: 0, chunk_z: 0, last_processed_tick: 0,
+            });
+        }
+        
+        if ctx.db.health().entity_id().find(entity_id).is_none() {
+            ctx.db.health().insert(combat::Health {
+                entity_id, current: 100.0, max: 100.0,
+            });
+        }
+        
+        if ctx.db.faction_component().entity_id().find(entity_id).is_none() {
+            ctx.db.faction_component().insert(combat::FactionComponent {
+                entity_id, faction: Faction::Player,
+            });
+        }
+        
+        if ctx.db.hitbox_history().entity_id().find(entity_id).is_none() {
+            ctx.db.hitbox_history().insert(combat::HitboxHistory {
+                entity_id, snapshots: Vec::new(),
+            });
+        }
+        
+        log::info!("Existing identity {} successfully restored and re-synced.", sender.to_hex());
     } else {
         let inserted_player = ctx.db.player().insert(Player { 
             entity_id: 0, identity: sender, is_online: true 
@@ -508,10 +574,10 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
         }
     }
 
-    // 2. Check against Living Entities
+    // 2. Check against Living (or Corpse) Entities
     for t in ctx.db.transform().iter() {
-        if t.entity_id == player.entity_id { continue; } // Skip self
-        if ctx.db.health().entity_id().find(t.entity_id).is_none() { continue; } // Target must be alive
+        if t.entity_id == player.entity_id { continue; } 
+        if ctx.db.health().entity_id().find(t.entity_id).is_none() { continue; } 
 
         let dist_x = t.x - px; 
         let dist_y = t.y - py; 
@@ -523,16 +589,52 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
             if dot > 0.5 { 
                 min_dist = dist;
                 hit_entity = Some(t);
-                hit_node = None; // Override node hit if the entity is physically closer
+                hit_node = None; 
             }
         }
     }
 
-    // Architectural Note: Prioritize damage to the living entity.
+    // Architectural Note: Multi-stage Entity Resolution (Damage vs. Harvesting)
     if let Some(target) = hit_entity {
+        
+        // Is the entity dead and harvestable?
+        if let Some(corpse) = ctx.db.harvestable_corpse().entity_id().find(target.entity_id) {
+            
+            // Generate blood fx for harvesting corpse
+            ctx.db.combat_event().insert(CombatEvent {
+                id: 0, event_type: "HitPlayer".into(),
+                x: target.x, y: target.y + 0.5, z: target.z
+            });
+            
+            if let Some(mut hp) = ctx.db.health().entity_id().find(target.entity_id) {
+                if hp.current > 1.0 {
+                    hp.current -= 1.0;
+                    ctx.db.health().entity_id().update(hp);
+                } else {
+                    // Corpse depleted. Grant loot and destroy entity.
+                    add_item(&mut inventory, &corpse.loot_item, corpse.amount);
+                    
+                    if ctx.db.inventory().entity_id().find(player.entity_id).is_some() {
+                        ctx.db.inventory().entity_id().update(inventory);
+                    } else {
+                        ctx.db.inventory().insert(inventory);
+                    }
+                    
+                    ctx.db.health().entity_id().delete(target.entity_id);
+                    ctx.db.transform().entity_id().delete(target.entity_id);
+                    ctx.db.faction_component().entity_id().delete(target.entity_id);
+                    ctx.db.npc_brain().entity_id().delete(target.entity_id);
+                    ctx.db.harvestable_corpse().entity_id().delete(target.entity_id);
+                    log::info!("Player harvested Corpse {}. Awarded {} {}.", target.entity_id, corpse.amount, corpse.loot_item);
+                }
+            }
+            return;
+        }
+        
+        // Entity is alive. Apply standard damage.
         crate::combat::apply_damage(ctx, target.entity_id, 20.0);
         ctx.db.combat_event().insert(CombatEvent {
-            id: 0, event_type: "HitPlayer".into(), // Triggers blood/impact FX on the client
+            id: 0, event_type: "HitPlayer".into(), 
             x: target.x, y: target.y + 1.0, z: target.z
         });
         return; 

@@ -18,6 +18,8 @@ pub mod faction_component_table;
 pub mod faction_component_type;
 pub mod faction_type;
 pub mod fire_weapon_reducer;
+pub mod harvestable_corpse_table;
+pub mod harvestable_corpse_type;
 pub mod health_table;
 pub mod health_type;
 pub mod high_frequency_timer_type;
@@ -71,6 +73,8 @@ pub use faction_component_table::*;
 pub use faction_component_type::FactionComponent;
 pub use faction_type::Faction;
 pub use fire_weapon_reducer::fire_weapon;
+pub use harvestable_corpse_table::*;
+pub use harvestable_corpse_type::HarvestableCorpse;
 pub use health_table::*;
 pub use health_type::Health;
 pub use high_frequency_timer_type::HighFrequencyTimer;
@@ -325,6 +329,7 @@ impl __sdk::Reducer for Reducer {
 pub struct DbUpdate {
     combat_event: __sdk::TableUpdate<CombatEvent>,
     faction_component: __sdk::TableUpdate<FactionComponent>,
+    harvestable_corpse: __sdk::TableUpdate<HarvestableCorpse>,
     health: __sdk::TableUpdate<Health>,
     hitbox_history: __sdk::TableUpdate<HitboxHistory>,
     inventory: __sdk::TableUpdate<Inventory>,
@@ -352,6 +357,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "faction_component" => db_update
                     .faction_component
                     .append(faction_component_table::parse_table_update(table_update)?),
+                "harvestable_corpse" => db_update
+                    .harvestable_corpse
+                    .append(harvestable_corpse_table::parse_table_update(table_update)?),
                 "health" => db_update
                     .health
                     .append(health_table::parse_table_update(table_update)?),
@@ -423,6 +431,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.faction_component = cache
             .apply_diff_to_table::<FactionComponent>("faction_component", &self.faction_component)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.harvestable_corpse = cache
+            .apply_diff_to_table::<HarvestableCorpse>(
+                "harvestable_corpse",
+                &self.harvestable_corpse,
+            )
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.health = cache
             .apply_diff_to_table::<Health>("health", &self.health)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -477,6 +491,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "faction_component" => db_update
                     .faction_component
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "harvestable_corpse" => db_update
+                    .harvestable_corpse
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "health" => db_update
                     .health
@@ -536,6 +553,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "faction_component" => db_update
                     .faction_component
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "harvestable_corpse" => db_update
+                    .harvestable_corpse
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "health" => db_update
                     .health
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -592,6 +612,7 @@ impl __sdk::DbUpdate for DbUpdate {
 pub struct AppliedDiff<'r> {
     combat_event: __sdk::TableAppliedDiff<'r, CombatEvent>,
     faction_component: __sdk::TableAppliedDiff<'r, FactionComponent>,
+    harvestable_corpse: __sdk::TableAppliedDiff<'r, HarvestableCorpse>,
     health: __sdk::TableAppliedDiff<'r, Health>,
     hitbox_history: __sdk::TableAppliedDiff<'r, HitboxHistory>,
     inventory: __sdk::TableAppliedDiff<'r, Inventory>,
@@ -626,6 +647,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<FactionComponent>(
             "faction_component",
             &self.faction_component,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<HarvestableCorpse>(
+            "harvestable_corpse",
+            &self.harvestable_corpse,
             event,
         );
         callbacks.invoke_table_row_callbacks::<Health>("health", &self.health, event);
@@ -1323,6 +1349,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         combat_event_table::register_table(client_cache);
         faction_component_table::register_table(client_cache);
+        harvestable_corpse_table::register_table(client_cache);
         health_table::register_table(client_cache);
         hitbox_history_table::register_table(client_cache);
         inventory_table::register_table(client_cache);
@@ -1340,6 +1367,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "combat_event",
         "faction_component",
+        "harvestable_corpse",
         "health",
         "hitbox_history",
         "inventory",

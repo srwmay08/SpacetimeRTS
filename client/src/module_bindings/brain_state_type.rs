@@ -17,6 +17,8 @@ pub enum BrainState {
     Attacking,
 
     Warning,
+
+    Corpse,
 }
 
 impl __sdk::InModule for BrainState {

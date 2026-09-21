@@ -65,6 +65,7 @@ pub fn init_network_connection(
                 "SELECT * FROM pet_component".to_string(),
                 "SELECT * FROM faction_component".to_string(),
                 "SELECT * FROM health".to_string(),
+                "SELECT * FROM harvestable_corpse".to_string(),
             ]);
 
             if let Ok(mut guard) = store_clone.lock() {
@@ -239,8 +240,18 @@ pub fn update_spatial_subscriptions(
         let current_z = (pos.0.z / 50.0).floor() as i32;
 
         if culling_state.current_chunk.0 != current_x || culling_state.current_chunk.1 != current_z {
-            culling_state.current_chunk = (current_x, current_z);
-            culling_state.needs_rebuild = true;
+            
+            // Architectural Note: Hysteresis Deadzone Validation
+            // Only commits to a new chunk index if the player successfully crossed the boundary 
+            // by at least 2.0 full coordinate units. This halts `needs_rebuild` from oscillating 
+            // continuously when resolving floating-point edge borders, fixing entity generation spam.
+            let center_x = (culling_state.current_chunk.0 as f32 * 50.0) + 25.0;
+            let center_z = (culling_state.current_chunk.1 as f32 * 50.0) + 25.0;
+            
+            if (pos.0.x - center_x).abs() > 27.0 || (pos.0.z - center_z).abs() > 27.0 {
+                culling_state.current_chunk = (current_x, current_z);
+                culling_state.needs_rebuild = true;
+            }
         }
     }
 
@@ -260,6 +271,7 @@ pub fn update_spatial_subscriptions(
             "SELECT * FROM pet_component".to_string(),
             "SELECT * FROM faction_component".to_string(),
             "SELECT * FROM health".to_string(),
+            "SELECT * FROM harvestable_corpse".to_string(),
         ];
 
         if culling_state.in_interior {
@@ -342,7 +354,6 @@ pub fn sync_transforms(
             let mut mesh_handle = meshes.add(Capsule3d::new(0.4, 1.8));
             let mut visual_transform = BevyTransform::default();
             
-            // Architectural Note: Default entity interaction collider for client-side raycasts
             let mut root_collider = Collider::capsule(0.4, 1.8);
 
             if is_pet {
@@ -373,6 +384,13 @@ pub fn sync_transforms(
                         mesh_handle = meshes.add(Capsule3d::new(0.4, 1.8));
                     }
                 }
+                
+                // Color corpses distinctly
+                if brain.state == crate::module_bindings::BrainState::Corpse {
+                    color = Color::srgb(0.2, 0.2, 0.2);
+                    visual_transform.rotation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+                }
+                
             } else if is_peasant {
                 color = Color::srgb(0.1, 0.3, 0.9); 
                 mesh_handle = meshes.add(Capsule3d::new(0.4, 1.8));
@@ -384,8 +402,6 @@ pub fn sync_transforms(
                 LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
                 LogicalRotation(Quat::IDENTITY),
                 Selectable, 
-                // Architectural Note: Assigning colliders strictly binds entities to the client's 
-                // SpatialQuery system, enabling tactile UI right-clicks and crosshair hit registration.
                 RigidBody::Kinematic, 
                 root_collider,
                 CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment]),

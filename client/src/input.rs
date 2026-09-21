@@ -142,9 +142,14 @@ pub fn context_aware_action_dispatcher(
                                         SpatialQueryFilter::from_excluded_entities([player_entity]),
                                     );
 
+                                    // Architectural Note: Added `queries.selectable` check. 
+                                    // Melee swings will now properly resolve against living enemies and corpses 
+                                    // instead of attempting to trigger a hitscan gunshot.
                                     let is_tool_context = hit.map_or(false, |hit_data| {
                                         hit_data.time_of_impact < 6.0 && 
-                                        (queries.node.contains(hit_data.entity) || queries.structure.contains(hit_data.entity))
+                                        (queries.node.contains(hit_data.entity) || 
+                                         queries.structure.contains(hit_data.entity) ||
+                                         queries.selectable.contains(hit_data.entity))
                                     });
 
                                     if is_tool_context {

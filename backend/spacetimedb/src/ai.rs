@@ -5,7 +5,7 @@ use crate::resource_node;
 use crate::respawn_bush_timer; 
 use crate::building::structure; 
 use crate::combat::{health, faction_component, Faction};
-use crate::combat_event; // Architectural Note: Trait import required to call ctx.db.combat_event().
+use crate::combat_event; 
 
 // ----------------------------------------------------------------------------
 // PEASANT AI STRUCTURES
@@ -49,8 +49,9 @@ pub struct Peasant {
 #[derive(SpacetimeType, Clone, Debug, PartialEq)]
 pub enum AiType { Friendly, Deer, Boar, Goblin, Peasant }
 
+// Architectural Note: Added `Corpse` state to retain physical presence post-mortem.
 #[derive(SpacetimeType, Clone, Debug, PartialEq)]
-pub enum BrainState { Idle, Fleeing, Chasing, Attacking, Warning }
+pub enum BrainState { Idle, Fleeing, Chasing, Attacking, Warning, Corpse }
 
 #[table(accessor = npc_brain, public)]
 #[derive(Clone, PartialEq)]
@@ -77,6 +78,17 @@ pub struct PetComponent {
     pub entity_id: u64,
     pub owner_id: u64, 
     pub stance: PetStance,
+}
+
+// Architectural Note: Defines the persistent physical entity left behind when an NPC dies,
+// allowing clients to target and harvest it for loot drops.
+#[table(accessor = harvestable_corpse, public)]
+#[derive(Clone, PartialEq)]
+pub struct HarvestableCorpse {
+    #[primary_key]
+    pub entity_id: u64,
+    pub loot_item: String,
+    pub amount: u32,
 }
 
 // ----------------------------------------------------------------------------
@@ -122,16 +134,45 @@ pub fn spawn_peasant(ctx: &ReducerContext) -> Result<(), String> {
     let spawn_transform = ctx.db.transform().entity_id().find(session.entity_id)
         .ok_or("Player transform missing")?;
         
-    let spawn_y = crate::get_terrain_height(spawn_transform.x, spawn_transform.z) + 1.5;
+    let mut seed = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    let offset_x = (crate::prng(&mut seed) * 4.0) - 2.0;
+    let offset_z = (crate::prng(&mut seed) * 4.0) - 2.0;
+
+    let spawn_x = spawn_transform.x + 2.0 + offset_x;
+    let spawn_z = spawn_transform.z + 2.0 + offset_z;
+    let spawn_y = crate::get_terrain_height(spawn_x, spawn_z) + 1.5;
 
     ctx.db.transform().insert(Transform {
         entity_id,
-        x: spawn_transform.x + 2.0, 
+        x: spawn_x, 
         y: spawn_y, 
-        z: spawn_transform.z + 2.0,
-        chunk_x: (spawn_transform.x / 50.0).floor() as i32,
-        chunk_z: (spawn_transform.z / 50.0).floor() as i32,
+        z: spawn_z,
+        chunk_x: (spawn_x / 50.0).floor() as i32,
+        chunk_z: (spawn_z / 50.0).floor() as i32,
         last_processed_tick: 0,
+    });
+
+    ctx.db.health().insert(crate::combat::Health {
+        entity_id,
+        current: 50.0,
+        max: 50.0,
+    });
+
+    ctx.db.faction_component().insert(crate::combat::FactionComponent {
+        entity_id,
+        faction: Faction::Villager,
+    });
+
+    ctx.db.npc_brain().insert(NpcBrain {
+        entity_id,
+        ai_type: AiType::Peasant,
+        state: BrainState::Idle,
+        target_id: None,
+        timer: 0.0,
+        home_x: spawn_x,
+        home_z: spawn_z,
+        wander_x: spawn_x,
+        wander_z: spawn_z,
     });
 
     ctx.db.peasant().insert(Peasant {
@@ -163,6 +204,15 @@ pub fn command_peasant(
 
     if peasant.owner_id != session.entity_id {
         return Err("Unauthorized: You do not own this unit.".into());
+    }
+
+    // Architectural Note: Fleeing Override Protection. 
+    // If the unit's overarching threat evaluator determines it is under attack, 
+    // we drop incoming player gathering commands and alert the client UI.
+    if let Some(brain) = ctx.db.npc_brain().entity_id().find(peasant_entity_id) {
+        if brain.state == BrainState::Fleeing {
+            return Err("Unit is currently fleeing from enemies and cannot process commands.".into());
+        }
     }
 
     peasant.state = match command_type.as_str() {
@@ -208,14 +258,21 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
     for mut brain in brains {
         let initial_brain = brain.clone();
         
+        // Architectural Note: Skip physics processing entirely if the unit is dead.
+        if brain.state == BrainState::Corpse { continue; }
+        
         let Some(mut transform) = ctx.db.transform().entity_id().find(brain.entity_id) else { continue; };
         let hp = ctx.db.health().entity_id().find(brain.entity_id);
         
-        // Architectural Note: Explicitly cast epoch timestamp to u64 to match brain.entity_id and prng seed typing.
         let mut seed: u64 = (ctx.timestamp.to_micros_since_unix_epoch() as u64) ^ brain.entity_id;
         let mut dx = 0.0;
         let mut dz = 0.0;
         let mut current_speed = 0.0;
+
+        let my_faction = all_factions.iter()
+            .find(|f| f.entity_id == brain.entity_id)
+            .map(|f| f.faction.clone())
+            .unwrap_or(Faction::Wildlife);
 
         // 1. Evaluate State Transitions
         match brain.ai_type {
@@ -227,6 +284,10 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                         let mut min_d = f32::MAX;
                         for t in &all_transforms {
                             if t.entity_id == brain.entity_id { continue; }
+                            
+                            // Check Corpse Table before targeting
+                            if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
+                            
                             let dist = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
                             if dist < min_d { min_d = dist; nearest = Some(t.entity_id); }
                         }
@@ -242,6 +303,10 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                         let mut min_d = f32::MAX;
                         for t in &all_transforms {
                             if t.entity_id == brain.entity_id { continue; }
+                            
+                            // Check Corpse Table before fleeing
+                            if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
+                            
                             let dist = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
                             if dist < min_d { min_d = dist; nearest = Some(t.entity_id); }
                         }
@@ -254,10 +319,13 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                 let mut min_dist = 100.0; 
                 for t in &all_transforms {
                     if t.entity_id == brain.entity_id { continue; }
+                    
+                    if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
+                    
                     let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
                     if dist_sq <= min_dist { 
                         if let Some(other_faction) = all_factions.iter().find(|f| f.entity_id == t.entity_id) {
-                            if other_faction.faction == Faction::Player || other_faction.faction == Faction::Villager {
+                            if crate::combat::get_standing(&my_faction, &other_faction.faction) == crate::combat::FactionStanding::KillOnSight {
                                 min_dist = dist_sq;
                                 nearest_threat = Some(t.entity_id);
                             }
@@ -286,10 +354,13 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                     let mut found_target = None;
                     for t in &all_transforms {
                         if t.entity_id == brain.entity_id { continue; }
+                        
+                        if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
+                        
                         let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
                         if dist_sq <= 400.0 { 
                             if let Some(other_faction) = all_factions.iter().find(|f| f.entity_id == t.entity_id) {
-                                if other_faction.faction == Faction::Player || other_faction.faction == Faction::Villager {
+                                if crate::combat::get_standing(&my_faction, &other_faction.faction) == crate::combat::FactionStanding::KillOnSight {
                                     found_target = Some(t.entity_id);
                                     break;
                                 }
@@ -307,10 +378,12 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                 for other_brain in ctx.db.npc_brain().iter() {
                     if other_brain.entity_id == brain.entity_id { continue; }
                     let is_attacking = other_brain.state == BrainState::Attacking;
-                    let is_goblin = other_brain.ai_type == AiType::Goblin;
                     
-                    if is_attacking || is_goblin {
+                    if is_attacking || other_brain.ai_type == AiType::Goblin {
                         if let Some(t) = ctx.db.transform().entity_id().find(other_brain.entity_id) {
+                            
+                            if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
+                            
                             let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
                             if dist_sq < 400.0 {
                                 danger = true;
@@ -352,10 +425,26 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                     if let Some(t) = ctx.db.transform().entity_id().find(target) {
                         dx = transform.x - t.x; 
                         dz = transform.z - t.z;
-                        current_speed = 7.0;
+                        let dist_sq = dx*dx + dz*dz;
+                        if dist_sq > 1600.0 { 
+                            brain.state = BrainState::Idle;
+                            brain.target_id = None;
+                        } else {
+                            current_speed = 7.0;
+                        }
+                    } else {
+                        brain.state = BrainState::Idle;
+                        brain.target_id = None;
                     }
                 } else {
-                    brain.state = BrainState::Idle;
+                    dx = transform.x - brain.home_x;
+                    dz = transform.z - brain.home_z;
+                    current_speed = 6.0;
+                    brain.timer += dt;
+                    if brain.timer > 4.0 {
+                        brain.state = BrainState::Idle;
+                        brain.timer = 0.0;
+                    }
                 }
             }
             BrainState::Chasing | BrainState::Attacking => {
@@ -363,17 +452,26 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                     if let Some(t) = ctx.db.transform().entity_id().find(target) {
                         dx = t.x - transform.x; 
                         dz = t.z - transform.z;
-                        current_speed = 5.5;
                         
-                        if (dx*dx + dz*dz) < 4.0 {
-                            current_speed = 0.0;
-                            brain.timer += dt;
-                            if brain.timer >= 1.0 { 
-                                crate::combat::apply_damage(ctx, target, 10.0);
-                                ctx.db.combat_event().insert(crate::CombatEvent {
-                                    id: 0, event_type: "HitPlayer".into(),
-                                    x: t.x, y: t.y + 1.0, z: t.z
-                                });
+                        let dist_sq = dx*dx + dz*dz;
+                        
+                        if dist_sq > 2500.0 {
+                            brain.state = BrainState::Idle;
+                            brain.target_id = None;
+                        } else {
+                            current_speed = 5.5;
+                            if dist_sq < 4.0 {
+                                current_speed = 0.0;
+                                brain.timer += dt;
+                                if brain.timer >= 1.0 { 
+                                    crate::combat::apply_damage(ctx, target, 10.0);
+                                    ctx.db.combat_event().insert(crate::CombatEvent {
+                                        id: 0, event_type: "HitPlayer".into(),
+                                        x: t.x, y: t.y + 1.0, z: t.z
+                                    });
+                                    brain.timer = 0.0;
+                                }
+                            } else {
                                 brain.timer = 0.0;
                             }
                         }
@@ -388,13 +486,49 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             BrainState::Warning => {
                 current_speed = 0.0;
             }
+            BrainState::Corpse => {
+                // Should be trapped by the guard clause at the top of the loop.
+            }
         }
 
-        // Apply physical mutations
+        // Architectural Note: Flocking / Separation Injection
+        // We inject generic spatial boids separation into all moving NPCs. 
+        // This ensures tracking groups naturally fan out, eliminating Avian3D narrow_phase overlap physics warnings.
+        let mut sep_x = 0.0;
+        let mut sep_z = 0.0;
+        
+        for other in &all_transforms {
+            if other.entity_id == brain.entity_id { continue; }
+            let ox = transform.x - other.x;
+            let oz = transform.z - other.z;
+            let odist_sq = ox * ox + oz * oz;
+            if odist_sq < 9.0 && odist_sq > 0.001 {
+                let odist = odist_sq.sqrt().max(0.01);
+                sep_x += (ox / odist) * (3.0 - odist);
+                sep_z += (oz / odist) * (3.0 - odist);
+            }
+        }
+
+        let mut final_vx = 0.0;
+        let mut final_vz = 0.0;
+        
         if current_speed > 0.0 {
             let dist = (dx*dx + dz*dz).sqrt().max(0.001);
-            transform.x += (dx / dist) * current_speed * dt;
-            transform.z += (dz / dist) * current_speed * dt;
+            final_vx = (dx / dist) * current_speed;
+            final_vz = (dz / dist) * current_speed;
+        }
+
+        final_vx += sep_x * 2.5;
+        final_vz += sep_z * 2.5;
+
+        let v_sq = final_vx * final_vx + final_vz * final_vz;
+        if v_sq > 0.0001 {
+            let v_mag = v_sq.sqrt().max(0.01);
+            let speed_cap = current_speed.max(3.0); 
+            let move_speed = v_mag.min(speed_cap);
+            
+            transform.x += (final_vx / v_mag) * move_speed * dt;
+            transform.z += (final_vz / v_mag) * move_speed * dt;
             
             let ground_y = crate::get_terrain_height(transform.x, transform.z);
             transform.y = ground_y + 1.05;
@@ -422,6 +556,12 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
     for p in peasants {
         let Some(mut peasant) = ctx.db.peasant().entity_id().find(p.entity_id) else { continue; };
         let initial_peasant = peasant.clone();
+
+        if let Some(brain) = ctx.db.npc_brain().entity_id().find(peasant.entity_id) {
+            if brain.state == BrainState::Fleeing || brain.state == BrainState::Corpse {
+                continue; 
+            }
+        }
 
         let Some(mut transform) = ctx.db.transform().entity_id().find(peasant.entity_id) else { continue; };
         let initial_transform = transform.clone();

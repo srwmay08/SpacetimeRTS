@@ -70,6 +70,7 @@ pub struct EventTracker {
 #[derive(Resource)]
 pub struct TelemetryTracker {
     pub last_frame_time: f64,
+    #[allow(dead_code)]
     pub frame_drop_threshold: f64,
 }
 
