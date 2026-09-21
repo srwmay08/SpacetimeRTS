@@ -1,0 +1,11 @@
+[package]
+name = "spacetime-rts-logic"
+version = "0.1.0"
+edition = "2021"
+description = "Pure game logic for SpacetimeRTS - shared between WASM module and native tests"
+
+[dependencies]
+noise = "0.9.0"
+
+[lib]
+crate-type = ["rlib"]

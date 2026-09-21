@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "client",
-    "backend/spacetimedb" # Note the nested path here!
+    "backend/spacetimedb", # Note the nested path here!
+    "backend/logic",
 ]
 resolver = "2"
