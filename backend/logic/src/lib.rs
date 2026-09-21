@@ -373,12 +373,73 @@ pub enum AiState {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum AiType {
+    Friendly,
+    Deer,
+    Boar,
+    Goblin,
+    Peasant,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BrainState {
+    Idle,
+    Fleeing,
+    Chasing,
+    Attacking,
+    Warning,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PetStance {
+    Stay,
+    Follow,
+    Aggressive,
+    Defensive,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Faction {
+    Player,
+    Villager,
+    Wildlife,
+    Goblin,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum FactionStanding {
+    Ally,
+    Neutral,
+    KillOnSight,
+}
+
+/// Evaluate faction relationships.
+pub fn get_standing(a: &Faction, b: &Faction) -> FactionStanding {
+    match (a, b) {
+        (Faction::Player, Faction::Villager) => FactionStanding::Neutral,
+        (Faction::Villager, Faction::Player) => FactionStanding::Neutral,
+        (Faction::Player, Faction::Goblin) => FactionStanding::KillOnSight,
+        (Faction::Goblin, Faction::Player) => FactionStanding::KillOnSight,
+        (Faction::Goblin, Faction::Villager) => FactionStanding::KillOnSight,
+        (Faction::Villager, Faction::Goblin) => FactionStanding::KillOnSight,
+        (Faction::Villager, Faction::Wildlife) => FactionStanding::Neutral,
+        (Faction::Wildlife, Faction::Villager) => FactionStanding::Neutral,
+        (Faction::Player, Faction::Wildlife) => FactionStanding::Neutral,
+        (Faction::Wildlife, Faction::Player) => FactionStanding::Neutral,
+        _ => FactionStanding::Neutral,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Peasant {
     pub entity_id: u64,
     pub owner_id: u64,
     pub state: AiState,
     pub carrying_item: String,
     pub carrying_amount: u32,
+    pub last_harvest_target: Option<u64>,
+    pub consecutive_stuck_ticks: u32,
+    pub auto_gather_type: String,
 }
 
 impl Peasant {
@@ -389,6 +450,9 @@ impl Peasant {
             state: AiState::Idle,
             carrying_item: "None".to_string(),
             carrying_amount: 0,
+            last_harvest_target: None,
+            consecutive_stuck_ticks: 0,
+            auto_gather_type: "None".to_string(),
         }
     }
 
@@ -398,6 +462,52 @@ impl Peasant {
 
     pub fn is_carrying_max(&self, max: u32) -> bool {
         self.carrying_amount >= max
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NpcBrain {
+    pub entity_id: u64,
+    pub ai_type: AiType,
+    pub state: BrainState,
+    pub target_id: Option<u64>,
+    pub timer: f32,
+    pub home_x: f32,
+    pub home_z: f32,
+    pub wander_x: f32,
+    pub wander_z: f32,
+}
+
+impl NpcBrain {
+    pub fn new(entity_id: u64, ai_type: AiType, home_x: f32, home_z: f32) -> Self {
+        Self {
+            entity_id,
+            ai_type,
+            state: BrainState::Idle,
+            target_id: None,
+            timer: 0.0,
+            home_x,
+            home_z,
+            wander_x: home_x,
+            wander_z: home_z,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PetComponent {
+    pub entity_id: u64,
+    pub owner_id: u64,
+    pub stance: PetStance,
+}
+
+impl PetComponent {
+    pub fn new(entity_id: u64, owner_id: u64) -> Self {
+        Self {
+            entity_id,
+            owner_id,
+            stance: PetStance::Follow,
+        }
     }
 }
 

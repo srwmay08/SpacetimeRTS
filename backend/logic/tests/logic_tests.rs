@@ -608,3 +608,186 @@ mod prng {
         }
     }
 }
+
+// ============================================================================
+// FACTION TESTS
+// ============================================================================
+
+mod faction {
+    use super::*;
+
+    #[test]
+    fn player_villager_neutral() {
+        assert_eq!(get_standing(&Faction::Player, &Faction::Villager), FactionStanding::Neutral);
+        assert_eq!(get_standing(&Faction::Villager, &Faction::Player), FactionStanding::Neutral);
+    }
+
+    #[test]
+    fn player_goblin_hostile() {
+        assert_eq!(get_standing(&Faction::Player, &Faction::Goblin), FactionStanding::KillOnSight);
+        assert_eq!(get_standing(&Faction::Goblin, &Faction::Player), FactionStanding::KillOnSight);
+    }
+
+    #[test]
+    fn goblin_villager_hostile() {
+        assert_eq!(get_standing(&Faction::Goblin, &Faction::Villager), FactionStanding::KillOnSight);
+        assert_eq!(get_standing(&Faction::Villager, &Faction::Goblin), FactionStanding::KillOnSight);
+    }
+
+    #[test]
+    fn wildlife_neutral_to_all() {
+        assert_eq!(get_standing(&Faction::Wildlife, &Faction::Player), FactionStanding::Neutral);
+        assert_eq!(get_standing(&Faction::Player, &Faction::Wildlife), FactionStanding::Neutral);
+        assert_eq!(get_standing(&Faction::Wildlife, &Faction::Villager), FactionStanding::Neutral);
+        assert_eq!(get_standing(&Faction::Villager, &Faction::Wildlife), FactionStanding::Neutral);
+    }
+
+    #[test]
+    fn same_faction_neutral() {
+        // Same faction relationships default to Neutral
+        assert_eq!(get_standing(&Faction::Player, &Faction::Player), FactionStanding::Neutral);
+        assert_eq!(get_standing(&Faction::Goblin, &Faction::Goblin), FactionStanding::Neutral);
+    }
+}
+
+// ============================================================================
+// NPC BRAIN TESTS
+// ============================================================================
+
+mod npc_brain {
+    use super::*;
+
+    #[test]
+    fn new_brain_defaults() {
+        let brain = NpcBrain::new(1, AiType::Deer, 10.0, 20.0);
+        assert_eq!(brain.entity_id, 1);
+        assert_eq!(brain.ai_type, AiType::Deer);
+        assert_eq!(brain.state, BrainState::Idle);
+        assert_eq!(brain.target_id, None);
+        assert_eq!(brain.timer, 0.0);
+        assert_eq!(brain.home_x, 10.0);
+        assert_eq!(brain.home_z, 20.0);
+        assert_eq!(brain.wander_x, 10.0);
+        assert_eq!(brain.wander_z, 20.0);
+    }
+
+    #[test]
+    fn ai_type_equality() {
+        assert_eq!(AiType::Deer, AiType::Deer);
+        assert_ne!(AiType::Deer, AiType::Boar);
+        assert_ne!(AiType::Goblin, AiType::Friendly);
+    }
+
+    #[test]
+    fn brain_state_equality() {
+        assert_eq!(BrainState::Idle, BrainState::Idle);
+        assert_ne!(BrainState::Idle, BrainState::Fleeing);
+        assert_ne!(BrainState::Chasing, BrainState::Attacking);
+    }
+}
+
+// ============================================================================
+// PET TESTS
+// ============================================================================
+
+mod pet {
+    use super::*;
+
+    #[test]
+    fn new_pet_defaults() {
+        let pet = PetComponent::new(1, 100);
+        assert_eq!(pet.entity_id, 1);
+        assert_eq!(pet.owner_id, 100);
+        assert_eq!(pet.stance, PetStance::Follow);
+    }
+
+    #[test]
+    fn pet_stance_equality() {
+        assert_eq!(PetStance::Stay, PetStance::Stay);
+        assert_ne!(PetStance::Stay, PetStance::Follow);
+        assert_ne!(PetStance::Aggressive, PetStance::Defensive);
+    }
+}
+
+// ============================================================================
+// STRUCTURE BUILDING TESTS (Extended)
+// ============================================================================
+
+mod structure_building {
+    use super::*;
+
+    #[test]
+    fn place_foundation_grounded() {
+        // Foundation with no parent, anchored to terrain
+        let s = Structure {
+            structure_id: 1,
+            parent_id: None,
+            piece_type: "Foundation".to_string(),
+            stability: 100,
+            is_grounded: true,
+        };
+        assert!(s.is_grounded);
+        assert_eq!(s.stability, 100);
+    }
+
+    #[test]
+    fn attach_wall_to_foundation() {
+        let f = Structure::foundation();
+        let wall = f.attach_child("Wall", 2).unwrap();
+        assert_eq!(wall.piece_type, "Wall");
+        assert_eq!(wall.stability, 80);
+        assert!(!wall.is_grounded);
+        assert_eq!(wall.parent_id, Some(f.structure_id));
+    }
+
+    #[test]
+    fn attach_floor_to_foundation() {
+        let f = Structure::foundation();
+        let floor = f.attach_child("Floor", 2).unwrap();
+        assert_eq!(floor.stability, 75);
+    }
+
+    #[test]
+    fn attach_roof_to_foundation() {
+        let f = Structure::foundation();
+        let roof = f.attach_child("Roof", 2).unwrap();
+        assert_eq!(roof.stability, 70);
+    }
+
+    #[test]
+    fn attach_ramp_to_foundation() {
+        let f = Structure::foundation();
+        let ramp = f.attach_child("Ramp", 2).unwrap();
+        assert_eq!(ramp.stability, 75);
+    }
+
+    #[test]
+    fn chain_structures() {
+        let f = Structure::foundation();
+        let wall = f.attach_child("Wall", 2).unwrap();
+        let floor = wall.attach_child("Floor", 3).unwrap();
+        assert_eq!(floor.stability, 55); // 80 - 25
+    }
+
+    #[test]
+    fn cannot_attach_to_weak_structure() {
+        let mut f = Structure::foundation();
+        f.stability = 15;
+        assert!(f.attach_child("Wall", 2).is_none());
+    }
+
+    #[test]
+    fn cannot_attach_unknown_piece() {
+        let f = Structure::foundation();
+        assert!(f.attach_child("Unknown", 2).is_none());
+    }
+
+    #[test]
+    fn can_support_check() {
+        let f = Structure::foundation();
+        assert!(f.can_support(20));
+        assert!(f.can_support(99));
+        assert!(!f.can_support(100));
+        assert!(!f.can_support(101));
+    }
+}
