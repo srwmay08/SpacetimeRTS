@@ -26,6 +26,23 @@ pub fn setup_ui(mut commands: Commands) {
         ..default()
     });
 
+    // Architectural Note: Interaction prompt text displayed in the center of the screen 
+    // when looking at pickable ground items or nodes.
+    commands.spawn((
+        TextBundle::from_section(
+            "",
+            TextStyle { font_size: 16.0, color: Color::srgb(1.0, 1.0, 1.0), ..default() }
+        )
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: Val::Percent(55.0),
+            left: Val::Percent(50.0),
+            margin: UiRect::left(Val::Px(-60.0)),
+            ..default()
+        }),
+        InteractionPromptText,
+    ));
+
     commands.spawn((NodeBundle {
         style: Style {
             width: Val::Percent(100.0), 
@@ -187,8 +204,6 @@ pub fn action_bar_interaction(
                 
                 info!("CLIENT UI: Dispatching Action '{}' to {} selected units.", button.0, selected_peasants.iter().count());
 
-                // Architectural Note: Removed the silent fail `let _ =` and explicitly bound errors 
-                // so the client immediately knows if the SpacetimeDB connection drops.
                 if button.0 == "Spawn Worker" {
                     if let Err(e) = conn.db.reducers.spawn_peasant() {
                         error!("NETWORK ERROR: Failed to spawn peasant. Are you disconnected? Details: {:?}", e);

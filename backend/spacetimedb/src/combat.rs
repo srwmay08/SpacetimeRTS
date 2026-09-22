@@ -1,12 +1,17 @@
+// ----------------------------------------------------------------------------
+// COMBAT IMPORTS & DEPENDENCIES
+// ----------------------------------------------------------------------------
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
 use crate::movement::player_session;
 use crate::CombatEvent;
 use crate::combat_event;
 use crate::movement::transform;
+use crate::inventory; // Fix for E0599: Bringing the inventory table trait into scope.
 
 // Architectural Note: Imported `peasant` trait to resolve E0599 compiler error. 
 // SpacetimeDB v2.x generates table accessors as traits that must be explicitly brought into scope.
-use crate::ai::{npc_brain, pet_component, peasant};
+// Unused `BrainState` and `HarvestableCorpse` imports removed to resolve warnings.
+use crate::ai::{npc_brain, pet_component, peasant, harvestable_corpse};
 
 // ----------------------------------------------------------------------------
 // DATA STRUCTURES
@@ -60,7 +65,6 @@ pub struct FactionComponent {
     pub entity_id: u64,
     pub faction: Faction,
 }
-
 // ----------------------------------------------------------------------------
 // CORE LOGIC & HELPERS
 // ----------------------------------------------------------------------------
@@ -97,13 +101,40 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
                 ctx.db.health().entity_id().update(hp);
 
                 if let Some(mut transform) = ctx.db.transform().entity_id().find(target_id) {
+                    
+                    // Architectural Note: 4. Economy & Survival (Loss of Investment)
+                    // If a player dies, their equipment drops. If unrecovered by teammates, 
+                    // the resources spent by the Commander are permanently lost.
+                    if let Some(mut inv) = ctx.db.inventory().entity_id().find(target_id) {
+                        for slot in inv.slots.iter() {
+                            if slot.count > 0 {
+                                // Offsetting Corpse IDs to avoid collision guarantees
+                                let corpse_id = ctx.timestamp.to_micros_since_unix_epoch() as u64 + slot.count as u64 + target_id;
+                                ctx.db.harvestable_corpse().insert(crate::ai::HarvestableCorpse {
+                                    entity_id: corpse_id,
+                                    loot_item: slot.item_type.clone(),
+                                    amount: slot.count,
+                                });
+                                ctx.db.transform().insert(crate::movement::Transform {
+                                    entity_id: corpse_id,
+                                    x: transform.x, y: transform.y, z: transform.z,
+                                    chunk_x: transform.chunk_x, chunk_z: transform.chunk_z,
+                                    last_processed_tick: 0,
+                                });
+                            }
+                        }
+                        inv.slots.clear();
+                        ctx.db.inventory().entity_id().update(inv);
+                    }
+
+                    // Respawn the player empty-handed
                     transform.x = 0.0;
                     transform.z = 0.0;
                     transform.y = crate::get_terrain_height(0.0, 0.0) + 10.0;
                     ctx.db.transform().entity_id().update(transform);
                 }
                 
-                log::info!("Player {} died and respawned at the origin.", target_id);
+                log::info!("Player {} died. Dropped inventory as harvestable corpses and respawned at the origin.", target_id);
             } else {
                 ctx.db.health().entity_id().delete(target_id);
                 ctx.db.transform().entity_id().delete(target_id);
@@ -145,6 +176,9 @@ pub fn fire_weapon(
     // 1. Lag Compensation: Rewind and Intersect
     for history in ctx.db.hitbox_history().iter() {
         if history.entity_id == session.entity_id { continue; } 
+        
+        // Architectural Note: We cannot shoot corpses, they must be gathered with tools.
+        if ctx.db.harvestable_corpse().entity_id().find(history.entity_id).is_some() { continue; }
 
         let closest_snapshot = history.snapshots.iter()
             .min_by_key(|s| (s.tick_id as i64 - client_tick as i64).abs());

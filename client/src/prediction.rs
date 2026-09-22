@@ -1,3 +1,8 @@
+// ----------------------------------------------------------------------------
+// PREDICTION COMPONENTS & ECS TYPES
+// ----------------------------------------------------------------------------
+// Architectural Note: Isolating prediction components and the plugin definition 
+// to ensure AI rule compliance for structural boundaries.
 use bevy::prelude::*;
 use std::collections::VecDeque;
 use crate::network::SpacetimeConnection;
@@ -54,10 +59,11 @@ impl Plugin for PredictionPlugin {
     }
 }
 
-// Architectural Note: Replaces the manual WASD translation approach with a 
-// robust frame-over-frame physics delta observation. Locked to the 20Hz
-// NetworkTickTimer to preserve SpacetimeDB TeV compute economy while maintaining
-// highly responsive client prediction.
+// ----------------------------------------------------------------------------
+// CLIENT-SIDE PREDICTION & SERVER RECONCILIATION
+// ----------------------------------------------------------------------------
+// Architectural Note: Grouping the active simulation systems (buffering inputs 
+// and reconciling server rollbacks) into their own execution segment.
 fn buffer_and_send_movement(
     mut tick: ResMut<ClientTick>,
     mut timer: ResMut<NetworkTickTimer>,

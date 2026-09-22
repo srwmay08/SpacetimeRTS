@@ -1,3 +1,8 @@
+// ----------------------------------------------------------------------------
+// APP CONFIGURATION & SYSTEM SCHEDULING
+// ----------------------------------------------------------------------------
+// Architectural Note: Grouping module declarations, imports, and the primary 
+// Bevy app builder to comply with AI structural boundary rules.
 mod module_bindings;
 mod core;
 mod components;
@@ -74,6 +79,7 @@ fn main() {
             toggle_build_mode, 
             update_build_hologram, 
             update_build_ui, 
+            update_interaction_prompt, // <-- Add this system here
             animate_view_model, 
             update_inventory_ui, 
             toggle_inventory_ui,
@@ -94,6 +100,11 @@ fn main() {
         .run();
 }
 
+// ----------------------------------------------------------------------------
+// TELEMETRY & UTILITY SYSTEMS
+// ----------------------------------------------------------------------------
+// Architectural Note: Isolating utility systems to maintain clear boundaries 
+// from core app initialization.
 fn track_telemetry_metrics(time: Res<Time>, mut telemetry: ResMut<TelemetryTracker>) {
     telemetry.last_frame_time = time.elapsed_seconds_f64();
 }

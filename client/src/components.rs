@@ -83,13 +83,13 @@ pub struct InteriorProp;
 // ----------------------------------------------------------------------------
 // UI & VFX COMPONENTS
 // ----------------------------------------------------------------------------
-
 #[derive(Component)] pub struct InventoryUiRoot; 
 #[derive(Component)] pub struct InventorySlotName(pub usize);
 #[derive(Component)] pub struct InventorySlotCount(pub usize);
 
 #[derive(Component)] pub struct HealthBarUI;
 #[derive(Component)] pub struct BuildUIText;
+#[derive(Component)] pub struct InteractionPromptText; // Added for ground item interaction prompts
 
 #[derive(Component)] pub struct ActionBarUiRoot;
 #[derive(Component)] pub struct ActionBarButton(pub String);

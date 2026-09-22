@@ -1,3 +1,6 @@
+// ----------------------------------------------------------------------------
+// AI IMPORTS & DEPENDENCIES
+// ----------------------------------------------------------------------------
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
 use crate::movement::{transform, player_session, Transform}; 
 use crate::inventory; 
@@ -5,7 +8,7 @@ use crate::resource_node;
 use crate::respawn_bush_timer; 
 use crate::building::structure; 
 use crate::combat::{health, faction_component, Faction};
-use crate::combat_event; 
+use crate::combat_event;
 
 // ----------------------------------------------------------------------------
 // PEASANT AI STRUCTURES
@@ -49,7 +52,6 @@ pub struct Peasant {
 #[derive(SpacetimeType, Clone, Debug, PartialEq)]
 pub enum AiType { Friendly, Deer, Boar, Goblin, Peasant }
 
-// Architectural Note: Added `Corpse` state to retain physical presence post-mortem.
 #[derive(SpacetimeType, Clone, Debug, PartialEq)]
 pub enum BrainState { Idle, Fleeing, Chasing, Attacking, Warning, Corpse }
 
@@ -80,8 +82,6 @@ pub struct PetComponent {
     pub stance: PetStance,
 }
 
-// Architectural Note: Defines the persistent physical entity left behind when an NPC dies,
-// allowing clients to target and harvest it for loot drops.
 #[table(accessor = harvestable_corpse, public)]
 #[derive(Clone, PartialEq)]
 pub struct HarvestableCorpse {
@@ -206,9 +206,6 @@ pub fn command_peasant(
         return Err("Unauthorized: You do not own this unit.".into());
     }
 
-    // Architectural Note: Fleeing Override Protection. 
-    // If the unit's overarching threat evaluator determines it is under attack, 
-    // we drop incoming player gathering commands and alert the client UI.
     if let Some(brain) = ctx.db.npc_brain().entity_id().find(peasant_entity_id) {
         if brain.state == BrainState::Fleeing {
             return Err("Unit is currently fleeing from enemies and cannot process commands.".into());
@@ -257,8 +254,6 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
 
     for mut brain in brains {
         let initial_brain = brain.clone();
-        
-        // Architectural Note: Skip physics processing entirely if the unit is dead.
         if brain.state == BrainState::Corpse { continue; }
         
         let Some(mut transform) = ctx.db.transform().entity_id().find(brain.entity_id) else { continue; };
@@ -274,7 +269,6 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             .map(|f| f.faction.clone())
             .unwrap_or(Faction::Wildlife);
 
-        // 1. Evaluate State Transitions
         match brain.ai_type {
             AiType::Friendly => {
                 if let Some(h) = hp {
@@ -284,8 +278,6 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                         let mut min_d = f32::MAX;
                         for t in &all_transforms {
                             if t.entity_id == brain.entity_id { continue; }
-                            
-                            // Check Corpse Table before targeting
                             if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                             
                             let dist = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
@@ -296,21 +288,30 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                 }
             }
             AiType::Deer => {
-                if let Some(h) = hp {
-                    if h.current < h.max && brain.state != BrainState::Fleeing {
-                        brain.state = BrainState::Fleeing;
-                        let mut nearest = None;
-                        let mut min_d = f32::MAX;
-                        for t in &all_transforms {
-                            if t.entity_id == brain.entity_id { continue; }
-                            
-                            // Check Corpse Table before fleeing
-                            if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
-                            
-                            let dist = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
-                            if dist < min_d { min_d = dist; nearest = Some(t.entity_id); }
+                let mut nearest_threat = None;
+                let mut min_d = 625.0; 
+                
+                for t in &all_transforms {
+                    if t.entity_id == brain.entity_id { continue; }
+                    if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
+                    
+                    if let Some(fac) = all_factions.iter().find(|fac| fac.entity_id == t.entity_id) {
+                        if fac.faction == Faction::Player {
+                            let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
+                            if dist_sq < min_d { 
+                                min_d = dist_sq; 
+                                nearest_threat = Some(t.entity_id); 
+                            }
                         }
-                        brain.target_id = nearest;
+                    }
+                }
+
+                if let Some(h) = hp {
+                    if h.current < h.max || nearest_threat.is_some() {
+                        if brain.state != BrainState::Fleeing {
+                            brain.state = BrainState::Fleeing;
+                            brain.target_id = nearest_threat;
+                        }
                     }
                 }
             }
@@ -319,7 +320,6 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                 let mut min_dist = 100.0; 
                 for t in &all_transforms {
                     if t.entity_id == brain.entity_id { continue; }
-                    
                     if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                     
                     let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
@@ -354,7 +354,6 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                     let mut found_target = None;
                     for t in &all_transforms {
                         if t.entity_id == brain.entity_id { continue; }
-                        
                         if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                         
                         let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
@@ -381,7 +380,6 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                     
                     if is_attacking || other_brain.ai_type == AiType::Goblin {
                         if let Some(t) = ctx.db.transform().entity_id().find(other_brain.entity_id) {
-                            
                             if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                             
                             let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
@@ -400,7 +398,6 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             }
         }
 
-        // 2. Process Physics/Movement Based on Assessed State
         match brain.state {
             BrainState::Idle => {
                 let dist_sq = (brain.wander_x - transform.x).powi(2) + (brain.wander_z - transform.z).powi(2);
@@ -486,14 +483,9 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             BrainState::Warning => {
                 current_speed = 0.0;
             }
-            BrainState::Corpse => {
-                // Should be trapped by the guard clause at the top of the loop.
-            }
+            BrainState::Corpse => {}
         }
 
-        // Architectural Note: Flocking / Separation Injection
-        // We inject generic spatial boids separation into all moving NPCs. 
-        // This ensures tracking groups naturally fan out, eliminating Avian3D narrow_phase overlap physics warnings.
         let mut sep_x = 0.0;
         let mut sep_z = 0.0;
         

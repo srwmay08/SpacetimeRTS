@@ -3,6 +3,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::window::PrimaryWindow;
 use avian3d::prelude::*;
 use tracing::{info, error};
+use spacetimedb_sdk::Table;
 
 use crate::core::*;
 use crate::components::*;
@@ -16,6 +17,7 @@ use crate::module_bindings::interact_node_reducer::interact_node;
 use crate::module_bindings::command_peasant_reducer::command_peasant;
 use crate::module_bindings::spawn_peasant_reducer::spawn_peasant;
 use crate::module_bindings::player_table::PlayerTableAccess;
+use crate::module_bindings::resource_node_table::ResourceNodeTableAccess;
 
 // ----------------------------------------------------------------------------
 // EVENTS & ENUMS
@@ -142,9 +144,6 @@ pub fn context_aware_action_dispatcher(
                                         SpatialQueryFilter::from_excluded_entities([player_entity]),
                                     );
 
-                                    // Architectural Note: Added `queries.selectable` check. 
-                                    // Melee swings will now properly resolve against living enemies and corpses 
-                                    // instead of attempting to trigger a hitscan gunshot.
                                     let is_tool_context = hit.map_or(false, |hit_data| {
                                         hit_data.time_of_impact < 6.0 && 
                                         (queries.node.contains(hit_data.entity) || 
@@ -201,8 +200,21 @@ pub fn context_aware_action_dispatcher(
                                 
                                 if let Some(hit_data) = hit {
                                     if let Ok(node) = queries.node.get(hit_data.entity) {
-                                        if let Err(e) = conn.db.reducers.interact_node(node.node_id) {
-                                            error!("NETWORK ERROR: Failed to interact with node. Details: {:?}", e);
+                                        // Architectural Note: Ground items like Flint/LooseStone/Branches 
+                                        // or Bushes can be looted/interacted with directly via [E].
+                                        if let Some(resource_node) = conn.db.db.resource_node().node_id().find(&node.node_id) {
+                                            if resource_node.node_type == "Bush" {
+                                                if let Err(e) = conn.db.reducers.interact_node(node.node_id) {
+                                                    error!("NETWORK ERROR: Failed to interact with node. Details: {:?}", e);
+                                                }
+                                            } else {
+                                                // For ground debris/nodes, simulate an instant harvest swing or pickup
+                                                if let Err(e) = conn.db.reducers.swing_tool(
+                                                    origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                                ) {
+                                                    error!("NETWORK ERROR: Failed to harvest ground item. Details: {:?}", e);
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -404,4 +416,48 @@ pub fn player_movement_system(
         lin_vel.y = 10.0; 
         kcc.is_grounded = false; 
     }
+}
+
+// ----------------------------------------------------------------------------
+// INTERACTION PROMPT SYSTEM
+// ----------------------------------------------------------------------------
+
+pub fn update_interaction_prompt(
+    conn: Res<SpacetimeConnection>,
+    camera_query: Query<&GlobalTransform, With<FpsCamera>>,
+    player_query: Query<Entity, With<PlayerBody>>,
+    spatial_query: SpatialQuery,
+    node_query: Query<&ResourceNodeItem>,
+    structure_query: Query<&NetworkStructure>,
+    mut prompt_query: Query<(&mut Text, &mut Visibility), With<InteractionPromptText>>,
+) {
+    let Ok(cam_transform) = camera_query.get_single() else { return; };
+    let Ok(player_entity) = player_query.get_single() else { return; };
+    let Ok((mut text, mut vis)) = prompt_query.get_single_mut() else { return; };
+
+    let origin = cam_transform.translation();
+    let dir = cam_transform.forward();
+
+    let hit = spatial_query.cast_ray(
+        origin, dir.into(), 5.0, true,
+        SpatialQueryFilter::from_excluded_entities([player_entity]),
+    );
+
+    if let Some(hit_data) = hit {
+        if let Ok(node_item) = node_query.get(hit_data.entity) {
+            if let Some(node) = conn.db.db.resource_node().node_id().find(&node_item.node_id) {
+                // Architectural Note: Dynamically formats prompt based on SpacetimeDB node type.
+                text.sections[0].value = format!("[E] Gather {}", node.node_type);
+                *vis = Visibility::Inherited;
+                return;
+            }
+        } else if structure_query.contains(hit_data.entity) {
+            text.sections[0].value = "[E] Hit with Hammer / Build".to_string();
+            *vis = Visibility::Inherited;
+            return;
+        }
+    }
+
+    text.sections[0].value = "".to_string();
+    *vis = Visibility::Hidden;
 }

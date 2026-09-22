@@ -1,3 +1,6 @@
+// ----------------------------------------------------------------------------
+// CORE MODULE IMPORTS & GLOBAL TABLES
+// ----------------------------------------------------------------------------
 use spacetimedb::{table, reducer, Identity, ReducerContext, Table, ScheduleAt, SpacetimeType};
 use std::time::Duration;
 use noise::{NoiseFn, Perlin}; 
@@ -9,8 +12,29 @@ pub mod ai;
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history, faction_component, Faction};
-use crate::ai::{npc_brain, AiType, BrainState, pet_component, PetComponent, PetStance, harvestable_corpse};
+use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse};
 use crate::building::{structure, Structure};
+
+// Architectural Note: GlobalState tracks the 24-hour Server Time of Day cycle 
+// to dynamically alter line of sight, spawn rules, and unit abilities.
+#[table(accessor = global_state, public)]
+#[derive(Clone)]
+pub struct GlobalState {
+    #[primary_key] pub id: u32,
+    pub time_of_day: f32, 
+}
+
+// Architectural Note: Waypoints act as the central nervous system for Commander-to-FPS squad coordination,
+// replacing verbal callouts with hard visual HUD markers.
+#[table(accessor = waypoint, public)]
+#[derive(Clone)]
+pub struct Waypoint {
+    #[primary_key] #[auto_inc] pub waypoint_id: u64,
+    pub commander_id: u64,
+    pub x: f32, pub y: f32, pub z: f32,
+    pub order_type: String, 
+    pub expires_at: u64,
+}
 
 #[table(accessor = high_frequency_timer, scheduled(high_frequency_tick))]
 #[derive(Clone)]
@@ -53,6 +77,7 @@ pub struct InventorySlot {
 pub struct Inventory {
     #[primary_key] pub entity_id: u64, 
     pub slots: Vec<InventorySlot>,
+    pub discovered_items: Vec<String>,
 }
 
 #[table(accessor = resource_node, public)]
@@ -87,7 +112,7 @@ pub struct CombatEvent {
 pub struct NavEvent {
     #[primary_key] #[auto_inc] pub id: u64,
     pub min_x: f32, pub min_y: f32, pub min_z: f32,
-    pub max_x: f32, pub max_y: f32, pub max_z: f32,
+    pub max_x: f32, pub max_y: f32, max_z: f32,
 }
 
 // ----------------------------------------------------------------------------
@@ -95,6 +120,10 @@ pub struct NavEvent {
 // ----------------------------------------------------------------------------
 
 pub fn add_item(inventory: &mut Inventory, item_type: &str, mut amount: u32) {
+    if !inventory.discovered_items.contains(&item_type.to_string()) {
+        inventory.discovered_items.push(item_type.to_string());
+    }
+
     for slot in inventory.slots.iter_mut() {
         if slot.item_type == item_type && slot.count < 50 {
             let space = 50 - slot.count;
@@ -138,10 +167,14 @@ pub fn remove_item(inventory: &mut Inventory, item_type: &str, mut amount: u32) 
     true
 }
 
+pub fn has_item(inventory: &Inventory, item_type: &str, amount: u32) -> bool {
+    let total: u32 = inventory.slots.iter().filter(|s| s.item_type == item_type).map(|s| s.count).sum();
+    total >= amount
+}
+
 // ----------------------------------------------------------------------------
 // LIFECYCLE & TICK REDUCERS
 // ----------------------------------------------------------------------------
-
 #[spacetimedb::reducer(init)]
 pub fn init(ctx: &ReducerContext) {
     ctx.db.high_frequency_timer().insert(HighFrequencyTimer {
@@ -153,6 +186,8 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_id: 0,
         scheduled_at: ScheduleAt::Interval(Duration::from_millis(100).into()), 
     });
+    
+    ctx.db.global_state().insert(GlobalState { id: 0, time_of_day: 8.0 });
 }
 
 #[reducer]
@@ -162,6 +197,25 @@ pub fn high_frequency_tick(_ctx: &ReducerContext, _timer: HighFrequencyTimer) {}
 pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
     crate::ai::process_ai_tick(ctx);
     crate::ai::process_npc_brain_tick(ctx, 0.1); 
+    
+    // Architectural Note: 3. Map Dynamics (Time-of-Day Dynamics)
+    // Progresses the global server time loop. Scaled so a full day cycle takes roughly 48 real-time minutes.
+    if let Some(mut state) = ctx.db.global_state().id().find(0) {
+        state.time_of_day += 0.005; 
+        if state.time_of_day >= 24.0 { state.time_of_day -= 24.0; }
+        ctx.db.global_state().id().update(state);
+    }
+    
+    // Architectural Note: Expire waypoints to maintain the HUD/Attention Economy
+    let now = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    let expired: Vec<u64> = ctx.db.waypoint().iter()
+        .filter(|w| w.expires_at < now)
+        .map(|w| w.waypoint_id)
+        .collect();
+        
+    for id in expired {
+        ctx.db.waypoint().waypoint_id().delete(id);
+    }
 }
 
 #[spacetimedb::reducer(client_connected)]
@@ -196,9 +250,15 @@ pub fn client_connected(ctx: &ReducerContext) {
                 let (node_type, scale, health, req_tool) = if ry > 12.0 { 
                     let sc = 0.5 + prng(&mut seed) * 2.5; 
                     ("Rock", sc, (4.0 * sc) as u32, "None")
-                } else if type_roll < 0.5 { 
+                } else if type_roll < 0.15 { 
+                    ("Flint", 0.5, 1, "None")
+                } else if type_roll < 0.3 {
+                    ("LooseStone", 0.5, 1, "None")
+                } else if type_roll < 0.5 {
+                    ("Branch", 0.5, 1, "None")
+                } else if type_roll < 0.8 { 
                     let sc = 0.5 + prng(&mut seed) * 2.0; 
-                    let tool = if sc > 1.5 { "Axe" } else { "None" };
+                    let tool = if sc > 1.5 { "Stone Axe" } else { "None" };
                     ("Tree", sc, (3.0 * sc) as u32, tool)
                 } else { 
                     ("Bush", 1.0, 1, "None")
@@ -213,120 +273,15 @@ pub fn client_connected(ctx: &ReducerContext) {
         let base_x = 0.0;
         let base_z = 20.0; 
         let base_y = get_terrain_height(base_x, base_z) + 1.0; 
-        let mut struct_id_counter = 1;
-
-        let qy = 0.70710677; 
-        let qw = 0.70710677; 
-
-        for ix in -1..=1 {
-            for iz in -1..=1 {
-                let fx = base_x + (ix as f32) * 4.0;
-                let fz = base_z + (iz as f32) * 4.0;
-                
-                ctx.db.structure().insert(Structure {
-                    structure_id: struct_id_counter, parent_id: None, piece_type: "Foundation".into(),
-                    stability: 100, is_grounded: true, x: fx, y: base_y, z: fz,
-                    rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
-                });
-                struct_id_counter += 1;
-
-                ctx.db.structure().insert(Structure {
-                    structure_id: struct_id_counter, parent_id: None, piece_type: "Roof".into(),
-                    stability: 80, is_grounded: false, x: fx, y: base_y + 3.0, z: fz,
-                    rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
-                });
-                struct_id_counter += 1;
-
-                if ix == -1 {
-                    ctx.db.structure().insert(Structure {
-                        structure_id: struct_id_counter, parent_id: None, piece_type: "Wall".into(),
-                        stability: 90, is_grounded: false, x: fx - 2.0, y: base_y + 1.5, z: fz,
-                        rot_x: 0.0, rot_y: qy, rot_z: 0.0, rot_w: qw, owner_id: 0,
-                    });
-                    struct_id_counter += 1;
-                }
-                if ix == 1 {
-                    ctx.db.structure().insert(Structure {
-                        structure_id: struct_id_counter, parent_id: None, piece_type: "Wall".into(),
-                        stability: 90, is_grounded: false, x: fx + 2.0, y: base_y + 1.5, z: fz,
-                        rot_x: 0.0, rot_y: qy, rot_z: 0.0, rot_w: qw, owner_id: 0,
-                    });
-                    struct_id_counter += 1;
-                }
-                if iz == 1 {
-                    ctx.db.structure().insert(Structure {
-                        structure_id: struct_id_counter, parent_id: None, piece_type: "Wall".into(),
-                        stability: 90, is_grounded: false, x: fx, y: base_y + 1.5, z: fz + 2.0,
-                        rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
-                    });
-                    struct_id_counter += 1;
-                }
-                if iz == -1 {
-                    if ix == 0 {
-                        ctx.db.structure().insert(Structure {
-                            structure_id: struct_id_counter, parent_id: None, piece_type: "Ramp".into(),
-                            stability: 100, is_grounded: true, x: fx, y: base_y - 0.5, z: fz - 4.0,
-                            rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
-                        });
-                        struct_id_counter += 1;
-                    } else {
-                        ctx.db.structure().insert(Structure {
-                            structure_id: struct_id_counter, parent_id: None, piece_type: "Wall".into(),
-                            stability: 90, is_grounded: false, x: fx, y: base_y + 1.5, z: fz - 2.0,
-                            rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
-                        });
-                        struct_id_counter += 1;
-                    }
-                }
-            }
-        }
+        
+        ctx.db.structure().insert(Structure {
+            structure_id: 1, parent_id: None, piece_type: "Foundation".into(),
+            stability: 100, is_grounded: true, x: base_x, y: base_y, z: base_z,
+            rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
+            is_blueprint: false, construction_progress: 100, // Fix for E0063
+        });
 
         let mut npc_id = ctx.timestamp.to_micros_since_unix_epoch() as u64 + 10000;
-        
-        for i in 0..3 {
-            let nx = base_x + (i as f32 - 1.0) * 2.0;
-            let nz = base_z + 2.0;
-            spawned_positions.push((nx, nz));
-            ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: base_y + 1.5, z: nz, chunk_x: 0, chunk_z: 0, last_processed_tick: 0 });
-            ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 50.0, max: 50.0 });
-            ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Villager });
-            ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
-                entity_id: npc_id, ai_type: AiType::Friendly, state: BrainState::Idle, target_id: None, timer: 0.0,
-                home_x: nx, home_z: nz, wander_x: nx, wander_z: nz 
-            });
-            npc_id += 1;
-        }
-
-        for _ in 0..20 {
-            let mut nx = 0.0; let mut nz = 0.0;
-            let mut valid = false;
-            for _ in 0..10 {
-                nx = (prng(&mut seed) * 400.0) - 200.0;
-                nz = (prng(&mut seed) * 400.0) - 200.0;
-                if nx.abs() < 50.0 && nz.abs() < 50.0 { continue; } 
-                
-                // Architectural Note: NPC Spawn Overlap Evaluation.
-                // Evaluates goblin random positions against all existing environment elements and previously spawned entities
-                // to completely eliminate the Avian3D `narrow_phase` spawn warnings caused by coordinate stacking.
-                let mut overlaps = false;
-                for (px, pz) in &spawned_positions {
-                    if (px - nx) * (px - nx) + (pz - nz) * (pz - nz) < 9.0 { overlaps = true; break; }
-                }
-                if !overlaps { valid = true; break; }
-            }
-            if valid {
-                spawned_positions.push((nx, nz));
-                let ny = get_terrain_height(nx, nz) + 1.5;
-                ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
-                ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 40.0, max: 40.0 });
-                ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Goblin });
-                ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
-                    entity_id: npc_id, ai_type: AiType::Goblin, state: BrainState::Idle, target_id: None, timer: 0.0,
-                    home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
-                });
-                npc_id += 1;
-            }
-        }
 
         for _ in 0..15 {
             let mut nx = 0.0; let mut nz = 0.0;
@@ -348,32 +303,6 @@ pub fn client_connected(ctx: &ReducerContext) {
                 ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
                 ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
                     entity_id: npc_id, ai_type: AiType::Deer, state: BrainState::Idle, target_id: None, timer: 0.0,
-                    home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
-                });
-                npc_id += 1;
-            }
-        }
-
-        for _ in 0..10 {
-            let mut nx = 0.0; let mut nz = 0.0;
-            let mut valid = false;
-            for _ in 0..10 {
-                nx = (prng(&mut seed) * 400.0) - 200.0;
-                nz = (prng(&mut seed) * 400.0) - 200.0;
-                let mut overlaps = false;
-                for (px, pz) in &spawned_positions {
-                    if (px - nx) * (px - nx) + (pz - nz) * (pz - nz) < 9.0 { overlaps = true; break; }
-                }
-                if !overlaps { valid = true; break; }
-            }
-            if valid {
-                spawned_positions.push((nx, nz));
-                let ny = get_terrain_height(nx, nz) + 1.5;
-                ctx.db.transform().insert(movement::Transform { entity_id: npc_id, x: nx, y: ny, z: nz, chunk_x: (nx/50.0) as i32, chunk_z: (nz/50.0) as i32, last_processed_tick: 0 });
-                ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 60.0, max: 60.0 });
-                ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
-                ctx.db.npc_brain().insert(crate::ai::NpcBrain { 
-                    entity_id: npc_id, ai_type: AiType::Boar, state: BrainState::Idle, target_id: None, timer: 0.0,
                     home_x: nx, home_z: nz, wander_x: nx, wander_z: nz
                 });
                 npc_id += 1;
@@ -411,7 +340,6 @@ pub fn client_connected(ctx: &ReducerContext) {
             });
         }
         
-        log::info!("Existing identity {} successfully restored and re-synced.", sender.to_hex());
     } else {
         let inserted_player = ctx.db.player().insert(Player { 
             entity_id: 0, identity: sender, is_online: true 
@@ -442,28 +370,12 @@ pub fn client_connected(ctx: &ReducerContext) {
 
         ctx.db.inventory().insert(Inventory {
             entity_id, 
-            slots: vec![
-                InventorySlot { item_type: "Axe".into(), count: 1 },
-                InventorySlot { item_type: "Wood".into(), count: 150 }, 
-            ],
+            slots: vec![],
+            discovered_items: vec![],
         });
         
         ctx.db.player_perspective().insert(PlayerPerspective {
             entity_id, camera_mode: "FPS".to_string(), in_interior: false,
-        });
-
-        let pet_id = entity_id + 99999;
-        ctx.db.transform().insert(movement::Transform {
-            entity_id: pet_id, x: 2.0, y: spawn_y, z: -2.0, chunk_x: 0, chunk_z: 0, last_processed_tick: 0,
-        });
-        ctx.db.health().insert(combat::Health {
-            entity_id: pet_id, current: 80.0, max: 80.0,
-        });
-        ctx.db.faction_component().insert(combat::FactionComponent {
-            entity_id: pet_id, faction: Faction::Player,
-        });
-        ctx.db.pet_component().insert(PetComponent {
-            entity_id: pet_id, owner_id: entity_id, stance: PetStance::Follow,
         });
     }
 }
@@ -478,51 +390,133 @@ pub fn client_disconnected(ctx: &ReducerContext) {
 }
 
 // ----------------------------------------------------------------------------
-// INTERACTION & COMBAT REDUCERS
+// PROGRESSION REDUCERS
 // ----------------------------------------------------------------------------
 
 #[reducer]
-pub fn set_camera_mode(ctx: &ReducerContext, mode: String) {
-    let sender = ctx.sender();
-    let Some(player) = ctx.db.player().identity().find(sender) else { return; };
-    if let Some(mut perspective) = ctx.db.player_perspective().entity_id().find(player.entity_id) {
-        perspective.camera_mode = mode.clone();
-        ctx.db.player_perspective().entity_id().update(perspective);
+pub fn consume_item(ctx: &ReducerContext, item_name: String) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or("Unauthorized: No active session")?;
+    let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or("Inventory not found")?;
+
+    if !remove_item(&mut inv, &item_name, 1) {
+        return Err(format!("You do not have any {}.", item_name));
     }
+
+    if item_name == "Berry" || item_name == "Honey" || item_name == "Cooked Meat" {
+        if let Some(mut hp) = ctx.db.health().entity_id().find(session.entity_id) {
+            let heal_amount = match item_name.as_str() {
+                "Berry" => 10.0,
+                "Honey" => 25.0,
+                "Cooked Meat" => 40.0,
+                _ => 0.0,
+            };
+            hp.current = (hp.current + heal_amount).min(hp.max);
+            ctx.db.health().entity_id().update(hp);
+            log::info!("Player {} consumed {} for {} HP.", session.entity_id, item_name, heal_amount);
+        }
+    } else {
+        return Err("Item is not consumable.".to_string());
+    }
+
+    ctx.db.inventory().entity_id().update(inv);
+    Ok(())
 }
 
 #[reducer]
-pub fn set_interior_culling(ctx: &ReducerContext, is_inside: bool) -> Result<(), String> {
-    let sender = ctx.sender();
-    let player = ctx.db.player().identity().find(sender).ok_or("Unauthorized")?;
-    if let Some(mut perspective) = ctx.db.player_perspective().entity_id().find(player.entity_id) {
-        perspective.in_interior = is_inside;
-        ctx.db.player_perspective().entity_id().update(perspective);
+pub fn craft_item(ctx: &ReducerContext, item_name: String) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or("Unauthorized: No active session")?;
+
+    let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or("Inventory not found")?;
+
+    let player_transform = ctx.db.transform().entity_id().find(session.entity_id)
+        .ok_or("Transform not found")?;
+
+    let requires_workbench = matches!(item_name.as_str(), "Leather Tunic" | "Crude Bow" | "Flint Arrow");
+    if requires_workbench {
+        let mut valid_workbench = false;
+        for s in ctx.db.structure().iter().filter(|s| s.piece_type == "Workbench") {
+            let dist_sq = (s.x - player_transform.x).powi(2) + (s.z - player_transform.z).powi(2);
+            if dist_sq < 100.0 { 
+                if crate::building::is_covered(ctx, s.x, s.y, s.z) {
+                    valid_workbench = true;
+                    break;
+                }
+            }
+        }
+        if !valid_workbench {
+            return Err("Crafting this item requires a Workbench with adequate roof cover nearby.".into());
+        }
     }
+
+    match item_name.as_str() {
+        "Hammer" => {
+            if !has_item(&inv, "Branch", 1) || !has_item(&inv, "LooseStone", 1) {
+                return Err("Missing materials: 1 Branch, 1 LooseStone.".into());
+            }
+            remove_item(&mut inv, "Branch", 1);
+            remove_item(&mut inv, "LooseStone", 1);
+            add_item(&mut inv, "Hammer", 1);
+        }
+        "Stone Axe" => {
+            if !has_item(&inv, "Branch", 1) || !has_item(&inv, "Flint", 1) {
+                return Err("Missing materials: 1 Branch, 1 Flint.".into());
+            }
+            remove_item(&mut inv, "Branch", 1);
+            remove_item(&mut inv, "Flint", 1);
+            add_item(&mut inv, "Stone Axe", 1);
+        }
+        "Club" => {
+            if !has_item(&inv, "Branch", 2) {
+                return Err("Missing materials: 2 Branch.".into());
+            }
+            remove_item(&mut inv, "Branch", 2);
+            add_item(&mut inv, "Club", 1);
+        }
+        "Torch" => {
+            if !has_item(&inv, "Branch", 1) || !has_item(&inv, "Resin", 1) {
+                return Err("Missing materials: 1 Branch, 1 Resin.".into());
+            }
+            remove_item(&mut inv, "Branch", 1);
+            remove_item(&mut inv, "Resin", 1);
+            add_item(&mut inv, "Torch", 1);
+        }
+        "Crude Bow" => {
+            if !has_item(&inv, "Wood", 10) || !has_item(&inv, "Leather Scraps", 8) {
+                return Err("Missing materials: 10 Wood, 8 Leather Scraps.".into());
+            }
+            remove_item(&mut inv, "Wood", 10);
+            remove_item(&mut inv, "Leather Scraps", 8);
+            add_item(&mut inv, "Crude Bow", 1);
+        }
+        _ => return Err("Unknown or locked crafting recipe.".into()),
+    }
+
+    ctx.db.inventory().entity_id().update(inv);
     Ok(())
 }
+
+// ----------------------------------------------------------------------------
+// INTERACTION REDUCERS
+// ----------------------------------------------------------------------------
 
 #[reducer]
 pub fn interact_node(ctx: &ReducerContext, node_id: u64) -> Result<(), String> {
     let sender = ctx.sender();
     let player = ctx.db.player().identity().find(sender).ok_or("Unauthorized")?;
     
-    let mut inventory = ctx.db.inventory().entity_id().find(player.entity_id).unwrap_or_else(|| Inventory {
-        entity_id: player.entity_id,
-        slots: vec![],
-    });
-    
+    let mut inventory = ctx.db.inventory().entity_id().find(player.entity_id).unwrap();
     let mut node = ctx.db.resource_node().node_id().find(node_id).ok_or("Node not found")?;
+    
     if node.node_type != "Bush" { return Err("Entity not interactable".into()); }
     if node.health == 0 { return Err("Berries depleted".into()); }
     
-    add_item(&mut inventory, "Berry", 5);
+    add_item(&mut inventory, "Berry", 2);
     
-    if ctx.db.inventory().entity_id().find(player.entity_id).is_some() {
-        ctx.db.inventory().entity_id().update(inventory);
-    } else {
-        ctx.db.inventory().insert(inventory);
-    }
+    ctx.db.inventory().entity_id().update(inventory);
     
     node.health = 0; 
     ctx.db.resource_node().node_id().update(node);
@@ -532,7 +526,6 @@ pub fn interact_node(ctx: &ReducerContext, node_id: u64) -> Result<(), String> {
         scheduled_at: ScheduleAt::Interval(Duration::from_secs(60).into()),
         node_id,
     });
-    
     Ok(())
 }
 
@@ -549,108 +542,61 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
     let sender = ctx.sender();
     let Some(player) = ctx.db.player().identity().find(sender) else { return; };
     
-    let mut inventory = ctx.db.inventory().entity_id().find(player.entity_id).unwrap_or_else(|| Inventory {
-        entity_id: player.entity_id,
-        slots: vec![],
-    });
-
+    let mut inventory = ctx.db.inventory().entity_id().find(player.entity_id).unwrap();
     let mut hit_node = None;
     let mut hit_entity = None;
     let mut min_dist = 12.0_f32; 
 
-    // 1. Check against Environment Nodes
     for node in ctx.db.resource_node().iter() {
-        let dist_x = node.x - px; 
-        let dist_y = node.y - py; 
-        let dist_z = node.z - pz;
-        let dist = (dist_x * dist_x + dist_y * dist_y + dist_z * dist_z).sqrt();
-
+        let dist = ((node.x - px).powi(2) + (node.y - py).powi(2) + (node.z - pz).powi(2)).sqrt();
         if dist < min_dist {
-            let dot = (dist_x / dist) * dx + (dist_y / dist) * dy + (dist_z / dist) * dz;
-            if dot > 0.5 { 
-                min_dist = dist;
-                hit_node = Some(node);
-            }
+            let dot = ((node.x - px) / dist) * dx + ((node.y - py) / dist) * dy + ((node.z - pz) / dist) * dz;
+            if dot > 0.5 { min_dist = dist; hit_node = Some(node); }
         }
     }
 
-    // 2. Check against Living (or Corpse) Entities
     for t in ctx.db.transform().iter() {
         if t.entity_id == player.entity_id { continue; } 
         if ctx.db.health().entity_id().find(t.entity_id).is_none() { continue; } 
-
-        let dist_x = t.x - px; 
-        let dist_y = t.y - py; 
-        let dist_z = t.z - pz;
-        let dist = (dist_x * dist_x + dist_y * dist_y + dist_z * dist_z).sqrt();
-
+        let dist = ((t.x - px).powi(2) + (t.y - py).powi(2) + (t.z - pz).powi(2)).sqrt();
         if dist < min_dist {
-            let dot = (dist_x / dist) * dx + (dist_y / dist) * dy + (dist_z / dist) * dz;
-            if dot > 0.5 { 
-                min_dist = dist;
-                hit_entity = Some(t);
-                hit_node = None; 
-            }
+            let dot = ((t.x - px) / dist) * dx + ((t.y - py) / dist) * dy + ((t.z - pz) / dist) * dz;
+            if dot > 0.5 { min_dist = dist; hit_entity = Some(t); hit_node = None; }
         }
     }
 
-    // Architectural Note: Multi-stage Entity Resolution (Damage vs. Harvesting)
     if let Some(target) = hit_entity {
-        
-        // Is the entity dead and harvestable?
         if let Some(corpse) = ctx.db.harvestable_corpse().entity_id().find(target.entity_id) {
-            
-            // Generate blood fx for harvesting corpse
-            ctx.db.combat_event().insert(CombatEvent {
-                id: 0, event_type: "HitPlayer".into(),
-                x: target.x, y: target.y + 0.5, z: target.z
-            });
-            
+            ctx.db.combat_event().insert(CombatEvent { id: 0, event_type: "HitPlayer".into(), x: target.x, y: target.y + 0.5, z: target.z });
             if let Some(mut hp) = ctx.db.health().entity_id().find(target.entity_id) {
                 if hp.current > 1.0 {
-                    hp.current -= 1.0;
-                    ctx.db.health().entity_id().update(hp);
+                    hp.current -= 1.0; ctx.db.health().entity_id().update(hp);
                 } else {
-                    // Corpse depleted. Grant loot and destroy entity.
                     add_item(&mut inventory, &corpse.loot_item, corpse.amount);
-                    
-                    if ctx.db.inventory().entity_id().find(player.entity_id).is_some() {
-                        ctx.db.inventory().entity_id().update(inventory);
-                    } else {
-                        ctx.db.inventory().insert(inventory);
-                    }
-                    
+                    ctx.db.inventory().entity_id().update(inventory);
                     ctx.db.health().entity_id().delete(target.entity_id);
                     ctx.db.transform().entity_id().delete(target.entity_id);
                     ctx.db.faction_component().entity_id().delete(target.entity_id);
                     ctx.db.npc_brain().entity_id().delete(target.entity_id);
                     ctx.db.harvestable_corpse().entity_id().delete(target.entity_id);
-                    log::info!("Player harvested Corpse {}. Awarded {} {}.", target.entity_id, corpse.amount, corpse.loot_item);
                 }
             }
             return;
         }
         
-        // Entity is alive. Apply standard damage.
         crate::combat::apply_damage(ctx, target.entity_id, 20.0);
-        ctx.db.combat_event().insert(CombatEvent {
-            id: 0, event_type: "HitPlayer".into(), 
-            x: target.x, y: target.y + 1.0, z: target.z
-        });
+        ctx.db.combat_event().insert(CombatEvent { id: 0, event_type: "HitPlayer".into(), x: target.x, y: target.y + 1.0, z: target.z });
         return; 
     }
 
     if let Some(node) = hit_node {
-        if node.required_tool == "Axe" {
-            let has_axe = inventory.slots.iter().any(|s| s.item_type == "Axe" && s.count > 0);
+        if node.required_tool == "Stone Axe" {
+            let has_axe = inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0);
             if !has_axe { return; }
         }
 
         let event_type = format!("Hit{}", node.node_type);
-        ctx.db.combat_event().insert(CombatEvent {
-            id: 0, event_type, 
-            x: node.x, y: node.y + 1.0, z: node.z
-        });
+        ctx.db.combat_event().insert(CombatEvent { id: 0, event_type, x: node.x, y: node.y + 1.0, z: node.z });
 
         if node.health > 1 {
             let mut updated = node.clone();
@@ -659,24 +605,21 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
         } else {
             ctx.db.resource_node().node_id().delete(node.node_id);
             
-            let base_amount = match node.node_type.as_str() { "Tree" => 5, "Rock" => 3, _ => 1 };
-            let amount = (base_amount as f32 * node.scale).ceil() as u32;
-            let item = match node.node_type.as_str() { "Tree" => "Wood", "Rock" => "Ore", _ => "Wood" };
+            let amount = (match node.node_type.as_str() { "Tree" => 5, "Rock" => 3, _ => 1 } as f32 * node.scale).ceil() as u32;
+            let item = match node.node_type.as_str() { 
+                "Tree" => "Wood", "Rock" => "Stone", "Branch" => "Branch", "Flint" => "Flint", "LooseStone" => "LooseStone", _ => "Wood" 
+            };
             
             add_item(&mut inventory, item, amount);
-            
-            if ctx.db.inventory().entity_id().find(player.entity_id).is_some() {
-                ctx.db.inventory().entity_id().update(inventory);
-            } else {
-                ctx.db.inventory().insert(inventory);
+            if node.node_type == "Tree" {
+                if inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0) {
+                    add_item(&mut inventory, "Resin", 1);
+                }
             }
+            ctx.db.inventory().entity_id().update(inventory);
         }
     }
 }
-
-// ----------------------------------------------------------------------------
-// UTILITIES
-// ----------------------------------------------------------------------------
 
 pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     let scale = 0.015; 
@@ -708,7 +651,6 @@ pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     y
 }
 
-// Architectural Note: Exposed to allow AI scripts deterministic random coordinate selection.
 pub fn prng(seed: &mut u64) -> f32 {
     *seed ^= *seed << 13; 
     *seed ^= *seed >> 7; 
