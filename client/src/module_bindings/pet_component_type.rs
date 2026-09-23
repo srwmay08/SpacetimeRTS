@@ -43,6 +43,7 @@ impl __sdk::__query_builder::HasCols for PetComponent {
 /// Provides typed access to indexed columns for query building.
 pub struct PetComponentIxCols {
     pub entity_id: __sdk::__query_builder::IxCol<PetComponent, u64>,
+    pub owner_id: __sdk::__query_builder::IxCol<PetComponent, u64>,
 }
 
 impl __sdk::__query_builder::HasIxCols for PetComponent {
@@ -50,6 +51,7 @@ impl __sdk::__query_builder::HasIxCols for PetComponent {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         PetComponentIxCols {
             entity_id: __sdk::__query_builder::IxCol::new(table_name, "entity_id"),
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
         }
     }
 }

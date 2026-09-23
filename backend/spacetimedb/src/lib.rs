@@ -15,9 +15,6 @@ use crate::combat::{health, hitbox_history, faction_component, Faction};
 use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse};
 use crate::building::{structure, Structure};
 
-// Architectural Note: Strongly-typed Camera Perspective Enum.
-// Replaces loose heap-allocated String representations ("FPS" / "RTS") across tables
-// to minimize BSATN serialization compute energy (TeV) and prevent runtime typos.
 #[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CameraModeType {
     #[default]
@@ -25,8 +22,6 @@ pub enum CameraModeType {
     Rts,
 }
 
-// Architectural Note: Strongly-typed Resource and Tool Enums.
-// Eliminates repetitive String allocations during world generation and hit tests.
 #[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceNodeType {
     Bush,
@@ -57,8 +52,6 @@ pub enum RequiredToolType {
     Pickaxe,
 }
 
-// Architectural Note: GlobalState tracks the 24-hour Server Time of Day cycle 
-// to dynamically alter line of sight, spawn rules, and unit abilities.
 #[table(accessor = global_state, public)]
 #[derive(Clone)]
 pub struct GlobalState {
@@ -66,8 +59,6 @@ pub struct GlobalState {
     pub time_of_day: f32, 
 }
 
-// Architectural Note: Waypoints coordinate Commander orders to squad members.
-// Added a BTree index on expires_at to allow fast garbage collection without full scans.
 #[table(accessor = waypoint, public)]
 #[derive(Clone)]
 pub struct Waypoint {
@@ -125,8 +116,6 @@ pub struct Inventory {
     pub discovered_items: Vec<String>,
 }
 
-// Architectural Note: Added spatial chunking coordinates and BTree indexes on ResourceNode
-// to drastically speed up AI neighbor lookups and spatial subscription filtering.
 #[table(accessor = resource_node, public)]
 #[derive(Clone)]
 pub struct ResourceNode {
@@ -175,7 +164,7 @@ pub struct NavEvent {
 }
 
 // ----------------------------------------------------------------------------
-// INVENTORY HELPER FUNCTIONS (Optimized for zero unnecessary allocations)
+// INVENTORY HELPER FUNCTIONS
 // ----------------------------------------------------------------------------
 
 pub fn add_item(inventory: &mut Inventory, item_type: &str, mut amount: u32) {
@@ -274,7 +263,6 @@ pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
         ctx.db.global_state().id().update(state);
     }
     
-    // Architectural Note: Immediate purge of expired waypoints to maintain low memory overhead.
     let now = ctx.timestamp.to_micros_since_unix_epoch() as u64;
     let expired_ids: Vec<u64> = ctx.db.waypoint().iter()
         .filter(|w| w.expires_at < now)
@@ -427,6 +415,16 @@ pub fn client_connected(ctx: &ReducerContext) {
         let entity_id = player.entity_id;
         ctx.db.player().entity_id().update(player);
         
+        // Architectural Note: Reconnection Session Guarantee
+        // Ensures player_session is present for returning connections, 
+        // preventing "Unauthorized: No active session" aborts on peasant commands.
+        if ctx.db.player_session().identity().find(sender).is_none() {
+            ctx.db.player_session().insert(movement::PlayerSession {
+                identity: sender,
+                entity_id,
+            });
+        }
+
         if ctx.db.transform().entity_id().find(entity_id).is_none() {
             let spawn_y = get_terrain_height(0.0, 0.0) + 10.0;
             ctx.db.transform().insert(movement::Transform {
@@ -687,8 +685,6 @@ pub fn respawn_bush_tick(ctx: &ReducerContext, timer: RespawnBushTimer) {
     }
 }
 
-// Architectural Note: Resolved production panic by safely extracting caller inventory 
-// and validating lookups against active player transforms.
 #[reducer]
 pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: f32, dz: f32) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())

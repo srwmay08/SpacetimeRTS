@@ -85,6 +85,8 @@ impl __sdk::__query_builder::HasCols for Structure {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct StructureIxCols {
+    pub owner_id: __sdk::__query_builder::IxCol<Structure, u64>,
+    pub parent_id: __sdk::__query_builder::IxCol<Structure, Option<u64>>,
     pub structure_id: __sdk::__query_builder::IxCol<Structure, u64>,
 }
 
@@ -92,6 +94,8 @@ impl __sdk::__query_builder::HasIxCols for Structure {
     type IxCols = StructureIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         StructureIxCols {
+            owner_id: __sdk::__query_builder::IxCol::new(table_name, "owner_id"),
+            parent_id: __sdk::__query_builder::IxCol::new(table_name, "parent_id"),
             structure_id: __sdk::__query_builder::IxCol::new(table_name, "structure_id"),
         }
     }

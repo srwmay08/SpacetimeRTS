@@ -55,6 +55,8 @@ impl __sdk::__query_builder::HasCols for Transform {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct TransformIxCols {
+    pub chunk_x: __sdk::__query_builder::IxCol<Transform, i32>,
+    pub chunk_z: __sdk::__query_builder::IxCol<Transform, i32>,
     pub entity_id: __sdk::__query_builder::IxCol<Transform, u64>,
 }
 
@@ -62,6 +64,8 @@ impl __sdk::__query_builder::HasIxCols for Transform {
     type IxCols = TransformIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         TransformIxCols {
+            chunk_x: __sdk::__query_builder::IxCol::new(table_name, "chunk_x"),
+            chunk_z: __sdk::__query_builder::IxCol::new(table_name, "chunk_z"),
             entity_id: __sdk::__query_builder::IxCol::new(table_name, "entity_id"),
         }
     }

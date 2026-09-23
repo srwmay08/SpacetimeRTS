@@ -52,6 +52,7 @@ impl __sdk::__query_builder::HasCols for Waypoint {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct WaypointIxCols {
+    pub expires_at: __sdk::__query_builder::IxCol<Waypoint, u64>,
     pub waypoint_id: __sdk::__query_builder::IxCol<Waypoint, u64>,
 }
 
@@ -59,6 +60,7 @@ impl __sdk::__query_builder::HasIxCols for Waypoint {
     type IxCols = WaypointIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         WaypointIxCols {
+            expires_at: __sdk::__query_builder::IxCol::new(table_name, "expires_at"),
             waypoint_id: __sdk::__query_builder::IxCol::new(table_name, "waypoint_id"),
         }
     }

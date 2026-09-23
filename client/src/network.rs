@@ -55,7 +55,7 @@ pub fn init_network_connection(
             
             let _handle = conn.subscription_builder().subscribe(vec![
                 "SELECT * FROM player".to_string(),
-                "SELECT * FROM transform WHERE chunk_x >= -1 AND chunk_x <= 1 AND chunk_z >= -1 AND chunk_z <= 1".to_string(),
+                "SELECT * FROM transform".to_string(),
                 "SELECT * FROM inventory".to_string(),
                 "SELECT * FROM resource_node".to_string(),
                 "SELECT * FROM combat_event".to_string(),
@@ -66,6 +66,7 @@ pub fn init_network_connection(
                 "SELECT * FROM faction_component".to_string(),
                 "SELECT * FROM health".to_string(),
                 "SELECT * FROM harvestable_corpse".to_string(),
+                "SELECT * FROM player_perspective".to_string(),
             ]);
 
             if let Ok(mut guard) = store_clone.lock() {
@@ -115,31 +116,32 @@ pub fn init_network_connection(
         ));
     });
 
-    commands.spawn((
-        (
-            SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 25.0, 0.0)),
-            PlayerBody,
-            RigidBody::Dynamic, 
-            Collider::capsule(0.4, 1.2),
-            SweptCcd::default(),
-            CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Unit, GameLayer::Environment]),
-            LockedAxes::ROTATION_LOCKED,
-            GravityScale(0.0),
-            LinearVelocity::ZERO,
-            ExternalForce::default().with_persistence(false),
-            Kcc { is_grounded: false },
-            LogicalPosition(Vec3::new(0.0, 25.0, 0.0)),
-            LogicalRotation(Quat::IDENTITY),
-            crate::components::Faction::Player, 
-            Selectable, 
-        ),
-        (
-            crate::prediction::InputBuffer::default(),
-            crate::prediction::AuthoritativeState::default(),
-            crate::prediction::LocalMovementTracker { last_position: Vec3::new(0.0, 25.0, 0.0) },
-            Friction::new(0.0).with_combine_rule(CoefficientCombine::Min),
-        )
-    )).with_children(|parent| {
+    let mut player_entity_commands = commands.spawn((
+        SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 25.0, 0.0)),
+        PlayerBody,
+        RigidBody::Dynamic, 
+        Collider::capsule(0.4, 1.2),
+        SweptCcd::default(),
+        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Unit, GameLayer::Environment]),
+        LockedAxes::ROTATION_LOCKED,
+        GravityScale(0.0),
+        LinearVelocity::ZERO,
+        ExternalForce::default().with_persistence(false),
+        Kcc { is_grounded: false },
+        LogicalPosition(Vec3::new(0.0, 25.0, 0.0)),
+        LogicalRotation(Quat::IDENTITY),
+        crate::components::Faction::Player, 
+        Selectable, 
+    ));
+
+    player_entity_commands.insert((
+        crate::prediction::InputBuffer::default(),
+        crate::prediction::AuthoritativeState::default(),
+        crate::prediction::LocalMovementTracker { last_position: Vec3::new(0.0, 25.0, 0.0) },
+        Friction::new(0.0).with_combine_rule(CoefficientCombine::Min),
+    ));
+
+    player_entity_commands.with_children(|parent| {
         parent.spawn((
             PbrBundle {
                 mesh: meshes.add(Cylinder::new(0.5, 2.0)),
@@ -233,7 +235,6 @@ pub fn wait_for_connection(
 pub fn update_spatial_subscriptions(
     player_query: Query<&LogicalPosition, With<PlayerBody>>,
     mut culling_state: ResMut<NetworkCullingState>,
-    conn: Res<SpacetimeConnection>,
 ) {
     if let Ok(pos) = player_query.get_single() {
         let current_x = (pos.0.x / 50.0).floor() as i32;
@@ -250,35 +251,7 @@ pub fn update_spatial_subscriptions(
         }
     }
 
-    if culling_state.needs_rebuild && conn.identity.is_some() {
-        let cx = culling_state.current_chunk.0;
-        let cz = culling_state.current_chunk.1;
-        let rad = culling_state.radius;
-
-        let mut subscriptions = vec![
-            "SELECT * FROM player".to_string(),
-            "SELECT * FROM inventory".to_string(),
-            "SELECT * FROM resource_node".to_string(),
-            "SELECT * FROM combat_event".to_string(),
-            "SELECT * FROM structure".to_string(),
-            "SELECT * FROM peasant".to_string(),
-            "SELECT * FROM npc_brain".to_string(),
-            "SELECT * FROM pet_component".to_string(),
-            "SELECT * FROM faction_component".to_string(),
-            "SELECT * FROM health".to_string(),
-            "SELECT * FROM harvestable_corpse".to_string(),
-        ];
-
-        if culling_state.in_interior {
-            subscriptions.push(format!("SELECT * FROM transform WHERE chunk_x = {} AND chunk_z = {}", cx, cz));
-        } else {
-            subscriptions.push(format!(
-                "SELECT * FROM transform WHERE chunk_x >= {} AND chunk_x <= {} AND chunk_z >= {} AND chunk_z <= {}",
-                cx - rad, cx + rad, cz - rad, cz + rad
-            ));
-        }
-
-        let _handle = conn.db.subscription_builder().subscribe(subscriptions);
+    if culling_state.needs_rebuild {
         culling_state.needs_rebuild = false;
     }
 }
@@ -299,10 +272,14 @@ pub fn sync_logical_components(
     }
 }
 
+// Architectural Note: Reconciles late-arriving Peasant component records.
+// Guarantees that units arriving over the wire receive PeasantUnit components 
+// even if the initial transform was committed before the peasant table was indexed.
 pub fn sync_transforms(
     mut commands: Commands, 
     conn: Res<SpacetimeConnection>, 
     mut query: Query<(Entity, &NetworkEntity, &mut LogicalPosition, &mut LogicalRotation)>,
+    peasant_query: Query<&PeasantUnit>,
     mut player_query: Query<&mut crate::prediction::AuthoritativeState, With<PlayerBody>>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -326,6 +303,11 @@ pub fn sync_transforms(
             log_pos.0 = Vec3::new(db_t.x, db_t.y, db_t.z);
         } else {
             commands.entity(entity).despawn_recursive();
+            continue;
+        }
+
+        if peasant_query.get(entity).is_err() && conn.db.db.peasant().entity_id().find(&net_entity.0).is_some() {
+            commands.entity(entity).insert(PeasantUnit { entity_id: net_entity.0 });
         }
     }
 
@@ -348,7 +330,6 @@ pub fn sync_transforms(
             let mut color = Color::srgb(0.8, 0.1, 0.1); 
             let mut mesh_handle = meshes.add(Capsule3d::new(0.4, 1.8));
             let mut visual_transform = BevyTransform::default();
-            
             let mut root_collider = Collider::capsule(0.4, 1.8);
 
             if is_pet {
@@ -427,9 +408,6 @@ pub fn sync_transforms(
     }
 }
 
-/// Architectural Note: Explicit Procedural Generation for Resource Debris
-/// Fixes the issue where all items were rendering as giant white fallback spheres.
-/// Each resource type now has unique geometry, distinct color, and custom colliders.
 pub fn sync_resource_nodes(
     mut commands: Commands, 
     mut meshes: ResMut<Assets<Mesh>>, 
@@ -448,7 +426,6 @@ pub fn sync_resource_nodes(
         db_node_ids.insert(node.node_id);
         
         if !local_nodes.contains(&node.node_id) {
-            // Trim whitespace to prevent match failure
             let clean_type = node.node_type.trim();
 
             let (mesh, color, collider, y_offset, rotation) = match clean_type {
@@ -474,7 +451,6 @@ pub fn sync_resource_nodes(
                     Quat::IDENTITY,
                 ),
                 "Branch" => (
-                    // Distinct elongated dark brown branch laying horizontally
                     meshes.add(Capsule3d::new(0.04, 0.7)),
                     Color::srgb(0.3, 0.18, 0.08),
                     Collider::capsule(0.08, 0.7),
@@ -482,7 +458,6 @@ pub fn sync_resource_nodes(
                     Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
                 ),
                 "Flint" => (
-                    // Sharp dark blue-black obsidian wedge, distinctly NOT a sphere
                     meshes.add(Cuboid::new(0.28, 0.08, 0.22)),
                     Color::srgb(0.12, 0.15, 0.22),
                     Collider::cuboid(0.35, 0.15, 0.3),
@@ -490,7 +465,6 @@ pub fn sync_resource_nodes(
                     Quat::from_rotation_y(0.4),
                 ),
                 "LooseStone" => (
-                    // Flattened rounded light-grey pebble
                     meshes.add(Sphere::new(0.18).mesh()),
                     Color::srgb(0.6, 0.6, 0.62),
                     Collider::sphere(0.25),

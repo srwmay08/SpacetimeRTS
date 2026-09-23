@@ -3,7 +3,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::window::PrimaryWindow;
 use avian3d::prelude::*;
 use tracing::{info, error};
-use spacetimedb_sdk::Table;
 
 use crate::core::*;
 use crate::components::*;
@@ -127,15 +126,22 @@ pub fn input_router_system(
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut action_events: EventWriter<ActionEvent>,
     interaction_query: Query<&Interaction>,
-    node_query: Query<(&Node, &GlobalTransform, &Visibility)>,
+    node_query: Query<(&Node, &GlobalTransform, &Visibility, &Style)>,
 ) {
     let cursor_pos = window_query.get_single().ok().and_then(|w| w.cursor_position());
     
     let mut is_over_ui = interaction_query.iter().any(|i| *i != Interaction::None);
+    
+    // Architectural Note: Intelligent Viewport UI Detection
+    // Ignores inactive UI (Display::None) and fullscreen layout containers (100% width and height).
+    // Prevents transparent HUD/overlay containers from disabling 3D RTS unit selection and drag bounding.
     if !is_over_ui {
         if let Some(pos) = cursor_pos {
-            for (node, transform, vis) in node_query.iter() {
-                if *vis != Visibility::Hidden {
+            for (node, transform, vis, style) in node_query.iter() {
+                if *vis != Visibility::Hidden && style.display != Display::None {
+                    if style.width == Val::Percent(100.0) && style.height == Val::Percent(100.0) {
+                        continue;
+                    }
                     let rect = Rect::from_center_size(transform.translation().truncate(), node.size());
                     if rect.contains(pos) {
                         is_over_ui = true;
@@ -217,7 +223,6 @@ pub fn context_aware_action_dispatcher(
                                     let origin = cam_transform.translation();
                                     let dir = cam_transform.forward();
 
-                                    // BOW & ARROW COMBAT PATH
                                     if is_holding_bow {
                                         let arrow_speed = 45.0;
                                         let tracer_mesh = meshes.add(Cylinder::new(0.015, 0.8));

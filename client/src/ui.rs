@@ -151,7 +151,6 @@ pub fn setup_ui(mut commands: Commands) {
         }, 
         InventoryUiRoot
     )).with_children(|root| {
-        // Backpack Row 2 (Slots 8..15)
         root.spawn(NodeBundle {
             style: Style {
                 flex_direction: FlexDirection::Column,
@@ -203,7 +202,6 @@ pub fn setup_ui(mut commands: Commands) {
             });
         });
 
-        // Crafting Recipes Panel
         root.spawn(NodeBundle {
             style: Style {
                 flex_direction: FlexDirection::Column,
@@ -347,7 +345,6 @@ pub fn setup_ui(mut commands: Commands) {
         });
     });
 
-    // Interaction Prompt
     commands.spawn((
         TextBundle::from_section(
             "",
@@ -389,13 +386,18 @@ pub fn setup_ui(mut commands: Commands) {
         BuildUIText,
     ));
 
-    // RTS Action Bar
+    // Architectural Note: Constrained Action Bar Root Bounds.
+    // Fixed height of 105px anchored to the bottom screen edge prevents this container 
+    // from covering the entire viewport and blocking 3D mouse picking raycasts.
     commands.spawn((NodeBundle {
         style: Style {
-            width: Val::Percent(100.0), height: Val::Percent(100.0),
+            width: Val::Percent(100.0), 
+            height: Val::Px(105.0),
             position_type: PositionType::Absolute,
-            justify_content: JustifyContent::Center, align_items: AlignItems::FlexEnd,
-            padding: UiRect::bottom(Val::Px(0.0)),
+            bottom: Val::Px(0.0),
+            left: Val::Px(0.0),
+            justify_content: JustifyContent::Center, 
+            align_items: AlignItems::Center,
             display: Display::None, 
             ..default()
         },
@@ -404,7 +406,8 @@ pub fn setup_ui(mut commands: Commands) {
     }, ActionBarUiRoot)).with_children(|root| {
         root.spawn(NodeBundle {
             style: Style {
-                flex_direction: FlexDirection::Row, column_gap: Val::Px(5.0),
+                flex_direction: FlexDirection::Row, 
+                column_gap: Val::Px(5.0),
                 padding: UiRect::all(Val::Px(10.0)),
                 border: UiRect::all(Val::Px(2.0)),
                 ..default()
@@ -428,8 +431,13 @@ pub fn setup_ui(mut commands: Commands) {
                 bar.spawn((
                     ButtonBundle {
                         style: Style { 
-                            width: Val::Px(80.0), height: Val::Px(80.0), flex_direction: FlexDirection::Column, 
-                            justify_content: JustifyContent::Center, align_items: AlignItems::Center, border: UiRect::all(Val::Px(1.0)), ..default() 
+                            width: Val::Px(80.0), 
+                            height: Val::Px(80.0), 
+                            flex_direction: FlexDirection::Column, 
+                            justify_content: JustifyContent::Center, 
+                            align_items: AlignItems::Center, 
+                            border: UiRect::all(Val::Px(1.0)), 
+                            ..default() 
                         },
                         border_color: Color::srgb(0.2, 0.2, 0.2).into(),
                         background_color: Color::srgb(0.15, 0.15, 0.15).into(),
@@ -653,8 +661,6 @@ pub fn update_build_ui(
     }
 }
 
-/// Architectural Note: Synchronized Menu Visibility & Cursor Liberation
-/// Toggling [Tab] frees the cursor when opening and locks it when returning to FPS view.
 pub fn toggle_inventory_ui(
     keys: Res<ButtonInput<KeyCode>>, 
     mut query: Query<&mut Style, With<InventoryUiRoot>>,
@@ -683,7 +689,7 @@ pub fn toggle_inventory_ui(
 pub fn update_inventory_ui(
     conn: Res<SpacetimeConnection>,
     mut name_q: Query<(&mut Text, &InventorySlotName)>,
-    mut count_q: Query<(&mut Text, &InventorySlotCount), Without<InventorySlotName>>,
+    mut count_q: Query<(&mut Text, &InventorySlotCount), Without<HotbarSlotName>>,
 ) {
     let Some(identity) = &conn.identity else { return; };
     if let Some(player) = conn.db.db.player().identity().find(identity) {
@@ -708,6 +714,9 @@ pub fn update_inventory_ui(
     }
 }
 
+// Architectural Note: Continuous Health Bar Reconciliation.
+// Hides all floating health bars immediately whenever camera_mode != CameraMode::RTS,
+// preventing visual screen artifacts in first-person mode.
 pub fn update_floating_health_bars(
     mut commands: Commands,
     conn: Res<SpacetimeConnection>,
@@ -718,7 +727,9 @@ pub fn update_floating_health_bars(
 ) {
     if *camera_mode.get() != CameraMode::RTS {
         for (_, _, _, _, mut vis) in bar_query.iter_mut() { 
-            *vis = Visibility::Hidden; 
+            if *vis != Visibility::Hidden {
+                *vis = Visibility::Hidden; 
+            }
         }
         return;
     }

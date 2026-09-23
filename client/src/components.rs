@@ -87,7 +87,7 @@ pub struct InteriorProp;
 
 // Personal Crafting UI Components
 #[derive(Component)] pub struct CraftRecipeButton(pub String);
-#[derive(Component)] pub struct CraftRecipeText;
+#[derive(Component)] #[allow(dead_code)] pub struct CraftRecipeText;
 
 // Persistent Top-Left Hotbar (Slots 1-8)
 #[derive(Component)] pub struct HotbarRoot;

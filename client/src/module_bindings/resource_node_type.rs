@@ -12,6 +12,8 @@ pub struct ResourceNode {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+    pub chunk_x: i32,
+    pub chunk_z: i32,
     pub health: u32,
     pub scale: f32,
     pub required_tool: String,
@@ -30,6 +32,8 @@ pub struct ResourceNodeCols {
     pub x: __sdk::__query_builder::Col<ResourceNode, f32>,
     pub y: __sdk::__query_builder::Col<ResourceNode, f32>,
     pub z: __sdk::__query_builder::Col<ResourceNode, f32>,
+    pub chunk_x: __sdk::__query_builder::Col<ResourceNode, i32>,
+    pub chunk_z: __sdk::__query_builder::Col<ResourceNode, i32>,
     pub health: __sdk::__query_builder::Col<ResourceNode, u32>,
     pub scale: __sdk::__query_builder::Col<ResourceNode, f32>,
     pub required_tool: __sdk::__query_builder::Col<ResourceNode, String>,
@@ -44,6 +48,8 @@ impl __sdk::__query_builder::HasCols for ResourceNode {
             x: __sdk::__query_builder::Col::new(table_name, "x"),
             y: __sdk::__query_builder::Col::new(table_name, "y"),
             z: __sdk::__query_builder::Col::new(table_name, "z"),
+            chunk_x: __sdk::__query_builder::Col::new(table_name, "chunk_x"),
+            chunk_z: __sdk::__query_builder::Col::new(table_name, "chunk_z"),
             health: __sdk::__query_builder::Col::new(table_name, "health"),
             scale: __sdk::__query_builder::Col::new(table_name, "scale"),
             required_tool: __sdk::__query_builder::Col::new(table_name, "required_tool"),
@@ -55,6 +61,8 @@ impl __sdk::__query_builder::HasCols for ResourceNode {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct ResourceNodeIxCols {
+    pub chunk_x: __sdk::__query_builder::IxCol<ResourceNode, i32>,
+    pub chunk_z: __sdk::__query_builder::IxCol<ResourceNode, i32>,
     pub node_id: __sdk::__query_builder::IxCol<ResourceNode, u64>,
 }
 
@@ -62,6 +70,8 @@ impl __sdk::__query_builder::HasIxCols for ResourceNode {
     type IxCols = ResourceNodeIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         ResourceNodeIxCols {
+            chunk_x: __sdk::__query_builder::IxCol::new(table_name, "chunk_x"),
+            chunk_z: __sdk::__query_builder::IxCol::new(table_name, "chunk_z"),
             node_id: __sdk::__query_builder::IxCol::new(table_name, "node_id"),
         }
     }

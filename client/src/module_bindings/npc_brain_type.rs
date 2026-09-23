@@ -61,14 +61,18 @@ impl __sdk::__query_builder::HasCols for NpcBrain {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct NpcBrainIxCols {
+    pub ai_type: __sdk::__query_builder::IxCol<NpcBrain, AiType>,
     pub entity_id: __sdk::__query_builder::IxCol<NpcBrain, u64>,
+    pub state: __sdk::__query_builder::IxCol<NpcBrain, BrainState>,
 }
 
 impl __sdk::__query_builder::HasIxCols for NpcBrain {
     type IxCols = NpcBrainIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         NpcBrainIxCols {
+            ai_type: __sdk::__query_builder::IxCol::new(table_name, "ai_type"),
             entity_id: __sdk::__query_builder::IxCol::new(table_name, "entity_id"),
+            state: __sdk::__query_builder::IxCol::new(table_name, "state"),
         }
     }
 }

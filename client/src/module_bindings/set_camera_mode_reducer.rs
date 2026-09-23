@@ -4,10 +4,12 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+use super::camera_mode_type_type::CameraModeType;
+
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct SetCameraModeArgs {
-    pub mode: String,
+    pub mode: CameraModeType,
 }
 
 impl From<SetCameraModeArgs> for super::Reducer {
@@ -31,7 +33,7 @@ pub trait set_camera_mode {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`set_camera_mode:set_camera_mode_then`] to run a callback after the reducer completes.
-    fn set_camera_mode(&self, mode: String) -> __sdk::Result<()> {
+    fn set_camera_mode(&self, mode: CameraModeType) -> __sdk::Result<()> {
         self.set_camera_mode_then(mode, |_, _| {})
     }
 
@@ -43,7 +45,7 @@ pub trait set_camera_mode {
     ///  and its status can be observed with the `callback`.
     fn set_camera_mode_then(
         &self,
-        mode: String,
+        mode: CameraModeType,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -54,7 +56,7 @@ pub trait set_camera_mode {
 impl set_camera_mode for super::RemoteReducers {
     fn set_camera_mode_then(
         &self,
-        mode: String,
+        mode: CameraModeType,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send

@@ -8,6 +8,7 @@ use crate::components::*;
 use crate::network::SpacetimeConnection;
 use crate::module_bindings::set_camera_mode_reducer::set_camera_mode; 
 use crate::module_bindings::set_interior_culling_reducer::set_interior_culling;
+use crate::module_bindings::CameraModeType;
 
 // ----------------------------------------------------------------------------
 // CAMERA BLENDING RESOURCE
@@ -63,7 +64,7 @@ pub fn toggle_perspective(
                 window.cursor.grab_mode = CursorGrabMode::None;
                 window.cursor.visible = true;
                 
-                let _ = conn.db.reducers.set_camera_mode("RTS".to_string());
+                let _ = conn.db.reducers.set_camera_mode(CameraModeType::Rts);
                 
                 culling_state.radius = 10;
                 culling_state.needs_rebuild = true;
@@ -74,7 +75,7 @@ pub fn toggle_perspective(
                 window.cursor.grab_mode = CursorGrabMode::Locked;
                 window.cursor.visible = false;
                 
-                let _ = conn.db.reducers.set_camera_mode("FPS".to_string());
+                let _ = conn.db.reducers.set_camera_mode(CameraModeType::Fps);
                 
                 culling_state.radius = 1;
                 culling_state.needs_rebuild = true;
@@ -104,13 +105,19 @@ pub fn update_camera_transition(
     }
 }
 
+// Architectural Note: Clean Camera Mode Transition Hooks.
+// Hides 2D floating health bar overlays instantly when entering FPS perspective.
 pub fn enable_fps_perspective(
     mut fps_cam: Query<&mut Camera, (With<FpsCamera>, Without<RtsCameraChild>)>,
     mut rts_cam: Query<&mut Camera, (With<RtsCameraChild>, Without<FpsCamera>)>,
+    mut health_bars: Query<&mut Visibility, With<HealthBarUI>>,
+    mut marquee: Query<&mut Visibility, (With<MarqueeUI>, Without<HealthBarUI>)>,
 ) {
     info!("Transitioning to FPS Camera Mode");
     for mut cam in &mut fps_cam { cam.is_active = true; }
     for mut cam in &mut rts_cam { cam.is_active = false; }
+    for mut vis in &mut health_bars { *vis = Visibility::Hidden; }
+    for mut vis in &mut marquee { *vis = Visibility::Hidden; }
 }
 
 pub fn enable_rts_perspective(
@@ -232,7 +239,6 @@ pub fn fps_look(
     let Ok(mut body_transform) = body_query.get_single_mut() else { return; };
     let Ok(mut head_transform) = head_query.get_single_mut() else { return; };
 
-    // Architectural Note: Suspend FPS mouse lock if any modal interface is currently open
     let is_inventory_open = inv_query.get_single().map_or(false, |s| s.display != Display::None);
     let is_build_menu_open = build_menu_query.get_single().map_or(false, |s| s.display != Display::None);
     let ui_active = is_inventory_open || is_build_menu_open;

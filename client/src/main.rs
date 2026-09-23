@@ -81,6 +81,8 @@ fn main() {
             sync_structures, 
         ).run_if(in_state(GameState::InGame)))
 
+        // Architectural Note: update_floating_health_bars runs in InGame state,
+        // allowing its inner camera_mode check to immediately hide health bars during FPS mode.
         .add_systems(Update, (
             toggle_build_mode, 
             update_build_hologram, 
@@ -95,14 +97,14 @@ fn main() {
             tick_particles,
             visualize_selection,
             action_bar_interaction,       
-            toggle_action_bar_visibility  
+            toggle_action_bar_visibility,
+            update_floating_health_bars,
         ).run_if(in_state(GameState::InGame)))    
 
         .add_systems(Update, fps_look.run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
         .add_systems(Update, (
             rts_camera_controller,
             update_marquee_ui,
-            update_floating_health_bars
         ).run_if(in_state(CameraMode::RTS).and_then(in_state(GameState::InGame))))
         
         .run();

@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub mod ai_state_type;
 pub mod ai_type_type;
 pub mod brain_state_type;
+pub mod camera_mode_type_type;
 pub mod change_pet_stance_reducer;
 pub mod combat_event_table;
 pub mod combat_event_type;
@@ -74,6 +75,7 @@ pub mod waypoint_type;
 pub use ai_state_type::AiState;
 pub use ai_type_type::AiType;
 pub use brain_state_type::BrainState;
+pub use camera_mode_type_type::CameraModeType;
 pub use change_pet_stance_reducer::change_pet_stance;
 pub use combat_event_table::*;
 pub use combat_event_type::CombatEvent;
@@ -216,7 +218,7 @@ pub enum Reducer {
         structure_id: u64,
     },
     SetCameraMode {
-        mode: String,
+        mode: CameraModeType,
     },
     SetInteriorCulling {
         in_interior: bool,
