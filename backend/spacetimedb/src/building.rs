@@ -28,10 +28,13 @@ pub struct Structure {
     pub stability: u32,         
     pub is_grounded: bool,      
     
-    // Architectural Note: 4. Economy, Survival, & Base Building
-    // Integrates Commander Blueprints vs Field Construction logic
+    // Architectural Note: Commander Blueprints vs Field Construction logic
     pub is_blueprint: bool,
     pub construction_progress: u32,
+    
+    // Architectural Note: Durability and Structure Combat
+    pub current_health: f32,
+    pub max_health: f32,
     
     pub x: f32,
     pub y: f32,
@@ -46,17 +49,27 @@ pub struct Structure {
 // ----------------------------------------------------------------------------
 // BUILDING LOGIC & REDUCERS
 // ----------------------------------------------------------------------------
-/// Architectural Note: Checks if a coordinate is protected by a Roof piece.
-/// Used to validate if a Workbench is covered for crafting, or if a Campfire is safe from rain.
+
+pub fn get_piece_max_health(piece_type: &str) -> f32 {
+    match piece_type {
+        "Foundation" => 400.0,
+        "Wall" => 200.0,
+        "Floor" => 150.0,
+        "Roof" => 150.0,
+        "Ramp" => 250.0,
+        "Workbench" => 100.0,
+        "Campfire" => 50.0,
+        _ => 100.0,
+    }
+}
+
+/// Architectural Note: Checks if a coordinate is protected by a completed Roof piece.
 pub fn is_covered(ctx: &ReducerContext, x: f32, y: f32, z: f32) -> bool {
     for s in ctx.db.structure().iter() {
         if s.piece_type == "Roof" && !s.is_blueprint {
             let dist_sq = (s.x - x).powi(2) + (s.z - z).powi(2);
-            // Assuming roof piece provides a roughly 3m radius of cover directly beneath it.
-            if dist_sq <= 9.0 {
-                if s.y > y && (s.y - y) < 10.0 {
-                    return true;
-                }
+            if dist_sq <= 9.0 && s.y > y && (s.y - y) < 10.0 {
+                return true;
             }
         }
     }
@@ -72,23 +85,30 @@ pub fn place_structure(
     rot_x: f32, rot_y: f32, rot_z: f32, rot_w: f32,
 ) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or("Unauthorized: No active session")?;
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
 
     let perspective = ctx.db.player_perspective().entity_id().find(session.entity_id)
-        .ok_or("Perspective not found")?;
+        .ok_or_else(|| "Perspective not found".to_string())?;
 
-    // Architectural Note: 2. Command Structure - Symbiotic Dependency
-    // The Commander operates from a macro perspective to issue orders and drop blueprints,
-    // but relies on FPS players to physically supply the materials.
-    if perspective.camera_mode != "RTS" {
-        return Err("Only the Commander (RTS Mode) can place building blueprints.".to_string());
+    // Allow placement if in RTS mode OR if holding a Hammer in FPS mode
+    let is_fps_builder = if perspective.camera_mode == "FPS" {
+        if let Some(inv) = ctx.db.inventory().entity_id().find(session.entity_id) {
+            inv.slots.iter().any(|s| s.item_type == "Hammer" && s.count > 0)
+        } else {
+            false
+        }
+    } else {
+        true
+    };
+
+    if !is_fps_builder && perspective.camera_mode != "RTS" {
+        return Err("Building blueprints requires RTS Mode or an equipped Hammer.".to_string());
     }
 
-    // Valheim Core Rule: You must build within the radius of a Workbench (Except the Workbench and Campfire itself)
     if piece_type != "Workbench" && piece_type != "Campfire" {
         let mut near_workbench = false;
         for s in ctx.db.structure().iter().filter(|s| s.piece_type == "Workbench" && !s.is_blueprint) {
-            if (s.x - x).powi(2) + (s.z - z).powi(2) < 400.0 { // 20m Build Radius
+            if (s.x - x).powi(2) + (s.z - z).powi(2) < 400.0 {
                 near_workbench = true;
                 break;
             }
@@ -123,7 +143,7 @@ pub fn place_structure(
         }
     } else if let Some(pid) = parent_id {
         let parent = ctx.db.structure().structure_id().find(pid)
-            .ok_or("Parent structure not found in the database")?;
+            .ok_or_else(|| "Parent structure not found in the database".to_string())?;
             
         if parent.stability <= decay_penalty {
             return Err("Structural integrity depleted. Cannot support additional mass.".to_string());
@@ -134,14 +154,23 @@ pub fn place_structure(
         return Err("Piece must be grounded to terrain or snapped to a valid parent structure.".to_string());
     }
 
-    // Architectural Note: Blueprint Placement. Initial resource cost is 0.
+    let max_hp = get_piece_max_health(&piece_type);
+
     ctx.db.structure().insert(Structure {
-        structure_id: 0, parent_id, piece_type: piece_type.clone(),
-        stability, is_grounded, x, y, z, rot_x, rot_y, rot_z, rot_w, owner_id: session.entity_id,
-        is_blueprint: true, construction_progress: 0,
+        structure_id: 0, 
+        parent_id, 
+        piece_type: piece_type.clone(),
+        stability, 
+        is_grounded, 
+        x, y, z, 
+        rot_x, rot_y, rot_z, rot_w, 
+        owner_id: session.entity_id,
+        is_blueprint: true, 
+        construction_progress: 0,
+        current_health: 1.0,
+        max_health: max_hp,
     });
 
-    // Automatically assign a Build Waypoint to the FPS players
     ctx.db.waypoint().insert(crate::Waypoint {
         waypoint_id: 0,
         commander_id: session.entity_id,
@@ -153,23 +182,20 @@ pub fn place_structure(
     Ok(())
 }
 
-/// Architectural Note: 4. Economy & Base Building
-/// FPS players must physically walk up to a blueprint and strike it with a hammer,
-/// transferring raw materials from their inventory to advance the construction state.
 #[reducer]
 pub fn contribute_construction(ctx: &ReducerContext, structure_id: u64) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or("Unauthorized: No active session")?;
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
         
     let mut structure = ctx.db.structure().structure_id().find(structure_id)
-        .ok_or("Structure not found")?;
+        .ok_or_else(|| "Structure not found".to_string())?;
         
     if !structure.is_blueprint {
         return Err("Structure is already fully constructed.".to_string());
     }
 
     let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
-        .unwrap_or_else(|| crate::Inventory { entity_id: session.entity_id, slots: vec![], discovered_items: vec![] });
+        .ok_or_else(|| "Player inventory not found.".to_string())?;
         
     let has_hammer = inv.slots.iter().any(|s| s.item_type == "Hammer" && s.count > 0);
     if !has_hammer {
@@ -187,25 +213,30 @@ pub fn contribute_construction(ctx: &ReducerContext, structure_id: u64) -> Resul
         _ => (2, 0),
     };
 
-    // Calculate micro-swing cost (4 swings to build)
     let wood_swing = (wood_cost as f32 * 0.25).ceil() as u32;
     let stone_swing = (stone_cost as f32 * 0.25).ceil() as u32;
 
-    if !crate::has_item(&inv, "Wood", wood_swing) && wood_swing > 0 {
+    if wood_swing > 0 && !crate::has_item(&inv, "Wood", wood_swing) {
         return Err(format!("Insufficient Wood. Need {} per hammer swing.", wood_swing));
     }
-    if !crate::has_item(&inv, "Stone", stone_swing) && stone_swing > 0 {
+    if stone_swing > 0 && !crate::has_item(&inv, "Stone", stone_swing) {
         return Err(format!("Insufficient Stone. Need {} per hammer swing.", stone_swing));
     }
 
-    crate::remove_item(&mut inv, "Wood", wood_swing);
-    crate::remove_item(&mut inv, "Stone", stone_swing);
+    if wood_swing > 0 {
+        crate::remove_item(&mut inv, "Wood", wood_swing);
+    }
+    if stone_swing > 0 {
+        crate::remove_item(&mut inv, "Stone", stone_swing);
+    }
     
     structure.construction_progress += 25;
+    structure.current_health = (structure.max_health * (structure.construction_progress as f32 / 100.0)).max(1.0);
     
     if structure.construction_progress >= 100 {
         structure.is_blueprint = false;
         structure.construction_progress = 100;
+        structure.current_health = structure.max_health;
         
         ctx.db.nav_event().insert(crate::NavEvent {
             id: 0,
@@ -219,13 +250,65 @@ pub fn contribute_construction(ctx: &ReducerContext, structure_id: u64) -> Resul
     Ok(())
 }
 
+/// Architectural Note: Authoritative Structure Repair
+/// Wielding a hammer allows players to restore a structure's health to max without extra cost.
+#[reducer]
+pub fn repair_structure(ctx: &ReducerContext, structure_id: u64) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
+
+    let inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Inventory not found".to_string())?;
+
+    let has_hammer = inv.slots.iter().any(|s| s.item_type == "Hammer" && s.count > 0);
+    if !has_hammer {
+        return Err("You must equip a Hammer to repair structures.".to_string());
+    }
+
+    let mut structure = ctx.db.structure().structure_id().find(structure_id)
+        .ok_or_else(|| "Structure not found".to_string())?;
+
+    if structure.is_blueprint {
+        return Err("Cannot repair an incomplete blueprint.".to_string());
+    }
+
+    if structure.current_health >= structure.max_health {
+        return Err("Structure is already at full health.".to_string());
+    }
+
+    structure.current_health = structure.max_health;
+    ctx.db.structure().structure_id().update(structure.clone());
+
+    ctx.db.combat_event().insert(CombatEvent {
+        id: 0,
+        event_type: "RepairStructure".to_string(),
+        x: structure.x,
+        y: structure.y + 1.0,
+        z: structure.z,
+    });
+
+    log::info!("Player {} repaired structure {}", session.entity_id, structure_id);
+    Ok(())
+}
+
+pub fn damage_structure(ctx: &ReducerContext, structure_id: u64, amount: f32) {
+    if let Some(mut structure) = ctx.db.structure().structure_id().find(structure_id) {
+        structure.current_health = (structure.current_health - amount).max(0.0);
+        if structure.current_health <= 0.0 {
+            let _ = destroy_structure(ctx, structure_id);
+        } else {
+            ctx.db.structure().structure_id().update(structure);
+        }
+    }
+}
+
 #[reducer]
 pub fn destroy_structure(
     ctx: &ReducerContext,
     target_structure_id: u64
 ) -> Result<(), String> {
     let _session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or("Unauthorized: No active session")?;
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
 
     let mut collapse_queue = vec![target_structure_id];
     let mut index = 0;
@@ -238,7 +321,7 @@ pub fn destroy_structure(
         index += 1;
     }
 
-    for id in collapse_queue.iter() {
+    for id in &collapse_queue {
         if let Some(structure) = ctx.db.structure().structure_id().find(*id) {
             ctx.db.structure().structure_id().delete(*id);
             

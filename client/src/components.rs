@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use crate::building::ModularPieceType;
 
 // ----------------------------------------------------------------------------
 // CORE LOGICAL ECS COMPONENTS
@@ -43,8 +44,6 @@ pub struct TerrainChunk {
 // ----------------------------------------------------------------------------
 
 #[derive(Component)] pub struct NetworkEntity(pub u64);
-
-/// Links a local rendered building structure to its SpacetimeDB `structure_id`.
 #[derive(Component)] pub struct NetworkStructure { pub structure_id: u64 }
 
 #[derive(Component)] pub struct PlayerBody;
@@ -52,13 +51,12 @@ pub struct TerrainChunk {
 #[derive(Component)] pub struct ViewModelArm;
 #[derive(Component)] pub struct Kcc { pub is_grounded: bool }
 #[derive(Component)] pub struct ResourceNodeItem { pub node_id: u64 } 
-#[derive(Component)] pub struct PeasantUnit { pub entity_id: u64 } // Architectural Note: Added to identify AI entities for RTS right-click routing.
+#[derive(Component)] pub struct PeasantUnit { pub entity_id: u64 }
 
 // ----------------------------------------------------------------------------
 // MODULAR BUILDING & SOCKET COMPONENTS
 // ----------------------------------------------------------------------------
 
-/// Defines a mathematical snap point on a structure for modular piece connection.
 #[derive(Component, Clone, Debug)]
 pub struct Socket {
     #[allow(dead_code)] pub name: String,
@@ -67,7 +65,6 @@ pub struct Socket {
     pub is_occupied: bool,
 }
 
-/// Marks an entity as a placement hologram previewing a modular piece.
 #[derive(Component)]
 pub struct BuildHologram;
 
@@ -81,15 +78,40 @@ pub struct BaseInteriorVolume {
 pub struct InteriorProp;
 
 // ----------------------------------------------------------------------------
-// UI & VFX COMPONENTS
+// UI & VFX COMPONENTS & RESOURCES
 // ----------------------------------------------------------------------------
+
 #[derive(Component)] pub struct InventoryUiRoot; 
 #[derive(Component)] pub struct InventorySlotName(pub usize);
 #[derive(Component)] pub struct InventorySlotCount(pub usize);
 
-#[derive(Component)] pub struct HealthBarUI;
+// Personal Crafting UI Components
+#[derive(Component)] pub struct CraftRecipeButton(pub String);
+#[derive(Component)] pub struct CraftRecipeText;
+
+// Persistent Top-Left Hotbar (Slots 1-8)
+#[derive(Component)] pub struct HotbarRoot;
+#[derive(Component)] pub struct HotbarSlotUi(pub usize);
+#[derive(Component)] pub struct HotbarSlotName(pub usize);
+#[derive(Component)] pub struct HotbarSlotCount(pub usize);
+
+#[derive(Resource, Component, Clone, Debug, Default)] 
+pub struct ActiveItemSlot(pub usize);
+
+#[derive(Resource, Component, Clone, Debug, Default)] 
+pub struct ActiveEquippedItem(pub Option<String>);
+
+// Bottom-Left Health Meter
+#[derive(Component)] pub struct HealthBarFill;
+#[derive(Component)] pub struct HealthBarText;
+
+// Visual Building Menu
+#[derive(Component)] pub struct BuildMenuRoot;
+#[derive(Component)] pub struct BuildPieceButton(pub ModularPieceType);
+
+#[derive(Component)] pub struct HealthBarUI(pub u64);
 #[derive(Component)] pub struct BuildUIText;
-#[derive(Component)] pub struct InteractionPromptText; // Added for ground item interaction prompts
+#[derive(Component)] pub struct InteractionPromptText;
 
 #[derive(Component)] pub struct ActionBarUiRoot;
 #[derive(Component)] pub struct ActionBarButton(pub String);

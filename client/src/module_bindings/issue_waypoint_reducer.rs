@@ -6,46 +6,55 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct SetInteriorCullingArgs {
-    pub in_interior: bool,
+pub(super) struct IssueWaypointArgs {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub order_type: String,
 }
 
-impl From<SetInteriorCullingArgs> for super::Reducer {
-    fn from(args: SetInteriorCullingArgs) -> Self {
-        Self::SetInteriorCulling {
-            in_interior: args.in_interior,
+impl From<IssueWaypointArgs> for super::Reducer {
+    fn from(args: IssueWaypointArgs) -> Self {
+        Self::IssueWaypoint {
+            x: args.x,
+            y: args.y,
+            z: args.z,
+            order_type: args.order_type,
         }
     }
 }
 
-impl __sdk::InModule for SetInteriorCullingArgs {
+impl __sdk::InModule for IssueWaypointArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `set_interior_culling`.
+/// Extension trait for access to the reducer `issue_waypoint`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait set_interior_culling {
-    /// Request that the remote module invoke the reducer `set_interior_culling` to run as soon as possible.
+pub trait issue_waypoint {
+    /// Request that the remote module invoke the reducer `issue_waypoint` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`set_interior_culling:set_interior_culling_then`] to run a callback after the reducer completes.
-    fn set_interior_culling(&self, in_interior: bool) -> __sdk::Result<()> {
-        self.set_interior_culling_then(in_interior, |_, _| {})
+    /// /// Use [`issue_waypoint:issue_waypoint_then`] to run a callback after the reducer completes.
+    fn issue_waypoint(&self, x: f32, y: f32, z: f32, order_type: String) -> __sdk::Result<()> {
+        self.issue_waypoint_then(x, y, z, order_type, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `set_interior_culling` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `issue_waypoint` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn set_interior_culling_then(
+    fn issue_waypoint_then(
         &self,
-        in_interior: bool,
+        x: f32,
+        y: f32,
+        z: f32,
+        order_type: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -53,16 +62,26 @@ pub trait set_interior_culling {
     ) -> __sdk::Result<()>;
 }
 
-impl set_interior_culling for super::RemoteReducers {
-    fn set_interior_culling_then(
+impl issue_waypoint for super::RemoteReducers {
+    fn issue_waypoint_then(
         &self,
-        in_interior: bool,
+        x: f32,
+        y: f32,
+        z: f32,
+        order_type: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(SetInteriorCullingArgs { in_interior }, callback)
+        self.imp.invoke_reducer_with_callback(
+            IssueWaypointArgs {
+                x,
+                y,
+                z,
+                order_type,
+            },
+            callback,
+        )
     }
 }

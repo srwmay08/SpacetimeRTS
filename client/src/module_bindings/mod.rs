@@ -13,11 +13,17 @@ pub mod change_pet_stance_reducer;
 pub mod combat_event_table;
 pub mod combat_event_type;
 pub mod command_peasant_reducer;
+pub mod consume_item_reducer;
+pub mod contribute_construction_reducer;
+pub mod craft_item_reducer;
 pub mod destroy_structure_reducer;
 pub mod faction_component_table;
 pub mod faction_component_type;
 pub mod faction_type;
+pub mod fire_bow_reducer;
 pub mod fire_weapon_reducer;
+pub mod global_state_table;
+pub mod global_state_type;
 pub mod harvestable_corpse_table;
 pub mod harvestable_corpse_type;
 pub mod health_table;
@@ -29,6 +35,7 @@ pub mod interact_node_reducer;
 pub mod inventory_slot_type;
 pub mod inventory_table;
 pub mod inventory_type;
+pub mod issue_waypoint_reducer;
 pub mod low_frequency_timer_type;
 pub mod nav_event_table;
 pub mod nav_event_type;
@@ -48,6 +55,7 @@ pub mod player_table;
 pub mod player_type;
 pub mod position_type;
 pub mod process_movement_reducer;
+pub mod repair_structure_reducer;
 pub mod resource_node_table;
 pub mod resource_node_type;
 pub mod respawn_bush_timer_type;
@@ -60,6 +68,8 @@ pub mod structure_type;
 pub mod swing_tool_reducer;
 pub mod transform_table;
 pub mod transform_type;
+pub mod waypoint_table;
+pub mod waypoint_type;
 
 pub use ai_state_type::AiState;
 pub use ai_type_type::AiType;
@@ -68,11 +78,17 @@ pub use change_pet_stance_reducer::change_pet_stance;
 pub use combat_event_table::*;
 pub use combat_event_type::CombatEvent;
 pub use command_peasant_reducer::command_peasant;
+pub use consume_item_reducer::consume_item;
+pub use contribute_construction_reducer::contribute_construction;
+pub use craft_item_reducer::craft_item;
 pub use destroy_structure_reducer::destroy_structure;
 pub use faction_component_table::*;
 pub use faction_component_type::FactionComponent;
 pub use faction_type::Faction;
+pub use fire_bow_reducer::fire_bow;
 pub use fire_weapon_reducer::fire_weapon;
+pub use global_state_table::*;
+pub use global_state_type::GlobalState;
 pub use harvestable_corpse_table::*;
 pub use harvestable_corpse_type::HarvestableCorpse;
 pub use health_table::*;
@@ -84,6 +100,7 @@ pub use interact_node_reducer::interact_node;
 pub use inventory_slot_type::InventorySlot;
 pub use inventory_table::*;
 pub use inventory_type::Inventory;
+pub use issue_waypoint_reducer::issue_waypoint;
 pub use low_frequency_timer_type::LowFrequencyTimer;
 pub use nav_event_table::*;
 pub use nav_event_type::NavEvent;
@@ -103,6 +120,7 @@ pub use player_table::*;
 pub use player_type::Player;
 pub use position_type::Position;
 pub use process_movement_reducer::process_movement;
+pub use repair_structure_reducer::repair_structure;
 pub use resource_node_table::*;
 pub use resource_node_type::ResourceNode;
 pub use respawn_bush_timer_type::RespawnBushTimer;
@@ -115,6 +133,8 @@ pub use structure_type::Structure;
 pub use swing_tool_reducer::swing_tool;
 pub use transform_table::*;
 pub use transform_type::Transform;
+pub use waypoint_table::*;
+pub use waypoint_type::Waypoint;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -136,8 +156,26 @@ pub enum Reducer {
         target_z: f32,
         target_id: u64,
     },
+    ConsumeItem {
+        item_name: String,
+    },
+    ContributeConstruction {
+        structure_id: u64,
+    },
+    CraftItem {
+        item_name: String,
+    },
     DestroyStructure {
         target_structure_id: u64,
+    },
+    FireBow {
+        client_tick: u64,
+        origin_x: f32,
+        origin_y: f32,
+        origin_z: f32,
+        dir_x: f32,
+        dir_y: f32,
+        dir_z: f32,
     },
     FireWeapon {
         client_tick: u64,
@@ -150,6 +188,12 @@ pub enum Reducer {
     },
     InteractNode {
         node_id: u64,
+    },
+    IssueWaypoint {
+        x: f32,
+        y: f32,
+        z: f32,
+        order_type: String,
     },
     PlaceStructure {
         parent_id: Option<u64>,
@@ -168,11 +212,14 @@ pub enum Reducer {
         delta_y: f32,
         delta_z: f32,
     },
+    RepairStructure {
+        structure_id: u64,
+    },
     SetCameraMode {
         mode: String,
     },
     SetInteriorCulling {
-        is_inside: bool,
+        in_interior: bool,
     },
     SpawnPeasant,
     SwingTool {
@@ -194,11 +241,17 @@ impl __sdk::Reducer for Reducer {
         match self {
             Reducer::ChangePetStance { .. } => "change_pet_stance",
             Reducer::CommandPeasant { .. } => "command_peasant",
+            Reducer::ConsumeItem { .. } => "consume_item",
+            Reducer::ContributeConstruction { .. } => "contribute_construction",
+            Reducer::CraftItem { .. } => "craft_item",
             Reducer::DestroyStructure { .. } => "destroy_structure",
+            Reducer::FireBow { .. } => "fire_bow",
             Reducer::FireWeapon { .. } => "fire_weapon",
             Reducer::InteractNode { .. } => "interact_node",
+            Reducer::IssueWaypoint { .. } => "issue_waypoint",
             Reducer::PlaceStructure { .. } => "place_structure",
             Reducer::ProcessMovement { .. } => "process_movement",
+            Reducer::RepairStructure { .. } => "repair_structure",
             Reducer::SetCameraMode { .. } => "set_camera_mode",
             Reducer::SetInteriorCulling { .. } => "set_interior_culling",
             Reducer::SpawnPeasant => "spawn_peasant",
@@ -231,10 +284,42 @@ impl __sdk::Reducer for Reducer {
                 target_z: target_z.clone(),
                 target_id: target_id.clone(),
             }),
+            Reducer::ConsumeItem { item_name } => {
+                __sats::bsatn::to_vec(&consume_item_reducer::ConsumeItemArgs {
+                    item_name: item_name.clone(),
+                })
+            }
+            Reducer::ContributeConstruction { structure_id } => __sats::bsatn::to_vec(
+                &contribute_construction_reducer::ContributeConstructionArgs {
+                    structure_id: structure_id.clone(),
+                },
+            ),
+            Reducer::CraftItem { item_name } => {
+                __sats::bsatn::to_vec(&craft_item_reducer::CraftItemArgs {
+                    item_name: item_name.clone(),
+                })
+            }
             Reducer::DestroyStructure {
                 target_structure_id,
             } => __sats::bsatn::to_vec(&destroy_structure_reducer::DestroyStructureArgs {
                 target_structure_id: target_structure_id.clone(),
+            }),
+            Reducer::FireBow {
+                client_tick,
+                origin_x,
+                origin_y,
+                origin_z,
+                dir_x,
+                dir_y,
+                dir_z,
+            } => __sats::bsatn::to_vec(&fire_bow_reducer::FireBowArgs {
+                client_tick: client_tick.clone(),
+                origin_x: origin_x.clone(),
+                origin_y: origin_y.clone(),
+                origin_z: origin_z.clone(),
+                dir_x: dir_x.clone(),
+                dir_y: dir_y.clone(),
+                dir_z: dir_z.clone(),
             }),
             Reducer::FireWeapon {
                 client_tick,
@@ -258,6 +343,17 @@ impl __sdk::Reducer for Reducer {
                     node_id: node_id.clone(),
                 })
             }
+            Reducer::IssueWaypoint {
+                x,
+                y,
+                z,
+                order_type,
+            } => __sats::bsatn::to_vec(&issue_waypoint_reducer::IssueWaypointArgs {
+                x: x.clone(),
+                y: y.clone(),
+                z: z.clone(),
+                order_type: order_type.clone(),
+            }),
             Reducer::PlaceStructure {
                 parent_id,
                 piece_type,
@@ -290,14 +386,19 @@ impl __sdk::Reducer for Reducer {
                 delta_y: delta_y.clone(),
                 delta_z: delta_z.clone(),
             }),
+            Reducer::RepairStructure { structure_id } => {
+                __sats::bsatn::to_vec(&repair_structure_reducer::RepairStructureArgs {
+                    structure_id: structure_id.clone(),
+                })
+            }
             Reducer::SetCameraMode { mode } => {
                 __sats::bsatn::to_vec(&set_camera_mode_reducer::SetCameraModeArgs {
                     mode: mode.clone(),
                 })
             }
-            Reducer::SetInteriorCulling { is_inside } => {
+            Reducer::SetInteriorCulling { in_interior } => {
                 __sats::bsatn::to_vec(&set_interior_culling_reducer::SetInteriorCullingArgs {
-                    is_inside: is_inside.clone(),
+                    in_interior: in_interior.clone(),
                 })
             }
             Reducer::SpawnPeasant => {
@@ -329,6 +430,7 @@ impl __sdk::Reducer for Reducer {
 pub struct DbUpdate {
     combat_event: __sdk::TableUpdate<CombatEvent>,
     faction_component: __sdk::TableUpdate<FactionComponent>,
+    global_state: __sdk::TableUpdate<GlobalState>,
     harvestable_corpse: __sdk::TableUpdate<HarvestableCorpse>,
     health: __sdk::TableUpdate<Health>,
     hitbox_history: __sdk::TableUpdate<HitboxHistory>,
@@ -343,6 +445,7 @@ pub struct DbUpdate {
     resource_node: __sdk::TableUpdate<ResourceNode>,
     structure: __sdk::TableUpdate<Structure>,
     transform: __sdk::TableUpdate<Transform>,
+    waypoint: __sdk::TableUpdate<Waypoint>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -357,6 +460,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "faction_component" => db_update
                     .faction_component
                     .append(faction_component_table::parse_table_update(table_update)?),
+                "global_state" => db_update
+                    .global_state
+                    .append(global_state_table::parse_table_update(table_update)?),
                 "harvestable_corpse" => db_update
                     .harvestable_corpse
                     .append(harvestable_corpse_table::parse_table_update(table_update)?),
@@ -399,6 +505,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "transform" => db_update
                     .transform
                     .append(transform_table::parse_table_update(table_update)?),
+                "waypoint" => db_update
+                    .waypoint
+                    .append(waypoint_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -431,6 +540,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.faction_component = cache
             .apply_diff_to_table::<FactionComponent>("faction_component", &self.faction_component)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.global_state = cache
+            .apply_diff_to_table::<GlobalState>("global_state", &self.global_state)
+            .with_updates_by_pk(|row| &row.id);
         diff.harvestable_corpse = cache
             .apply_diff_to_table::<HarvestableCorpse>(
                 "harvestable_corpse",
@@ -479,6 +591,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.transform = cache
             .apply_diff_to_table::<Transform>("transform", &self.transform)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.waypoint = cache
+            .apply_diff_to_table::<Waypoint>("waypoint", &self.waypoint)
+            .with_updates_by_pk(|row| &row.waypoint_id);
 
         diff
     }
@@ -491,6 +606,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "faction_component" => db_update
                     .faction_component
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "global_state" => db_update
+                    .global_state
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "harvestable_corpse" => db_update
                     .harvestable_corpse
@@ -533,6 +651,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "transform" => db_update
                     .transform
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "waypoint" => db_update
+                    .waypoint
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -553,6 +674,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "faction_component" => db_update
                     .faction_component
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "global_state" => db_update
+                    .global_state
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "harvestable_corpse" => db_update
                     .harvestable_corpse
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -595,6 +719,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "transform" => db_update
                     .transform
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "waypoint" => db_update
+                    .waypoint
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
                         __sdk::InternalError::unknown_name("table", unknown, "QueryRows").into(),
@@ -612,6 +739,7 @@ impl __sdk::DbUpdate for DbUpdate {
 pub struct AppliedDiff<'r> {
     combat_event: __sdk::TableAppliedDiff<'r, CombatEvent>,
     faction_component: __sdk::TableAppliedDiff<'r, FactionComponent>,
+    global_state: __sdk::TableAppliedDiff<'r, GlobalState>,
     harvestable_corpse: __sdk::TableAppliedDiff<'r, HarvestableCorpse>,
     health: __sdk::TableAppliedDiff<'r, Health>,
     hitbox_history: __sdk::TableAppliedDiff<'r, HitboxHistory>,
@@ -626,6 +754,7 @@ pub struct AppliedDiff<'r> {
     resource_node: __sdk::TableAppliedDiff<'r, ResourceNode>,
     structure: __sdk::TableAppliedDiff<'r, Structure>,
     transform: __sdk::TableAppliedDiff<'r, Transform>,
+    waypoint: __sdk::TableAppliedDiff<'r, Waypoint>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -647,6 +776,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<FactionComponent>(
             "faction_component",
             &self.faction_component,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<GlobalState>(
+            "global_state",
+            &self.global_state,
             event,
         );
         callbacks.invoke_table_row_callbacks::<HarvestableCorpse>(
@@ -687,6 +821,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<Structure>("structure", &self.structure, event);
         callbacks.invoke_table_row_callbacks::<Transform>("transform", &self.transform, event);
+        callbacks.invoke_table_row_callbacks::<Waypoint>("waypoint", &self.waypoint, event);
     }
 }
 
@@ -1349,6 +1484,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         combat_event_table::register_table(client_cache);
         faction_component_table::register_table(client_cache);
+        global_state_table::register_table(client_cache);
         harvestable_corpse_table::register_table(client_cache);
         health_table::register_table(client_cache);
         hitbox_history_table::register_table(client_cache);
@@ -1363,10 +1499,12 @@ impl __sdk::SpacetimeModule for RemoteModule {
         resource_node_table::register_table(client_cache);
         structure_table::register_table(client_cache);
         transform_table::register_table(client_cache);
+        waypoint_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "combat_event",
         "faction_component",
+        "global_state",
         "harvestable_corpse",
         "health",
         "hitbox_history",
@@ -1381,5 +1519,6 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "resource_node",
         "structure",
         "transform",
+        "waypoint",
     ];
 }

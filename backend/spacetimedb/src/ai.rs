@@ -92,16 +92,26 @@ pub struct HarvestableCorpse {
 }
 
 // ----------------------------------------------------------------------------
+// HELPER: SPATIAL CHUNK FILTERING
+// ----------------------------------------------------------------------------
+/// Evaluates whether two chunks are adjacent (within a 3x3 chunk perimeter).
+/// Drastically bounds search spaces to conserve server compute energy (TeV).
+#[inline]
+fn is_chunk_adjacent(cx1: i32, cz1: i32, cx2: i32, cz2: i32) -> bool {
+    (cx1 - cx2).abs() <= 1 && (cz1 - cz2).abs() <= 1
+}
+
+// ----------------------------------------------------------------------------
 // PET COMMAND REDUCERS
 // ----------------------------------------------------------------------------
 
 #[reducer]
 pub fn change_pet_stance(ctx: &ReducerContext, pet_entity_id: u64, new_stance: PetStance) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or("Unauthorized: No active session")?;
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
         
     let mut pet = ctx.db.pet_component().entity_id().find(pet_entity_id)
-        .ok_or("Pet not found")?;
+        .ok_or_else(|| "Pet not found".to_string())?;
     
     if pet.owner_id != session.entity_id {
         return Err("Not your pet".to_string());
@@ -119,20 +129,20 @@ pub fn change_pet_stance(ctx: &ReducerContext, pet_entity_id: u64, new_stance: P
 #[reducer]
 pub fn spawn_peasant(ctx: &ReducerContext) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or("Unauthorized: No active session")?;
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
 
     let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
-        .ok_or("Inventory not found")?;
+        .ok_or_else(|| "Inventory not found".to_string())?;
 
     if !crate::remove_item(&mut inv, "Wood", 20) {
-        return Err("Insufficient Wood to spawn a peasant.".into());
+        return Err("Insufficient Wood to spawn a peasant.".to_string());
     }
     
     ctx.db.inventory().entity_id().update(inv);
 
     let entity_id = ctx.timestamp.to_micros_since_unix_epoch() as u64;
     let spawn_transform = ctx.db.transform().entity_id().find(session.entity_id)
-        .ok_or("Player transform missing")?;
+        .ok_or_else(|| "Player transform missing".to_string())?;
         
     let mut seed = ctx.timestamp.to_micros_since_unix_epoch() as u64;
     let offset_x = (crate::prng(&mut seed) * 4.0) - 2.0;
@@ -197,18 +207,18 @@ pub fn command_peasant(
     target_id: u64,
 ) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or("Unauthorized: No active session")?;
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
 
     let mut peasant = ctx.db.peasant().entity_id().find(peasant_entity_id)
-        .ok_or("Peasant not found")?;
+        .ok_or_else(|| "Peasant not found".to_string())?;
 
     if peasant.owner_id != session.entity_id {
-        return Err("Unauthorized: You do not own this unit.".into());
+        return Err("Unauthorized: You do not own this unit.".to_string());
     }
 
     if let Some(brain) = ctx.db.npc_brain().entity_id().find(peasant_entity_id) {
         if brain.state == BrainState::Fleeing {
-            return Err("Unit is currently fleeing from enemies and cannot process commands.".into());
+            return Err("Unit is currently fleeing from enemies and cannot process commands.".to_string());
         }
     }
 
@@ -216,7 +226,16 @@ pub fn command_peasant(
         "MoveTo" => { 
             peasant.auto_gather_type = "None".to_string(); 
             peasant.last_harvest_target = None;
-            AiState::MoveTo(Position { x: target_x, y: target_y, z: target_z }) 
+
+            // Architectural Note: Quality-of-Play Sunflower Spiral / Formation Offset
+            // When multiple units are given move commands, applying deterministic offsets based 
+            // on entity_id prevents stacking and continuous separation force bouncing.
+            let angle = (peasant_entity_id % 12) as f32 * (std::f32::consts::PI / 6.0);
+            let radius = 1.2 * ((peasant_entity_id % 3) as f32 + 1.0);
+            let scattered_x = target_x + angle.cos() * radius;
+            let scattered_z = target_z + angle.sin() * radius;
+
+            AiState::MoveTo(Position { x: scattered_x, y: target_y, z: scattered_z }) 
         },
         "Harvest" => {
             peasant.auto_gather_type = "None".to_string();
@@ -269,6 +288,11 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             .map(|f| f.faction.clone())
             .unwrap_or(Faction::Wildlife);
 
+        // Pre-filter transforms by adjacent chunks to prune comparisons
+        let local_transforms: Vec<&Transform> = all_transforms.iter()
+            .filter(|t| is_chunk_adjacent(transform.chunk_x, transform.chunk_z, t.chunk_x, t.chunk_z))
+            .collect();
+
         match brain.ai_type {
             AiType::Friendly => {
                 if let Some(h) = hp {
@@ -276,7 +300,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                         brain.state = BrainState::Attacking;
                         let mut nearest = None;
                         let mut min_d = f32::MAX;
-                        for t in &all_transforms {
+                        for t in &local_transforms {
                             if t.entity_id == brain.entity_id { continue; }
                             if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                             
@@ -291,7 +315,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                 let mut nearest_threat = None;
                 let mut min_d = 625.0; 
                 
-                for t in &all_transforms {
+                for t in &local_transforms {
                     if t.entity_id == brain.entity_id { continue; }
                     if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                     
@@ -318,7 +342,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             AiType::Boar => {
                 let mut nearest_threat = None;
                 let mut min_dist = 100.0; 
-                for t in &all_transforms {
+                for t in &local_transforms {
                     if t.entity_id == brain.entity_id { continue; }
                     if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                     
@@ -352,7 +376,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             AiType::Goblin => {
                 if brain.state == BrainState::Idle {
                     let mut found_target = None;
-                    for t in &all_transforms {
+                    for t in &local_transforms {
                         if t.entity_id == brain.entity_id { continue; }
                         if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                         
@@ -380,6 +404,9 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                     
                     if is_attacking || other_brain.ai_type == AiType::Goblin {
                         if let Some(t) = ctx.db.transform().entity_id().find(other_brain.entity_id) {
+                            if !is_chunk_adjacent(transform.chunk_x, transform.chunk_z, t.chunk_x, t.chunk_z) {
+                                continue;
+                            }
                             if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                             
                             let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
@@ -463,7 +490,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                                 if brain.timer >= 1.0 { 
                                     crate::combat::apply_damage(ctx, target, 10.0);
                                     ctx.db.combat_event().insert(crate::CombatEvent {
-                                        id: 0, event_type: "HitPlayer".into(),
+                                        id: 0, event_type: "HitPlayer".to_string(),
                                         x: t.x, y: t.y + 1.0, z: t.z
                                     });
                                     brain.timer = 0.0;
@@ -486,10 +513,11 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             BrainState::Corpse => {}
         }
 
+        // Crowd separation strictly computed against localized spatial partition
         let mut sep_x = 0.0;
         let mut sep_z = 0.0;
         
-        for other in &all_transforms {
+        for other in &local_transforms {
             if other.entity_id == brain.entity_id { continue; }
             let ox = transform.x - other.x;
             let oz = transform.z - other.z;
@@ -540,6 +568,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
 pub fn process_ai_tick(ctx: &ReducerContext) {
     let peasants: Vec<Peasant> = ctx.db.peasant().iter().collect();
     let all_transforms: Vec<Transform> = ctx.db.transform().iter().collect();
+    let all_structures: Vec<crate::building::Structure> = ctx.db.structure().iter().collect();
 
     let dt = 0.1_f32; 
     let speed = 6.0_f32; 
@@ -730,7 +759,8 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
             let mut sep_z = 0.0;
             
             if peasant.consecutive_stuck_ticks < 5 {
-                for other in &all_transforms {
+                // Prune crowd transforms to localized 3x3 chunk space
+                for other in all_transforms.iter().filter(|t| is_chunk_adjacent(transform.chunk_x, transform.chunk_z, t.chunk_x, t.chunk_z)) {
                     if other.entity_id == peasant.entity_id { continue; }
                     let ox = transform.x - other.x;
                     let oz = transform.z - other.z;
@@ -743,7 +773,8 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                     }
                 }
 
-                for s in ctx.db.structure().iter() {
+                // Prune structure collisions to localized radius
+                for s in all_structures.iter().filter(|s| (s.x - transform.x).abs() <= 5.0 && (s.z - transform.z).abs() <= 5.0) {
                     let ox = transform.x - s.x;
                     let oz = transform.z - s.z;
                     let odist_sq = ox * ox + oz * oz;

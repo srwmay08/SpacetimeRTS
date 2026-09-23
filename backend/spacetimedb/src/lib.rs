@@ -198,15 +198,12 @@ pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
     crate::ai::process_ai_tick(ctx);
     crate::ai::process_npc_brain_tick(ctx, 0.1); 
     
-    // Architectural Note: 3. Map Dynamics (Time-of-Day Dynamics)
-    // Progresses the global server time loop. Scaled so a full day cycle takes roughly 48 real-time minutes.
     if let Some(mut state) = ctx.db.global_state().id().find(0) {
         state.time_of_day += 0.005; 
         if state.time_of_day >= 24.0 { state.time_of_day -= 24.0; }
         ctx.db.global_state().id().update(state);
     }
     
-    // Architectural Note: Expire waypoints to maintain the HUD/Attention Economy
     let now = ctx.timestamp.to_micros_since_unix_epoch() as u64;
     let expired: Vec<u64> = ctx.db.waypoint().iter()
         .filter(|w| w.expires_at < now)
@@ -251,11 +248,11 @@ pub fn client_connected(ctx: &ReducerContext) {
                     let sc = 0.5 + prng(&mut seed) * 2.5; 
                     ("Rock", sc, (4.0 * sc) as u32, "None")
                 } else if type_roll < 0.15 { 
-                    ("Flint", 0.5, 1, "None")
+                    ("Flint", 0.6, 1, "None")
                 } else if type_roll < 0.3 {
-                    ("LooseStone", 0.5, 1, "None")
+                    ("LooseStone", 0.6, 1, "None")
                 } else if type_roll < 0.5 {
-                    ("Branch", 0.5, 1, "None")
+                    ("Branch", 0.6, 1, "None")
                 } else if type_roll < 0.8 { 
                     let sc = 0.5 + prng(&mut seed) * 2.0; 
                     let tool = if sc > 1.5 { "Stone Axe" } else { "None" };
@@ -275,10 +272,23 @@ pub fn client_connected(ctx: &ReducerContext) {
         let base_y = get_terrain_height(base_x, base_z) + 1.0; 
         
         ctx.db.structure().insert(Structure {
-            structure_id: 1, parent_id: None, piece_type: "Foundation".into(),
-            stability: 100, is_grounded: true, x: base_x, y: base_y, z: base_z,
-            rot_x: 0.0, rot_y: 0.0, rot_z: 0.0, rot_w: 1.0, owner_id: 0,
-            is_blueprint: false, construction_progress: 100, // Fix for E0063
+            structure_id: 1, 
+            parent_id: None, 
+            piece_type: "Foundation".into(),
+            stability: 100, 
+            is_grounded: true, 
+            x: base_x, 
+            y: base_y, 
+            z: base_z,
+            rot_x: 0.0, 
+            rot_y: 0.0, 
+            rot_z: 0.0, 
+            rot_w: 1.0, 
+            owner_id: 0,
+            is_blueprint: false, 
+            construction_progress: 100,
+            current_health: 400.0,
+            max_health: 400.0,
         });
 
         let mut npc_id = ctx.timestamp.to_micros_since_unix_epoch() as u64 + 10000;
@@ -396,9 +406,9 @@ pub fn client_disconnected(ctx: &ReducerContext) {
 #[reducer]
 pub fn consume_item(ctx: &ReducerContext, item_name: String) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or("Unauthorized: No active session")?;
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
     let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
-        .ok_or("Inventory not found")?;
+        .ok_or_else(|| "Inventory not found".to_string())?;
 
     if !remove_item(&mut inv, &item_name, 1) {
         return Err(format!("You do not have any {}.", item_name));
@@ -427,24 +437,22 @@ pub fn consume_item(ctx: &ReducerContext, item_name: String) -> Result<(), Strin
 #[reducer]
 pub fn craft_item(ctx: &ReducerContext, item_name: String) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or("Unauthorized: No active session")?;
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
 
     let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
-        .ok_or("Inventory not found")?;
+        .ok_or_else(|| "Inventory not found".to_string())?;
 
     let player_transform = ctx.db.transform().entity_id().find(session.entity_id)
-        .ok_or("Transform not found")?;
+        .ok_or_else(|| "Transform not found".to_string())?;
 
     let requires_workbench = matches!(item_name.as_str(), "Leather Tunic" | "Crude Bow" | "Flint Arrow");
     if requires_workbench {
         let mut valid_workbench = false;
         for s in ctx.db.structure().iter().filter(|s| s.piece_type == "Workbench") {
             let dist_sq = (s.x - player_transform.x).powi(2) + (s.z - player_transform.z).powi(2);
-            if dist_sq < 100.0 { 
-                if crate::building::is_covered(ctx, s.x, s.y, s.z) {
-                    valid_workbench = true;
-                    break;
-                }
+            if dist_sq < 100.0 && crate::building::is_covered(ctx, s.x, s.y, s.z) {
+                valid_workbench = true;
+                break;
             }
         }
         if !valid_workbench {
@@ -455,7 +463,7 @@ pub fn craft_item(ctx: &ReducerContext, item_name: String) -> Result<(), String>
     match item_name.as_str() {
         "Hammer" => {
             if !has_item(&inv, "Branch", 1) || !has_item(&inv, "LooseStone", 1) {
-                return Err("Missing materials: 1 Branch, 1 LooseStone.".into());
+                return Err("Missing materials: 1 Branch, 1 Stone.".into());
             }
             remove_item(&mut inv, "Branch", 1);
             remove_item(&mut inv, "LooseStone", 1);
@@ -492,6 +500,21 @@ pub fn craft_item(ctx: &ReducerContext, item_name: String) -> Result<(), String>
             remove_item(&mut inv, "Leather Scraps", 8);
             add_item(&mut inv, "Crude Bow", 1);
         }
+        "Flint Arrow" => {
+            if !has_item(&inv, "Wood", 8) || !has_item(&inv, "Flint", 2) {
+                return Err("Missing materials: 8 Wood, 2 Flint.".into());
+            }
+            remove_item(&mut inv, "Wood", 8);
+            remove_item(&mut inv, "Flint", 2);
+            add_item(&mut inv, "Flint Arrow", 20);
+        }
+        "Wood Arrow" => {
+            if !has_item(&inv, "Wood", 8) {
+                return Err("Missing materials: 8 Wood.".into());
+            }
+            remove_item(&mut inv, "Wood", 8);
+            add_item(&mut inv, "Wood Arrow", 20);
+        }
         _ => return Err("Unknown or locked crafting recipe.".into()),
     }
 
@@ -505,27 +528,54 @@ pub fn craft_item(ctx: &ReducerContext, item_name: String) -> Result<(), String>
 
 #[reducer]
 pub fn interact_node(ctx: &ReducerContext, node_id: u64) -> Result<(), String> {
-    let sender = ctx.sender();
-    let player = ctx.db.player().identity().find(sender).ok_or("Unauthorized")?;
-    
-    let mut inventory = ctx.db.inventory().entity_id().find(player.entity_id).unwrap();
-    let mut node = ctx.db.resource_node().node_id().find(node_id).ok_or("Node not found")?;
-    
-    if node.node_type != "Bush" { return Err("Entity not interactable".into()); }
-    if node.health == 0 { return Err("Berries depleted".into()); }
-    
-    add_item(&mut inventory, "Berry", 2);
-    
-    ctx.db.inventory().entity_id().update(inventory);
-    
-    node.health = 0; 
-    ctx.db.resource_node().node_id().update(node);
-    
-    ctx.db.respawn_bush_timer().insert(RespawnBushTimer {
-        scheduled_id: 0,
-        scheduled_at: ScheduleAt::Interval(Duration::from_secs(60).into()),
-        node_id,
-    });
+    // Authoritatively resolve caller session
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active player session".to_string())?;
+
+    let mut inventory = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Inventory not found for entity".to_string())?;
+
+    let mut node = ctx.db.resource_node().node_id().find(node_id)
+        .ok_or_else(|| "Node not found".to_string())?;
+
+    match node.node_type.as_str() {
+        "Bush" => {
+            if node.health == 0 {
+                return Err("Berries depleted".into());
+            }
+            add_item(&mut inventory, "Berry", 2);
+            ctx.db.inventory().entity_id().update(inventory);
+
+            node.health = 0;
+            ctx.db.resource_node().node_id().update(node);
+
+            let has_timer = ctx.db.respawn_bush_timer().iter().any(|t| t.node_id == node_id);
+            if !has_timer {
+                ctx.db.respawn_bush_timer().insert(RespawnBushTimer {
+                    scheduled_id: 0,
+                    scheduled_at: ScheduleAt::Interval(Duration::from_secs(60).into()),
+                    node_id,
+                });
+            }
+        }
+        "Branch" => {
+            add_item(&mut inventory, "Branch", 1);
+            ctx.db.inventory().entity_id().update(inventory);
+            ctx.db.resource_node().node_id().delete(node_id);
+        }
+        "Flint" => {
+            add_item(&mut inventory, "Flint", 1);
+            ctx.db.inventory().entity_id().update(inventory);
+            ctx.db.resource_node().node_id().delete(node_id);
+        }
+        "LooseStone" => {
+            add_item(&mut inventory, "LooseStone", 1);
+            ctx.db.inventory().entity_id().update(inventory);
+            ctx.db.resource_node().node_id().delete(node_id);
+        }
+        _ => return Err("Entity not interactable".into()),
+    }
+
     Ok(())
 }
 
@@ -539,10 +589,10 @@ pub fn respawn_bush_tick(ctx: &ReducerContext, timer: RespawnBushTimer) {
 
 #[reducer]
 pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: f32, dz: f32) {
-    let sender = ctx.sender();
-    let Some(player) = ctx.db.player().identity().find(sender) else { return; };
+    let session = ctx.db.player_session().identity().find(ctx.sender());
+    let Some(session) = session else { return; };
     
-    let mut inventory = ctx.db.inventory().entity_id().find(player.entity_id).unwrap();
+    let mut inventory = ctx.db.inventory().entity_id().find(session.entity_id).unwrap();
     let mut hit_node = None;
     let mut hit_entity = None;
     let mut min_dist = 12.0_f32; 
@@ -556,7 +606,7 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
     }
 
     for t in ctx.db.transform().iter() {
-        if t.entity_id == player.entity_id { continue; } 
+        if t.entity_id == session.entity_id { continue; } 
         if ctx.db.health().entity_id().find(t.entity_id).is_none() { continue; } 
         let dist = ((t.x - px).powi(2) + (t.y - py).powi(2) + (t.z - pz).powi(2)).sqrt();
         if dist < min_dist {
@@ -611,10 +661,8 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
             };
             
             add_item(&mut inventory, item, amount);
-            if node.node_type == "Tree" {
-                if inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0) {
-                    add_item(&mut inventory, "Resin", 1);
-                }
+            if node.node_type == "Tree" && inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0) {
+                add_item(&mut inventory, "Resin", 1);
             }
             ctx.db.inventory().entity_id().update(inventory);
         }
@@ -656,4 +704,32 @@ pub fn prng(seed: &mut u64) -> f32 {
     *seed ^= *seed >> 7; 
     *seed ^= *seed << 17;
     (*seed as u32 as f32) / (u32::MAX as f32)
+}
+
+// ----------------------------------------------------------------------------
+// NATIVE TEST LINKER STUBS
+// ----------------------------------------------------------------------------
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+mod native_spacetimedb_stubs {
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn datastore_insert_bsatn() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn datastore_update_bsatn() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn index_id_from_name() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn procedure_sleep_until() {}
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn bytes_sink_write() {}
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn bytes_source_remaining_length() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn bytes_source_read() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn table_id_from_name() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn get_jwt() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn console_log() {}
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn identity() {}
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn console_timer_start() {}
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn console_timer_end() {}
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn datastore_table_scan_bsatn() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn datastore_index_scan_point_bsatn() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn datastore_index_scan_range_bsatn() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn datastore_delete_by_index_scan_point_bsatn() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn datastore_delete_by_index_scan_range_bsatn() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn row_iter_bsatn_advance() -> u32 { 0 }
+    #[unsafe(no_mangle)] pub unsafe extern "C" fn row_iter_bsatn_close() {}
 }

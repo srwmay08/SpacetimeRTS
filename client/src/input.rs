@@ -13,11 +13,16 @@ use crate::building::BuildModeState;
 
 use crate::module_bindings::swing_tool_reducer::swing_tool;
 use crate::module_bindings::fire_weapon_reducer::fire_weapon;
+use crate::module_bindings::fire_bow_reducer::fire_bow;
+use crate::module_bindings::repair_structure_reducer::repair_structure;
+use crate::module_bindings::contribute_construction_reducer::contribute_construction;
 use crate::module_bindings::interact_node_reducer::interact_node;
 use crate::module_bindings::command_peasant_reducer::command_peasant;
 use crate::module_bindings::spawn_peasant_reducer::spawn_peasant;
 use crate::module_bindings::player_table::PlayerTableAccess;
+use crate::module_bindings::inventory_table::InventoryTableAccess;
 use crate::module_bindings::resource_node_table::ResourceNodeTableAccess;
+use crate::module_bindings::structure_table::StructureTableAccess;
 
 // ----------------------------------------------------------------------------
 // EVENTS & ENUMS
@@ -54,11 +59,62 @@ pub struct ActionContextQueries<'w, 's> {
     pub fps_camera: Query<'w, 's, &'static GlobalTransform, With<FpsCamera>>,
     pub player: Query<'w, 's, (Entity, &'static BevyTransform), With<PlayerBody>>,
     pub node: Query<'w, 's, &'static ResourceNodeItem>,
+    pub parent_q: Query<'w, 's, &'static Parent>,
     pub structure: Query<'w, 's, &'static NetworkStructure>,
     pub peasant: Query<'w, 's, &'static PeasantUnit>, 
     pub rts_camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<RtsCameraChild>>,
     pub selectable: Query<'w, 's, (Entity, &'static BevyTransform), With<Selectable>>,
     pub selected: Query<'w, 's, Entity, With<Selected>>,
+}
+
+// ----------------------------------------------------------------------------
+// HELPER: RESOLVE NODE ID FROM HIT ENTITY
+// ----------------------------------------------------------------------------
+fn resolve_node_id(entity: Entity, node_q: &Query<&ResourceNodeItem>, parent_q: &Query<&Parent>) -> Option<u64> {
+    if let Ok(node) = node_q.get(entity) {
+        return Some(node.node_id);
+    }
+    if let Ok(parent) = parent_q.get(entity) {
+        if let Ok(node) = node_q.get(parent.get()) {
+            return Some(node.node_id);
+        }
+    }
+    None
+}
+
+// ----------------------------------------------------------------------------
+// HOTBAR INPUT SYSTEM
+// ----------------------------------------------------------------------------
+
+pub fn hotbar_input_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut active_slot: ResMut<ActiveItemSlot>,
+    mut active_item: ResMut<ActiveEquippedItem>,
+    conn: Res<SpacetimeConnection>,
+) {
+    let digit_keys = [
+        (KeyCode::Digit1, 0),
+        (KeyCode::Digit2, 1),
+        (KeyCode::Digit3, 2),
+        (KeyCode::Digit4, 3),
+        (KeyCode::Digit5, 4),
+        (KeyCode::Digit6, 5),
+        (KeyCode::Digit7, 6),
+        (KeyCode::Digit8, 7),
+    ];
+
+    for (key, slot_idx) in digit_keys {
+        if keys.just_pressed(key) {
+            active_slot.0 = slot_idx;
+            info!("Hotbar Slot {} Selected", slot_idx + 1);
+        }
+    }
+
+    let Some(identity) = &conn.identity else { return; };
+    let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
+    let Some(inventory) = conn.db.db.inventory().entity_id().find(&player.entity_id) else { return; };
+
+    active_item.0 = inventory.slots.get(active_slot.0).map(|s| s.item_type.clone());
 }
 
 // ----------------------------------------------------------------------------
@@ -71,10 +127,24 @@ pub fn input_router_system(
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut action_events: EventWriter<ActionEvent>,
     interaction_query: Query<&Interaction>,
+    node_query: Query<(&Node, &GlobalTransform, &Visibility)>,
 ) {
     let cursor_pos = window_query.get_single().ok().and_then(|w| w.cursor_position());
     
-    let is_over_ui = interaction_query.iter().any(|i| *i != Interaction::None);
+    let mut is_over_ui = interaction_query.iter().any(|i| *i != Interaction::None);
+    if !is_over_ui {
+        if let Some(pos) = cursor_pos {
+            for (node, transform, vis) in node_query.iter() {
+                if *vis != Visibility::Hidden {
+                    let rect = Rect::from_center_size(transform.translation().truncate(), node.size());
+                    if rect.contains(pos) {
+                        is_over_ui = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
     if mouse.just_pressed(MouseButton::Left) {
         action_events.send(ActionEvent { action: VirtualAction::Primary, state: ActionState::JustPressed, cursor_pos, is_over_ui });
@@ -106,6 +176,7 @@ pub fn context_aware_action_dispatcher(
     build_state: Res<BuildModeState>,
     keys: Res<ButtonInput<KeyCode>>,
     mut swing_state: ResMut<SwingState>,
+    active_item: Res<ActiveEquippedItem>,
     queries: ActionContextQueries,
     spatial_query: SpatialQuery,
     mut selection_state: ResMut<SelectionState>,
@@ -113,22 +184,29 @@ pub fn context_aware_action_dispatcher(
     tick: Res<ClientTick>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut build_menu_query: Query<&mut Style, With<BuildMenuRoot>>,
 ) {
     let multi_select = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let my_player_entity = queries.player.get_single().map(|(e, _)| e).unwrap_or(Entity::PLACEHOLDER);
 
     if keys.just_pressed(KeyCode::KeyP) {
-        if let Err(e) = conn.db.reducers.spawn_peasant() {
-            error!("NETWORK ERROR: Failed to spawn peasant. Details: {:?}", e);
-        } else {
-            info!("Spawning worker via debug hotkey [P]");
-        }
+        let _ = conn.db.reducers.spawn_peasant();
     }
+
+    let is_holding_hammer = active_item.0.as_deref() == Some("Hammer");
+    let is_holding_bow = active_item.0.as_deref() == Some("Crude Bow");
 
     for event in action_events.read() {
         match camera_mode.get() {
             CameraMode::FPS => {
                 match event.action {
+                    VirtualAction::Secondary if event.state == ActionState::JustPressed => {
+                        if is_holding_hammer && !event.is_over_ui {
+                            if let Ok(mut style) = build_menu_query.get_single_mut() {
+                                style.display = if style.display == Display::None { Display::Flex } else { Display::None };
+                            }
+                        }
+                    }
                     VirtualAction::Primary if event.state == ActionState::JustPressed => {
                         if event.is_over_ui || build_state.is_active { continue; }
 
@@ -138,7 +216,41 @@ pub fn context_aware_action_dispatcher(
                                 if let Ok((player_entity, _)) = queries.player.get_single() {
                                     let origin = cam_transform.translation();
                                     let dir = cam_transform.forward();
-                                    
+
+                                    // BOW & ARROW COMBAT PATH
+                                    if is_holding_bow {
+                                        let arrow_speed = 45.0;
+                                        let tracer_mesh = meshes.add(Cylinder::new(0.015, 0.8));
+                                        let tracer_mat = materials.add(StandardMaterial {
+                                            base_color: Color::srgb(0.8, 0.7, 0.5),
+                                            unlit: true,
+                                            ..default()
+                                        });
+
+                                        let mut arrow_transform = BevyTransform::from_translation(origin + dir * 1.0)
+                                            .looking_at(origin + dir * 5.0, Vec3::Y);
+                                        arrow_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+
+                                        commands.spawn((
+                                            PbrBundle {
+                                                mesh: tracer_mesh,
+                                                material: tracer_mat,
+                                                transform: arrow_transform,
+                                                ..default()
+                                            },
+                                            RigidBody::Dynamic,
+                                            LinearVelocity(dir * arrow_speed),
+                                            Particle { timer: Timer::from_seconds(1.2, TimerMode::Once) },
+                                        ));
+
+                                        if let Err(e) = conn.db.reducers.fire_bow(
+                                            tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                        ) {
+                                            error!("Bow error: {:?}", e);
+                                        }
+                                        continue;
+                                    }
+
                                     let hit = spatial_query.cast_ray(
                                         origin, dir.into(), 50.0, true,
                                         SpatialQueryFilter::from_excluded_entities([player_entity]),
@@ -152,11 +264,9 @@ pub fn context_aware_action_dispatcher(
                                     });
 
                                     if is_tool_context {
-                                        if let Err(e) = conn.db.reducers.swing_tool(
+                                        let _ = conn.db.reducers.swing_tool(
                                             origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
-                                        ) {
-                                            error!("NETWORK ERROR: Failed to swing tool. Details: {:?}", e);
-                                        }
+                                        );
                                     } else {
                                         let distance = hit.map_or(50.0, |h| h.time_of_impact);
                                         let mid_point = origin + dir * (distance / 2.0);
@@ -175,11 +285,9 @@ pub fn context_aware_action_dispatcher(
                                             Particle { timer: Timer::from_seconds(0.05, TimerMode::Once) },
                                         ));
 
-                                        if let Err(e) = conn.db.reducers.fire_weapon(
+                                        let _ = conn.db.reducers.fire_weapon(
                                             tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
-                                        ) {
-                                            error!("NETWORK ERROR: Failed to fire weapon. Details: {:?}", e);
-                                        }
+                                        );
                                     }
                                 }
                             }
@@ -194,25 +302,24 @@ pub fn context_aware_action_dispatcher(
                                 let dir = cam_transform.forward();
                                 
                                 let hit = spatial_query.cast_ray(
-                                    origin, dir.into(), 5.0, true,
-                                    SpatialQueryFilter::from_excluded_entities([player_entity]),
+                                    origin, dir.into(), 7.0, true,
+                                    SpatialQueryFilter::from_mask([GameLayer::Environment, GameLayer::Default])
+                                        .with_excluded_entities([player_entity]),
                                 );
                                 
                                 if let Some(hit_data) = hit {
-                                    if let Ok(node) = queries.node.get(hit_data.entity) {
-                                        // Architectural Note: Ground items like Flint/LooseStone/Branches 
-                                        // or Bushes can be looted/interacted with directly via [E].
-                                        if let Some(resource_node) = conn.db.db.resource_node().node_id().find(&node.node_id) {
-                                            if resource_node.node_type == "Bush" {
-                                                if let Err(e) = conn.db.reducers.interact_node(node.node_id) {
-                                                    error!("NETWORK ERROR: Failed to interact with node. Details: {:?}", e);
-                                                }
-                                            } else {
-                                                // For ground debris/nodes, simulate an instant harvest swing or pickup
-                                                if let Err(e) = conn.db.reducers.swing_tool(
-                                                    origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
-                                                ) {
-                                                    error!("NETWORK ERROR: Failed to harvest ground item. Details: {:?}", e);
+                                    if let Some(node_id) = resolve_node_id(hit_data.entity, &queries.node, &queries.parent_q) {
+                                        info!("Dispatching interact_node for node_id: {}", node_id);
+                                        if let Err(e) = conn.db.reducers.interact_node(node_id) {
+                                            error!("Failed to pick up resource: {:?}", e);
+                                        }
+                                    } else if let Ok(net_structure) = queries.structure.get(hit_data.entity) {
+                                        if is_holding_hammer {
+                                            if let Some(s) = conn.db.db.structure().structure_id().find(&net_structure.structure_id) {
+                                                if s.is_blueprint {
+                                                    let _ = conn.db.reducers.contribute_construction(s.structure_id);
+                                                } else if s.current_health < s.max_health {
+                                                    let _ = conn.db.reducers.repair_structure(s.structure_id);
                                                 }
                                             }
                                         }
@@ -311,22 +418,30 @@ pub fn context_aware_action_dispatcher(
                                     let is_node = queries.node.contains(hit.entity);
                                     let is_player = hit.entity == my_player_entity;
 
+                                    commands.spawn((
+                                        PbrBundle {
+                                            mesh: meshes.add(Cylinder::new(0.8, 0.05)),
+                                            material: materials.add(StandardMaterial {
+                                                base_color: if is_node { Color::srgb(0.9, 0.8, 0.1) } else { Color::srgb(0.2, 0.9, 0.3) },
+                                                unlit: true,
+                                                ..default()
+                                            }),
+                                            transform: BevyTransform::from_xyz(hit_point.x, hit_point.y + 0.05, hit_point.z),
+                                            ..default()
+                                        },
+                                        Particle { timer: Timer::from_seconds(0.8, TimerMode::Once) },
+                                    ));
+
                                     for selected_entity in queries.selected.iter() {
                                         if let Ok(peasant) = queries.peasant.get(selected_entity) {
                                             if is_node {
                                                 let node = queries.node.get(hit.entity).unwrap();
-                                                if let Err(e) = conn.db.reducers.command_peasant(peasant.entity_id, "Harvest".to_string(), hit_point.x, hit_point.y, hit_point.z, node.node_id) {
-                                                    error!("NETWORK ERROR: {:?}", e);
-                                                }
+                                                let _ = conn.db.reducers.command_peasant(peasant.entity_id, "Harvest".to_string(), hit_point.x, hit_point.y, hit_point.z, node.node_id);
                                             } else if is_player {
                                                 let player_id = conn.identity.as_ref().and_then(|id| conn.db.db.player().identity().find(id)).map(|p| p.entity_id).unwrap_or(0);
-                                                if let Err(e) = conn.db.reducers.command_peasant(peasant.entity_id, "Return".to_string(), hit_point.x, hit_point.y, hit_point.z, player_id) {
-                                                    error!("NETWORK ERROR: {:?}", e);
-                                                }
+                                                let _ = conn.db.reducers.command_peasant(peasant.entity_id, "Return".to_string(), hit_point.x, hit_point.y, hit_point.z, player_id);
                                             } else {
-                                                if let Err(e) = conn.db.reducers.command_peasant(peasant.entity_id, "MoveTo".to_string(), hit_point.x, hit_point.y, hit_point.z, 0) {
-                                                    error!("NETWORK ERROR: {:?}", e);
-                                                }
+                                                let _ = conn.db.reducers.command_peasant(peasant.entity_id, "MoveTo".to_string(), hit_point.x, hit_point.y, hit_point.z, 0);
                                             }
                                         }
                                     }
@@ -424,10 +539,12 @@ pub fn player_movement_system(
 
 pub fn update_interaction_prompt(
     conn: Res<SpacetimeConnection>,
+    active_item: Res<ActiveEquippedItem>,
     camera_query: Query<&GlobalTransform, With<FpsCamera>>,
     player_query: Query<Entity, With<PlayerBody>>,
     spatial_query: SpatialQuery,
     node_query: Query<&ResourceNodeItem>,
+    parent_query: Query<&Parent>,
     structure_query: Query<&NetworkStructure>,
     mut prompt_query: Query<(&mut Text, &mut Visibility), With<InteractionPromptText>>,
 ) {
@@ -439,22 +556,47 @@ pub fn update_interaction_prompt(
     let dir = cam_transform.forward();
 
     let hit = spatial_query.cast_ray(
-        origin, dir.into(), 5.0, true,
-        SpatialQueryFilter::from_excluded_entities([player_entity]),
+        origin, dir.into(), 7.0, true,
+        SpatialQueryFilter::from_mask([GameLayer::Environment, GameLayer::Default])
+            .with_excluded_entities([player_entity]),
     );
 
     if let Some(hit_data) = hit {
-        if let Ok(node_item) = node_query.get(hit_data.entity) {
-            if let Some(node) = conn.db.db.resource_node().node_id().find(&node_item.node_id) {
-                // Architectural Note: Dynamically formats prompt based on SpacetimeDB node type.
-                text.sections[0].value = format!("[E] Gather {}", node.node_type);
+        if let Some(node_id) = resolve_node_id(hit_data.entity, &node_query, &parent_query) {
+            if let Some(node) = conn.db.db.resource_node().node_id().find(&node_id) {
+                let prompt = match node.node_type.as_str() {
+                    "Bush" => {
+                        if node.health > 0 { "[E] Pick Berries" } else { "Berries Depleted" }
+                    }
+                    "Branch" => "[E] Pick up Branch",
+                    "Flint" => "[E] Pick up Flint",
+                    "LooseStone" => "[E] Pick up Stone",
+                    "Tree" => "Tree (Left-click with Stone Axe)",
+                    "Rock" => "Rock (Left-click with Pickaxe)",
+                    _ => "[E] Gather",
+                };
+
+                text.sections[0].value = prompt.to_string();
                 *vis = Visibility::Inherited;
                 return;
             }
-        } else if structure_query.contains(hit_data.entity) {
-            text.sections[0].value = "[E] Hit with Hammer / Build".to_string();
-            *vis = Visibility::Inherited;
-            return;
+        } else if let Ok(net_structure) = structure_query.get(hit_data.entity) {
+            if let Some(s) = conn.db.db.structure().structure_id().find(&net_structure.structure_id) {
+                let is_hammer = active_item.0.as_deref() == Some("Hammer");
+                if s.is_blueprint {
+                    text.sections[0].value = if is_hammer { "[E] Hammer Blueprint" } else { "Equip Hammer to Build" }.to_string();
+                } else if s.current_health < s.max_health {
+                    text.sections[0].value = if is_hammer {
+                        format!("[E] Repair Structure ({:.0}/{:.0} HP)", s.current_health, s.max_health)
+                    } else {
+                        format!("Damaged ({:.0}/{:.0} HP) - Equip Hammer", s.current_health, s.max_health)
+                    };
+                } else {
+                    text.sections[0].value = format!("{} ({:.0}/{:.0} HP)", s.piece_type, s.current_health, s.max_health);
+                }
+                *vis = Visibility::Inherited;
+                return;
+            }
         }
     }
 

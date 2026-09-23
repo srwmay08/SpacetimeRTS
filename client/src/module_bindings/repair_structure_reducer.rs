@@ -6,46 +6,46 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct SetInteriorCullingArgs {
-    pub in_interior: bool,
+pub(super) struct RepairStructureArgs {
+    pub structure_id: u64,
 }
 
-impl From<SetInteriorCullingArgs> for super::Reducer {
-    fn from(args: SetInteriorCullingArgs) -> Self {
-        Self::SetInteriorCulling {
-            in_interior: args.in_interior,
+impl From<RepairStructureArgs> for super::Reducer {
+    fn from(args: RepairStructureArgs) -> Self {
+        Self::RepairStructure {
+            structure_id: args.structure_id,
         }
     }
 }
 
-impl __sdk::InModule for SetInteriorCullingArgs {
+impl __sdk::InModule for RepairStructureArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `set_interior_culling`.
+/// Extension trait for access to the reducer `repair_structure`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait set_interior_culling {
-    /// Request that the remote module invoke the reducer `set_interior_culling` to run as soon as possible.
+pub trait repair_structure {
+    /// Request that the remote module invoke the reducer `repair_structure` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`set_interior_culling:set_interior_culling_then`] to run a callback after the reducer completes.
-    fn set_interior_culling(&self, in_interior: bool) -> __sdk::Result<()> {
-        self.set_interior_culling_then(in_interior, |_, _| {})
+    /// /// Use [`repair_structure:repair_structure_then`] to run a callback after the reducer completes.
+    fn repair_structure(&self, structure_id: u64) -> __sdk::Result<()> {
+        self.repair_structure_then(structure_id, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `set_interior_culling` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `repair_structure` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn set_interior_culling_then(
+    fn repair_structure_then(
         &self,
-        in_interior: bool,
+        structure_id: u64,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -53,16 +53,16 @@ pub trait set_interior_culling {
     ) -> __sdk::Result<()>;
 }
 
-impl set_interior_culling for super::RemoteReducers {
-    fn set_interior_culling_then(
+impl repair_structure for super::RemoteReducers {
+    fn repair_structure_then(
         &self,
-        in_interior: bool,
+        structure_id: u64,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(SetInteriorCullingArgs { in_interior }, callback)
+            .invoke_reducer_with_callback(RepairStructureArgs { structure_id }, callback)
     }
 }

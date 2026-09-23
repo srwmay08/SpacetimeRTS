@@ -240,11 +240,6 @@ pub fn update_spatial_subscriptions(
         let current_z = (pos.0.z / 50.0).floor() as i32;
 
         if culling_state.current_chunk.0 != current_x || culling_state.current_chunk.1 != current_z {
-            
-            // Architectural Note: Hysteresis Deadzone Validation
-            // Only commits to a new chunk index if the player successfully crossed the boundary 
-            // by at least 2.0 full coordinate units. This halts `needs_rebuild` from oscillating 
-            // continuously when resolving floating-point edge borders, fixing entity generation spam.
             let center_x = (culling_state.current_chunk.0 as f32 * 50.0) + 25.0;
             let center_z = (culling_state.current_chunk.1 as f32 * 50.0) + 25.0;
             
@@ -290,7 +285,7 @@ pub fn update_spatial_subscriptions(
 
 pub fn sync_logical_components(
     time: Res<Time>,
-    mut query: Query<(&LogicalPosition, &LogicalRotation, &mut BevyTransform), Without<PlayerBody>>
+    mut query: Query<(&LogicalPosition, &LogicalRotation, &mut BevyTransform), (Without<PlayerBody>, With<NetworkEntity>)>
 ) {
     let decay_factor = 1.0 - (-15.0_f32 * time.delta_seconds()).exp(); 
     
@@ -385,12 +380,10 @@ pub fn sync_transforms(
                     }
                 }
                 
-                // Color corpses distinctly
                 if brain.state == crate::module_bindings::BrainState::Corpse {
                     color = Color::srgb(0.2, 0.2, 0.2);
                     visual_transform.rotation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
                 }
-                
             } else if is_peasant {
                 color = Color::srgb(0.1, 0.3, 0.9); 
                 mesh_handle = meshes.add(Capsule3d::new(0.4, 1.8));
@@ -434,6 +427,9 @@ pub fn sync_transforms(
     }
 }
 
+/// Architectural Note: Explicit Procedural Generation for Resource Debris
+/// Fixes the issue where all items were rendering as giant white fallback spheres.
+/// Each resource type now has unique geometry, distinct color, and custom colliders.
 pub fn sync_resource_nodes(
     mut commands: Commands, 
     mut meshes: ResMut<Assets<Mesh>>, 
@@ -452,37 +448,94 @@ pub fn sync_resource_nodes(
         db_node_ids.insert(node.node_id);
         
         if !local_nodes.contains(&node.node_id) {
-            let (mesh, color, collider, y_offset) = match node.node_type.as_str() {
-                "Tree" => (meshes.add(Cylinder::new(0.5, 4.0)), Color::srgb(0.3, 0.2, 0.1), Collider::cylinder(0.5, 4.0), 2.0),
-                "Rock" => (meshes.add(Cuboid::new(1.5, 1.2, 1.5)), Color::srgb(0.5, 0.5, 0.5), Collider::cuboid(1.5, 1.2, 1.5), 0.6),
-                "Bush" => (meshes.add(Sphere::new(0.8).mesh()), Color::srgb(0.2, 0.6, 0.2), Collider::sphere(0.8), 0.8),
-                _ => (meshes.add(Sphere::new(1.0).mesh()), Color::WHITE, Collider::sphere(1.0), 1.0)
+            // Trim whitespace to prevent match failure
+            let clean_type = node.node_type.trim();
+
+            let (mesh, color, collider, y_offset, rotation) = match clean_type {
+                "Tree" => (
+                    meshes.add(Cylinder::new(0.5, 4.0)),
+                    Color::srgb(0.35, 0.22, 0.12),
+                    Collider::cylinder(0.5, 4.0),
+                    2.0,
+                    Quat::IDENTITY,
+                ),
+                "Rock" => (
+                    meshes.add(Cuboid::new(1.5, 1.2, 1.5)),
+                    Color::srgb(0.45, 0.45, 0.48),
+                    Collider::cuboid(1.5, 1.2, 1.5),
+                    0.6,
+                    Quat::IDENTITY,
+                ),
+                "Bush" => (
+                    meshes.add(Sphere::new(0.85).mesh()),
+                    Color::srgb(0.15, 0.5, 0.15),
+                    Collider::sphere(0.85),
+                    0.7,
+                    Quat::IDENTITY,
+                ),
+                "Branch" => (
+                    // Distinct elongated dark brown branch laying horizontally
+                    meshes.add(Capsule3d::new(0.04, 0.7)),
+                    Color::srgb(0.3, 0.18, 0.08),
+                    Collider::capsule(0.08, 0.7),
+                    0.05,
+                    Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                ),
+                "Flint" => (
+                    // Sharp dark blue-black obsidian wedge, distinctly NOT a sphere
+                    meshes.add(Cuboid::new(0.28, 0.08, 0.22)),
+                    Color::srgb(0.12, 0.15, 0.22),
+                    Collider::cuboid(0.35, 0.15, 0.3),
+                    0.04,
+                    Quat::from_rotation_y(0.4),
+                ),
+                "LooseStone" => (
+                    // Flattened rounded light-grey pebble
+                    meshes.add(Sphere::new(0.18).mesh()),
+                    Color::srgb(0.6, 0.6, 0.62),
+                    Collider::sphere(0.25),
+                    0.06,
+                    Quat::IDENTITY,
+                ),
+                _ => (
+                    meshes.add(Sphere::new(0.25).mesh()),
+                    Color::srgb(0.8, 0.7, 0.2),
+                    Collider::sphere(0.3),
+                    0.15,
+                    Quat::IDENTITY,
+                )
             };
 
             commands.spawn((
                 PbrBundle {
                     mesh, 
-                    material: materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.9, reflectance: 0.05, ..default() }),
-                    transform: BevyTransform::from_xyz(node.x, node.y + (y_offset * node.scale) + 0.05, node.z)
-                        .with_scale(Vec3::splat(node.scale)),
+                    material: materials.add(StandardMaterial {
+                        base_color: color,
+                        perceptual_roughness: 0.85,
+                        reflectance: 0.1,
+                        ..default()
+                    }),
+                    transform: BevyTransform::from_xyz(node.x, node.y + y_offset, node.z)
+                        .with_rotation(rotation),
                     ..default()
                 },
                 ResourceNodeItem { node_id: node.node_id },
-                RigidBody::Static, collider,
+                RigidBody::Static,
+                collider,
                 CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
             )).with_children(|parent| {
-                if node.node_type == "Bush" {
+                if clean_type == "Bush" {
                     let offsets = [
-                        Vec3::new(0.6, 0.2, 0.0), Vec3::new(-0.4, 0.5, 0.5), 
-                        Vec3::new(0.0, -0.3, 0.6), Vec3::new(0.5, -0.5, -0.5), 
-                        Vec3::new(-0.5, 0.1, -0.5),
+                        Vec3::new(0.55, 0.2, 0.0), Vec3::new(-0.35, 0.45, 0.45), 
+                        Vec3::new(0.0, -0.25, 0.55), Vec3::new(0.45, -0.4, -0.45), 
+                        Vec3::new(-0.45, 0.1, -0.45),
                     ];
                     
-                    let red_material = materials.add(StandardMaterial { base_color: Color::srgb(0.8, 0.1, 0.1), ..default() });
+                    let red_material = materials.add(StandardMaterial { base_color: Color::srgb(0.85, 0.08, 0.08), ..default() });
                     for offset in offsets {
                         parent.spawn((
                             PbrBundle {
-                                mesh: meshes.add(Sphere::new(0.15).mesh()),
+                                mesh: meshes.add(Sphere::new(0.14).mesh()),
                                 material: red_material.clone(),
                                 transform: BevyTransform::from_translation(offset),
                                 ..default()
@@ -496,7 +549,9 @@ pub fn sync_resource_nodes(
     }
 
     for (entity, node_item) in node_query.iter() {
-        if !db_node_ids.contains(&node_item.node_id) { commands.entity(entity).despawn_recursive(); }
+        if !db_node_ids.contains(&node_item.node_id) { 
+            commands.entity(entity).despawn_recursive(); 
+        }
     }
 }
 

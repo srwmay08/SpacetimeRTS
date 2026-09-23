@@ -77,7 +77,7 @@ impl ModularPieceType {
 pub struct BuildModeState {
     pub is_active: bool,
     pub selected_piece: ModularPieceType,
-    pub rotation_steps: u8, // Architectural Note: Tracks manual 90-degree rotations.
+    pub rotation_steps: u8,
 }
 
 impl Default for BuildModeState {
@@ -97,11 +97,11 @@ impl Default for BuildModeState {
 pub fn create_ramp_mesh() -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     let positions = vec![
-        [-2.0, -1.5,  2.0], [ 2.0, -1.5,  2.0], [ 2.0, -1.5, -2.0], [-2.0, -1.5, -2.0], // Bottom Face
-        [ 2.0, -1.5, -2.0], [-2.0, -1.5, -2.0], [-2.0,  1.5, -2.0], [ 2.0,  1.5, -2.0], // Back Wall Face
-        [-2.0, -1.5,  2.0], [ 2.0, -1.5,  2.0], [ 2.0,  1.5, -2.0], [-2.0,  1.5, -2.0], // Sloped Face
-        [-2.0, -1.5,  2.0], [-2.0, -1.5, -2.0], [-2.0,  1.5, -2.0],                     // Left Triangle
-        [ 2.0, -1.5,  2.0], [ 2.0, -1.5, -2.0], [ 2.0,  1.5, -2.0],                     // Right Triangle
+        [-2.0, -1.5,  2.0], [ 2.0, -1.5,  2.0], [ 2.0, -1.5, -2.0], [-2.0, -1.5, -2.0],
+        [ 2.0, -1.5, -2.0], [-2.0, -1.5, -2.0], [-2.0,  1.5, -2.0], [ 2.0,  1.5, -2.0],
+        [-2.0, -1.5,  2.0], [ 2.0, -1.5,  2.0], [ 2.0,  1.5, -2.0], [-2.0,  1.5, -2.0],
+        [-2.0, -1.5,  2.0], [-2.0, -1.5, -2.0], [-2.0,  1.5, -2.0],
+        [ 2.0, -1.5,  2.0], [ 2.0, -1.5, -2.0], [ 2.0,  1.5, -2.0],
     ];
     
     let normals = vec![
@@ -113,11 +113,11 @@ pub fn create_ramp_mesh() -> Mesh {
     ];
     
     let indices = vec![
-        0, 2, 1,  0, 3, 2,       // Bottom
-        4, 6, 5,  4, 7, 6,       // Back
-        8, 9, 10,  8, 10, 11,    // Slope
-        12, 14, 13,              // Left
-        15, 16, 17,              // Right
+        0, 2, 1,  0, 3, 2,
+        4, 6, 5,  4, 7, 6,
+        8, 9, 10,  8, 10, 11,
+        12, 14, 13,
+        15, 16, 17,
     ];
 
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
@@ -163,7 +163,6 @@ pub fn toggle_build_mode(
             }
         }
 
-        // Architectural Note: Q and E allow rotating the hologram in 90-degree steps.
         if keys.just_pressed(KeyCode::KeyQ) {
             build_state.rotation_steps = (build_state.rotation_steps + 1) % 4;
         }
@@ -181,7 +180,7 @@ pub fn update_build_hologram(
     spatial_query: SpatialQuery,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut hologram_query: Query<(Entity, &mut Transform), With<BuildHologram>>,
+    mut hologram_query: Query<(Entity, &mut Transform, &Handle<StandardMaterial>), With<BuildHologram>>,
     structure_query: Query<&NetworkStructure>,
     children_query: Query<&Children>,
     socket_query: Query<(&GlobalTransform, &Socket)>,
@@ -195,8 +194,8 @@ pub fn update_build_hologram(
     let ray_origin = cam_t.translation();
     let ray_dir = cam_t.forward();
 
-    let hologram_entity = if let Ok((entity, _)) = hologram_query.get_single() {
-        entity
+    let (hologram_entity, mat_handle) = if let Ok((entity, _, mat)) = hologram_query.get_single() {
+        (entity, mat.clone())
     } else {
         let mesh = match build_state.selected_piece {
             ModularPieceType::Foundation => meshes.add(Cuboid::new(4.0, 1.0, 4.0)),
@@ -213,10 +212,11 @@ pub fn update_build_hologram(
             ..default()
         });
 
-        commands.spawn((
-            PbrBundle { mesh, material, ..default() },
+        let entity = commands.spawn((
+            PbrBundle { mesh, material: material.clone(), ..default() },
             BuildHologram,
-        )).id()
+        )).id();
+        (entity, material)
     };
 
     let mut filter = SpatialQueryFilter::default();
@@ -236,7 +236,6 @@ pub fn update_build_hologram(
     let mut target_parent_id = None;
     let mut snapped = false;
 
-    // Architectural Note: Calculate manual user rotation offset applied via Q/E
     let manual_rotation_offset = Quat::from_rotation_y(build_state.rotation_steps as f32 * std::f32::consts::FRAC_PI_2);
 
     if let Some(hit) = ray_hit {
@@ -256,7 +255,6 @@ pub fn update_build_hologram(
                             closest_dist = dist;
                             target_transform.translation = socket_t.translation();
                             let (_, rotation, _) = socket_t.to_scale_rotation_translation();
-                            // Apply the manual Q/E rotation ON TOP OF the socket's defined rotation.
                             target_transform.rotation = rotation * manual_rotation_offset; 
                             snapped = true;
                         }
@@ -281,11 +279,22 @@ pub fn update_build_hologram(
         target_transform.rotation = Quat::IDENTITY * manual_rotation_offset;
     }
 
-    if let Ok((_, mut transform)) = hologram_query.get_mut(hologram_entity) {
+    // Architectural Note: Quality-of-Play Snapping Indicator Visual
+    // Update hologram material color: Green if snapped to parent or grounded, Red if invalid.
+    let is_valid_placement = snapped || build_state.selected_piece == ModularPieceType::Foundation;
+    if let Some(mat) = materials.get_mut(&mat_handle) {
+        mat.base_color = if is_valid_placement {
+            Color::srgba(0.2, 0.9, 0.2, 0.5)
+        } else {
+            Color::srgba(0.9, 0.2, 0.2, 0.5)
+        };
+    }
+
+    if let Ok((_, mut transform, _)) = hologram_query.get_mut(hologram_entity) {
         *transform = target_transform;
     }
 
-    if mouse_buttons.just_pressed(MouseButton::Left) {
+    if mouse_buttons.just_pressed(MouseButton::Left) && is_valid_placement {
         let pos = target_transform.translation;
         let rot = target_transform.rotation;
         let piece_name = build_state.selected_piece.name().to_string();

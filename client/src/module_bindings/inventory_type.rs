@@ -11,6 +11,7 @@ use super::inventory_slot_type::InventorySlot;
 pub struct Inventory {
     pub entity_id: u64,
     pub slots: Vec<InventorySlot>,
+    pub discovered_items: Vec<String>,
 }
 
 impl __sdk::InModule for Inventory {
@@ -23,6 +24,7 @@ impl __sdk::InModule for Inventory {
 pub struct InventoryCols {
     pub entity_id: __sdk::__query_builder::Col<Inventory, u64>,
     pub slots: __sdk::__query_builder::Col<Inventory, Vec<InventorySlot>>,
+    pub discovered_items: __sdk::__query_builder::Col<Inventory, Vec<String>>,
 }
 
 impl __sdk::__query_builder::HasCols for Inventory {
@@ -31,6 +33,7 @@ impl __sdk::__query_builder::HasCols for Inventory {
         InventoryCols {
             entity_id: __sdk::__query_builder::Col::new(table_name, "entity_id"),
             slots: __sdk::__query_builder::Col::new(table_name, "slots"),
+            discovered_items: __sdk::__query_builder::Col::new(table_name, "discovered_items"),
         }
     }
 }

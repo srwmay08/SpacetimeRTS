@@ -10,6 +10,28 @@ use crate::module_bindings::set_camera_mode_reducer::set_camera_mode;
 use crate::module_bindings::set_interior_culling_reducer::set_interior_culling;
 
 // ----------------------------------------------------------------------------
+// CAMERA BLENDING RESOURCE
+// ----------------------------------------------------------------------------
+#[derive(Resource)]
+pub struct CameraTransitionState {
+    pub is_transitioning: bool,
+    pub timer: Timer,
+    pub start_pos: Vec3,
+    pub target_pos: Vec3,
+}
+
+impl Default for CameraTransitionState {
+    fn default() -> Self {
+        Self {
+            is_transitioning: false,
+            timer: Timer::from_seconds(0.35, TimerMode::Once),
+            start_pos: Vec3::ZERO,
+            target_pos: Vec3::ZERO,
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
 // PERSPECTIVE TOGGLING & CULLING
 // ----------------------------------------------------------------------------
 
@@ -22,6 +44,7 @@ pub fn toggle_perspective(
     mut rts_rig_query: Query<&mut BevyTransform, (With<RtsCameraRig>, Without<PlayerBody>)>,
     conn: Res<SpacetimeConnection>,
     mut culling_state: ResMut<NetworkCullingState>, 
+    mut transition: ResMut<CameraTransitionState>,
 ) {
     if keys.just_pressed(KeyCode::KeyV) {
         let Ok(mut window) = window_query.get_single_mut() else { return; };
@@ -31,6 +54,11 @@ pub fn toggle_perspective(
         match state.get() {
             CameraMode::FPS => {
                 next_state.set(CameraMode::RTS);
+                transition.is_transitioning = true;
+                transition.timer.reset();
+                transition.start_pos = player_transform.translation;
+                transition.target_pos = player_transform.translation + Vec3::new(0.0, 40.0, 25.0);
+
                 rig_transform.translation = player_transform.translation;
                 window.cursor.grab_mode = CursorGrabMode::None;
                 window.cursor.visible = true;
@@ -52,6 +80,26 @@ pub fn toggle_perspective(
                 culling_state.needs_rebuild = true;
                 info!("Camera Mode: FPS. Contracting network culling bounds to 1 chunk.");
             }
+        }
+    }
+}
+
+pub fn update_camera_transition(
+    time: Res<Time>,
+    mut transition: ResMut<CameraTransitionState>,
+    mut rts_cam: Query<&mut BevyTransform, With<RtsCameraChild>>,
+) {
+    if transition.is_transitioning {
+        transition.timer.tick(time.delta());
+        let t = transition.timer.fraction();
+        let ease = 1.0 - (1.0 - t).powi(3);
+
+        if let Ok(mut cam_t) = rts_cam.get_single_mut() {
+            cam_t.translation = transition.start_pos.lerp(transition.target_pos, ease);
+        }
+
+        if transition.timer.just_finished() {
+            transition.is_transitioning = false;
         }
     }
 }
@@ -126,7 +174,10 @@ pub fn rts_camera_controller(
     mut scroll_evts: EventReader<MouseWheel>,
     mut rig_query: Query<&mut BevyTransform, With<RtsCameraRig>>,
     mut child_camera_query: Query<&mut BevyTransform, (With<RtsCameraChild>, Without<RtsCameraRig>)>,
+    transition: Res<CameraTransitionState>,
 ) {
+    if transition.is_transitioning { return; }
+
     let Ok(mut rig_transform) = rig_query.get_single_mut() else { return; };
     let Ok(mut cam_transform) = child_camera_query.get_single_mut() else { return; };
     let Ok(window) = window_query.get_single() else { return; };
@@ -143,9 +194,6 @@ pub fn rts_camera_controller(
         let width = window.width();
         let height = window.height();
         
-        // Architectural Note: Reduced panning margin from a massive 5% of the screen width 
-        // to a strict 5-pixel boundary. This prevents the camera from panning accidentally 
-        // when attempting to click the action bar UI at the bottom of the screen.
         let margin_x = 5.0;
         let margin_y = 5.0;
 
@@ -177,10 +225,25 @@ pub fn fps_look(
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>, 
     keys: Res<ButtonInput<KeyCode>>,
+    inv_query: Query<&Style, With<InventoryUiRoot>>,
+    build_menu_query: Query<&Style, With<BuildMenuRoot>>,
 ) {
     let Ok(mut window) = window_query.get_single_mut() else { return; };
     let Ok(mut body_transform) = body_query.get_single_mut() else { return; };
     let Ok(mut head_transform) = head_query.get_single_mut() else { return; };
+
+    // Architectural Note: Suspend FPS mouse lock if any modal interface is currently open
+    let is_inventory_open = inv_query.get_single().map_or(false, |s| s.display != Display::None);
+    let is_build_menu_open = build_menu_query.get_single().map_or(false, |s| s.display != Display::None);
+    let ui_active = is_inventory_open || is_build_menu_open;
+
+    if ui_active {
+        if window.cursor.grab_mode != CursorGrabMode::None {
+            window.cursor.grab_mode = CursorGrabMode::None;
+            window.cursor.visible = true;
+        }
+        return;
+    }
 
     if mouse_buttons.just_pressed(MouseButton::Left) {
         window.cursor.grab_mode = CursorGrabMode::Locked;
@@ -192,12 +255,6 @@ pub fn fps_look(
     }
 
     if window.cursor.grab_mode == CursorGrabMode::Locked {
-        
-        // Architectural Note: Remote Desktop Protocol (RDP) / VNC mitigation.
-        // When playing remotely, the host OS sends absolute cursor positions, which winit
-        // translates into fake MouseMotion. If the invisible OS cursor hits the physical screen edge, 
-        // MouseMotion dies, causing the "180-degree spin limit". Forcing the cursor to the 
-        // center every frame prevents the absolute coordinates from ever hitting the bounds.
         let center_x = window.width() / 2.0;
         let center_y = window.height() / 2.0;
         window.set_cursor_position(Some(Vec2::new(center_x, center_y)));
@@ -205,9 +262,6 @@ pub fn fps_look(
         for event in mouse_motion.read() {
             body_transform.rotate_y(-event.delta.x * 0.002);
             
-            // Architectural Note: Replaced `to_euler` yaw/pitch/roll extraction with pure 
-            // pitch logic. Rebuilding quaternions from Euler angles can suffer from gimbal 
-            // lock and floating point flipping at steep angles. We strictly enforce local X-axis rotation.
             let mut current_pitch = head_transform.rotation.to_euler(EulerRot::YXZ).1;
             let min_pitch = -89.0_f32.to_radians();
             let max_pitch = 89.0_f32.to_radians();

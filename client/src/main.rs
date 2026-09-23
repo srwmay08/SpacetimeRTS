@@ -1,8 +1,6 @@
 // ----------------------------------------------------------------------------
 // APP CONFIGURATION & SYSTEM SCHEDULING
 // ----------------------------------------------------------------------------
-// Architectural Note: Grouping module declarations, imports, and the primary 
-// Bevy app builder to comply with AI structural boundary rules.
 mod module_bindings;
 mod core;
 mod components;
@@ -18,6 +16,7 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::core::*;
+use crate::components::*;
 use crate::network::*;
 use crate::input::*;
 use crate::camera::*;
@@ -40,6 +39,9 @@ fn main() {
         .insert_resource(SelectionState::default())
         .insert_resource(BuildModeState::default())
         .insert_resource(NetworkCullingState::default()) 
+        .insert_resource(CameraTransitionState::default())
+        .insert_resource(ActiveItemSlot(0))
+        .insert_resource(ActiveEquippedItem(None))
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState { is_swinging: false, timer: Timer::from_seconds(0.3, TimerMode::Once) })
         .insert_resource(AmbientLight { color: Color::srgb(1.0, 0.95, 0.9), brightness: 400.0 })
@@ -55,6 +57,8 @@ fn main() {
         .add_systems(Update, (
             track_telemetry_metrics,
             toggle_perspective,
+            update_camera_transition,
+            hotbar_input_system,
             input_router_system, 
             rts_navmesh_movement_system, 
             player_movement_system,
@@ -62,6 +66,8 @@ fn main() {
 
         .add_systems(Update, (
             context_aware_action_dispatcher,
+            handle_build_menu_selection,
+            handle_crafting_interaction,
             interior_occlusion_culling_system,
             update_infinite_terrain_chunks
         ).run_if(in_state(GameState::InGame)))
@@ -79,15 +85,17 @@ fn main() {
             toggle_build_mode, 
             update_build_hologram, 
             update_build_ui, 
-            update_interaction_prompt, // <-- Add this system here
+            update_hotbar_ui,
+            update_hud_health_bar,
+            update_interaction_prompt,
             animate_view_model, 
             update_inventory_ui, 
             toggle_inventory_ui,
             process_combat_events, 
             tick_particles,
             visualize_selection,
-            action_bar_interaction,       // Architectural Note: Registers the RTS command bar click responder.
-            toggle_action_bar_visibility  // Architectural Note: Hides the command bar when switching to FPS culling mode.
+            action_bar_interaction,       
+            toggle_action_bar_visibility  
         ).run_if(in_state(GameState::InGame)))    
 
         .add_systems(Update, fps_look.run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
@@ -100,11 +108,6 @@ fn main() {
         .run();
 }
 
-// ----------------------------------------------------------------------------
-// TELEMETRY & UTILITY SYSTEMS
-// ----------------------------------------------------------------------------
-// Architectural Note: Isolating utility systems to maintain clear boundaries 
-// from core app initialization.
 fn track_telemetry_metrics(time: Res<Time>, mut telemetry: ResMut<TelemetryTracker>) {
     telemetry.last_frame_time = time.elapsed_seconds_f64();
 }
