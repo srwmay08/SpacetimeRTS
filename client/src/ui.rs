@@ -475,11 +475,14 @@ pub fn handle_crafting_interaction(
     }
 }
 
+// Architectural Note: Disjoint Hotbar Text Queries
+// Mutually exclusive filters (Without<HotbarSlotCount> and Without<HotbarSlotName>)
+// prevent Bevy B0001 mutable aliasing query conflicts.
 pub fn update_hotbar_ui(
     conn: Res<SpacetimeConnection>,
     active_slot: Res<ActiveItemSlot>,
     mut slot_q: Query<(&HotbarSlotUi, &mut BorderColor, &mut BackgroundColor)>,
-    mut name_q: Query<(&mut Text, &HotbarSlotName)>,
+    mut name_q: Query<(&mut Text, &HotbarSlotName), Without<HotbarSlotCount>>,
     mut count_q: Query<(&mut Text, &HotbarSlotCount), Without<HotbarSlotName>>,
 ) {
     let Some(identity) = &conn.identity else { return; };
@@ -686,10 +689,14 @@ pub fn toggle_inventory_ui(
     }
 }
 
+// Architectural Note: Disjoint Inventory Text Queries
+// Adding Without<InventorySlotCount> to name_q and Without<InventorySlotName> to count_q
+// guarantees to Bevy's type system that Text is never concurrently aliased mutably,
+// resolving panic B0001 during system startup.
 pub fn update_inventory_ui(
     conn: Res<SpacetimeConnection>,
-    mut name_q: Query<(&mut Text, &InventorySlotName)>,
-    mut count_q: Query<(&mut Text, &InventorySlotCount), Without<HotbarSlotName>>,
+    mut name_q: Query<(&mut Text, &InventorySlotName), Without<InventorySlotCount>>,
+    mut count_q: Query<(&mut Text, &InventorySlotCount), Without<InventorySlotName>>,
 ) {
     let Some(identity) = &conn.identity else { return; };
     if let Some(player) = conn.db.db.player().identity().find(identity) {
@@ -714,9 +721,6 @@ pub fn update_inventory_ui(
     }
 }
 
-// Architectural Note: Continuous Health Bar Reconciliation.
-// Hides all floating health bars immediately whenever camera_mode != CameraMode::RTS,
-// preventing visual screen artifacts in first-person mode.
 pub fn update_floating_health_bars(
     mut commands: Commands,
     conn: Res<SpacetimeConnection>,
