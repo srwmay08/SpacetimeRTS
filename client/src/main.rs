@@ -26,7 +26,14 @@ use crate::building::*;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
+        .add_plugins((
+            DefaultPlugins,
+            PhysicsPlugins::default(),
+            // Frame time diagnostics for performance profiling
+            bevy::diagnostic::FrameTimeDiagnosticsPlugin,
+            bevy::diagnostic::EntityCountDiagnosticsPlugin,
+            bevy::diagnostic::SystemInformationDiagnosticsPlugin,
+        ))
         .add_plugins(prediction::PredictionPlugin) 
         .insert_resource(Msaa::Off)
         
@@ -107,7 +114,70 @@ fn main() {
             update_marquee_ui,
         ).run_if(in_state(CameraMode::RTS).and_then(in_state(GameState::InGame))))
         
+        // Diagnostic overlay system
+        .add_systems(Update, update_diagnostic_overlay.run_if(in_state(GameState::InGame)))
+        
         .run();
+}
+
+#[derive(Component)]
+struct DiagnosticOverlay;
+
+fn update_diagnostic_overlay(
+    mut commands: Commands,
+    diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
+    mut existing: Query<(Entity, &mut Text), With<DiagnosticOverlay>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+) {
+    // Toggle with F3 key
+    if keyboard.just_pressed(KeyCode::F3) {
+        if let Some((entity, _)) = existing.iter().next() {
+            // Despawn existing overlay
+            commands.entity(entity).despawn();
+            return;
+        } else {
+            // Spawn new overlay
+            commands.spawn((
+                TextBundle::from_section(
+                    "Loading diagnostics...",
+                    TextStyle { font_size: 14.0, color: Color::srgb(0.0, 1.0, 0.0), ..default() }
+                ).with_style(Style {
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(10.0),
+                    right: Val::Px(10.0),
+                    ..default()
+                }),
+                DiagnosticOverlay,
+            ));
+            return;
+        }
+    }
+    
+    // Update existing overlay
+    for (_, mut text) in existing.iter_mut() {
+        let mut output = String::new();
+        
+        // FPS
+        if let Some(fps) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS) {
+            if let Some(value) = fps.value() {
+                output.push_str(&format!("FPS: {:.1}\n", value));
+            }
+        }
+        // Frame Time
+        if let Some(frame_time) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME) {
+            if let Some(value) = frame_time.value() {
+                output.push_str(&format!("Frame: {:.2}ms\n", value));
+            }
+        }
+        // Entity Count
+        if let Some(entities) = diagnostics.get(&bevy::diagnostic::EntityCountDiagnosticsPlugin::ENTITY_COUNT) {
+            if let Some(value) = entities.value() {
+                output.push_str(&format!("Entities: {:.0}\n", value));
+            }
+        }
+        
+        text.sections[0].value = output;
+    }
 }
 
 fn track_telemetry_metrics(time: Res<Time>, mut telemetry: ResMut<TelemetryTracker>) {
