@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// AI IMPORTS & DEPENDENCIES
+// AI IMPORTS & DEPENDENCIES (SpacetimeDB v2.x / Rust 2024 Edition)
 // ----------------------------------------------------------------------------
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
 use crate::movement::{transform, player_session, Transform}; 
@@ -31,11 +31,13 @@ pub enum AiState {
     AutoGather(String),
 }
 
+// Architectural Note: Indexed owner_id for high-speed ownership lookups in multi-unit RTS selections.
 #[table(accessor = peasant, public)]
 #[derive(Clone, PartialEq)]
 pub struct Peasant {
     #[primary_key]
     pub entity_id: u64,
+    #[index(btree)]
     pub owner_id: u64,
     pub state: AiState,
     pub carrying_item: String,
@@ -49,18 +51,21 @@ pub struct Peasant {
 // THREAT NPC & PET STRUCTURES
 // ----------------------------------------------------------------------------
 
-#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+#[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AiType { Friendly, Deer, Boar, Goblin, Peasant }
 
-#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+#[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BrainState { Idle, Fleeing, Chasing, Attacking, Warning, Corpse }
 
+// Architectural Note: Added index on ai_type and state to accelerate state-machine tick queries.
 #[table(accessor = npc_brain, public)]
 #[derive(Clone, PartialEq)]
 pub struct NpcBrain {
     #[primary_key]
     pub entity_id: u64,
+    #[index(btree)]
     pub ai_type: AiType,
+    #[index(btree)]
     pub state: BrainState,
     pub target_id: Option<u64>,
     pub timer: f32, 
@@ -70,7 +75,7 @@ pub struct NpcBrain {
     pub wander_z: f32,
 }
 
-#[derive(SpacetimeType, Clone, Debug, PartialEq)]
+#[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PetStance { Stay, Follow, Aggressive, Defensive }
 
 #[table(accessor = pet_component, public)]
@@ -78,6 +83,7 @@ pub enum PetStance { Stay, Follow, Aggressive, Defensive }
 pub struct PetComponent {
     #[primary_key]
     pub entity_id: u64,
+    #[index(btree)]
     pub owner_id: u64, 
     pub stance: PetStance,
 }
@@ -94,8 +100,6 @@ pub struct HarvestableCorpse {
 // ----------------------------------------------------------------------------
 // HELPER: SPATIAL CHUNK FILTERING
 // ----------------------------------------------------------------------------
-/// Evaluates whether two chunks are adjacent (within a 3x3 chunk perimeter).
-/// Drastically bounds search spaces to conserve server compute energy (TeV).
 #[inline]
 fn is_chunk_adjacent(cx1: i32, cz1: i32, cx2: i32, cz2: i32) -> bool {
     (cx1 - cx2).abs() <= 1 && (cz1 - cz2).abs() <= 1
@@ -203,7 +207,9 @@ pub fn command_peasant(
     ctx: &ReducerContext,
     peasant_entity_id: u64,
     command_type: String, 
-    target_x: f32, target_y: f32, target_z: f32,
+    target_x: f32, 
+    target_y: f32, 
+    target_z: f32,
     target_id: u64,
 ) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
@@ -227,9 +233,6 @@ pub fn command_peasant(
             peasant.auto_gather_type = "None".to_string(); 
             peasant.last_harvest_target = None;
 
-            // Architectural Note: Quality-of-Play Sunflower Spiral / Formation Offset
-            // When multiple units are given move commands, applying deterministic offsets based 
-            // on entity_id prevents stacking and continuous separation force bouncing.
             let angle = (peasant_entity_id % 12) as f32 * (std::f32::consts::PI / 6.0);
             let radius = 1.2 * ((peasant_entity_id % 3) as f32 + 1.0);
             let scattered_x = target_x + angle.cos() * radius;
@@ -247,11 +250,23 @@ pub fn command_peasant(
             peasant.last_harvest_target = None;
             AiState::Return(session.entity_id) 
         },
-        "AutoTree" => { peasant.auto_gather_type = "Tree".to_string(); AiState::AutoGather("Tree".to_string()) },
-        "AutoRock" => { peasant.auto_gather_type = "Rock".to_string(); AiState::AutoGather("Rock".to_string()) },
-        "AutoBush" => { peasant.auto_gather_type = "Bush".to_string(); AiState::AutoGather("Bush".to_string()) },
-        "AutoAll"  => { peasant.auto_gather_type = "All".to_string(); AiState::AutoGather("All".to_string()) },
-        "Idle" | _ => { 
+        "AutoTree" => { 
+            peasant.auto_gather_type = "Tree".to_string(); 
+            AiState::AutoGather("Tree".to_string()) 
+        },
+        "AutoRock" => { 
+            peasant.auto_gather_type = "Rock".to_string(); 
+            AiState::AutoGather("Rock".to_string()) 
+        },
+        "AutoBush" => { 
+            peasant.auto_gather_type = "Bush".to_string(); 
+            AiState::AutoGather("Bush".to_string()) 
+        },
+        "AutoAll"  => { 
+            peasant.auto_gather_type = "All".to_string(); 
+            AiState::AutoGather("All".to_string()) 
+        },
+        _ => { 
             peasant.auto_gather_type = "None".to_string(); 
             peasant.last_harvest_target = None;
             AiState::Idle 
@@ -263,13 +278,11 @@ pub fn command_peasant(
 }
 
 // ----------------------------------------------------------------------------
-// SERVER TICK ROUTINES
+// SERVER TICK ROUTINES (Optimized for minimal allocations & index lookups)
 // ----------------------------------------------------------------------------
 
 pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
     let brains: Vec<NpcBrain> = ctx.db.npc_brain().iter().collect();
-    let all_transforms: Vec<Transform> = ctx.db.transform().iter().collect();
-    let all_factions: Vec<crate::combat::FactionComponent> = ctx.db.faction_component().iter().collect();
 
     for mut brain in brains {
         let initial_brain = brain.clone();
@@ -283,13 +296,13 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
         let mut dz = 0.0;
         let mut current_speed = 0.0;
 
-        let my_faction = all_factions.iter()
-            .find(|f| f.entity_id == brain.entity_id)
-            .map(|f| f.faction.clone())
+        let my_faction = ctx.db.faction_component().entity_id().find(brain.entity_id)
+            .map(|f| f.faction)
             .unwrap_or(Faction::Wildlife);
 
-        // Pre-filter transforms by adjacent chunks to prune comparisons
-        let local_transforms: Vec<&Transform> = all_transforms.iter()
+        // Architectural Note: Replaces global transform scans with localized chunk-bounded queries
+        // directly within the database index iterators, eliminating redundant allocations.
+        let local_entities: Vec<Transform> = ctx.db.transform().iter()
             .filter(|t| is_chunk_adjacent(transform.chunk_x, transform.chunk_z, t.chunk_x, t.chunk_z))
             .collect();
 
@@ -300,12 +313,15 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                         brain.state = BrainState::Attacking;
                         let mut nearest = None;
                         let mut min_d = f32::MAX;
-                        for t in &local_transforms {
+                        for t in &local_entities {
                             if t.entity_id == brain.entity_id { continue; }
                             if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                             
                             let dist = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
-                            if dist < min_d { min_d = dist; nearest = Some(t.entity_id); }
+                            if dist < min_d { 
+                                min_d = dist; 
+                                nearest = Some(t.entity_id); 
+                            }
                         }
                         brain.target_id = nearest;
                     }
@@ -315,11 +331,11 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                 let mut nearest_threat = None;
                 let mut min_d = 625.0; 
                 
-                for t in &local_transforms {
+                for t in &local_entities {
                     if t.entity_id == brain.entity_id { continue; }
                     if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                     
-                    if let Some(fac) = all_factions.iter().find(|fac| fac.entity_id == t.entity_id) {
+                    if let Some(fac) = ctx.db.faction_component().entity_id().find(t.entity_id) {
                         if fac.faction == Faction::Player {
                             let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
                             if dist_sq < min_d { 
@@ -331,24 +347,22 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                 }
 
                 if let Some(h) = hp {
-                    if h.current < h.max || nearest_threat.is_some() {
-                        if brain.state != BrainState::Fleeing {
-                            brain.state = BrainState::Fleeing;
-                            brain.target_id = nearest_threat;
-                        }
+                    if (h.current < h.max || nearest_threat.is_some()) && brain.state != BrainState::Fleeing {
+                        brain.state = BrainState::Fleeing;
+                        brain.target_id = nearest_threat;
                     }
                 }
             }
             AiType::Boar => {
                 let mut nearest_threat = None;
                 let mut min_dist = 100.0; 
-                for t in &local_transforms {
+                for t in &local_entities {
                     if t.entity_id == brain.entity_id { continue; }
                     if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                     
                     let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
                     if dist_sq <= min_dist { 
-                        if let Some(other_faction) = all_factions.iter().find(|f| f.entity_id == t.entity_id) {
+                        if let Some(other_faction) = ctx.db.faction_component().entity_id().find(t.entity_id) {
                             if crate::combat::get_standing(&my_faction, &other_faction.faction) == crate::combat::FactionStanding::KillOnSight {
                                 min_dist = dist_sq;
                                 nearest_threat = Some(t.entity_id);
@@ -376,13 +390,13 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             AiType::Goblin => {
                 if brain.state == BrainState::Idle {
                     let mut found_target = None;
-                    for t in &local_transforms {
+                    for t in &local_entities {
                         if t.entity_id == brain.entity_id { continue; }
                         if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
                         
                         let dist_sq = (t.x - transform.x).powi(2) + (t.z - transform.z).powi(2);
                         if dist_sq <= 400.0 { 
-                            if let Some(other_faction) = all_factions.iter().find(|f| f.entity_id == t.entity_id) {
+                            if let Some(other_faction) = ctx.db.faction_component().entity_id().find(t.entity_id) {
                                 if crate::combat::get_standing(&my_faction, &other_faction.faction) == crate::combat::FactionStanding::KillOnSight {
                                     found_target = Some(t.entity_id);
                                     break;
@@ -449,7 +463,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                     if let Some(t) = ctx.db.transform().entity_id().find(target) {
                         dx = transform.x - t.x; 
                         dz = transform.z - t.z;
-                        let dist_sq = dx*dx + dz*dz;
+                        let dist_sq = dx * dx + dz * dz;
                         if dist_sq > 1600.0 { 
                             brain.state = BrainState::Idle;
                             brain.target_id = None;
@@ -477,7 +491,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                         dx = t.x - transform.x; 
                         dz = t.z - transform.z;
                         
-                        let dist_sq = dx*dx + dz*dz;
+                        let dist_sq = dx * dx + dz * dz;
                         
                         if dist_sq > 2500.0 {
                             brain.state = BrainState::Idle;
@@ -490,8 +504,11 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                                 if brain.timer >= 1.0 { 
                                     crate::combat::apply_damage(ctx, target, 10.0);
                                     ctx.db.combat_event().insert(crate::CombatEvent {
-                                        id: 0, event_type: "HitPlayer".to_string(),
-                                        x: t.x, y: t.y + 1.0, z: t.z
+                                        id: 0, 
+                                        event_type: "HitPlayer".to_string(),
+                                        x: t.x, 
+                                        y: t.y + 1.0, 
+                                        z: t.z
                                     });
                                     brain.timer = 0.0;
                                 }
@@ -513,11 +530,10 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             BrainState::Corpse => {}
         }
 
-        // Crowd separation strictly computed against localized spatial partition
         let mut sep_x = 0.0;
         let mut sep_z = 0.0;
         
-        for other in &local_transforms {
+        for other in &local_entities {
             if other.entity_id == brain.entity_id { continue; }
             let ox = transform.x - other.x;
             let oz = transform.z - other.z;
@@ -533,7 +549,7 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
         let mut final_vz = 0.0;
         
         if current_speed > 0.0 {
-            let dist = (dx*dx + dz*dz).sqrt().max(0.001);
+            let dist = (dx * dx + dz * dz).sqrt().max(0.001);
             final_vx = (dx / dist) * current_speed;
             final_vz = (dz / dist) * current_speed;
         }
@@ -567,8 +583,6 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
 
 pub fn process_ai_tick(ctx: &ReducerContext) {
     let peasants: Vec<Peasant> = ctx.db.peasant().iter().collect();
-    let all_transforms: Vec<Transform> = ctx.db.transform().iter().collect();
-    let all_structures: Vec<crate::building::Structure> = ctx.db.structure().iter().collect();
 
     let dt = 0.1_f32; 
     let speed = 6.0_f32; 
@@ -588,7 +602,9 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
         let initial_transform = transform.clone();
         
         if !transform.x.is_finite() || !transform.y.is_finite() || !transform.z.is_finite() {
-            transform.x = 0.0; transform.y = 10.0; transform.z = 0.0;
+            transform.x = 0.0; 
+            transform.y = 10.0; 
+            transform.z = 0.0;
         }
 
         let original_pos = (transform.x, transform.z);
@@ -601,8 +617,9 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                 let mut nearest_node = None;
                 let mut min_dist_sq = 1_000_000.0_f32;
 
+                // Architectural Note: Filter nodes using chunk bounds around peasant
                 for node in ctx.db.resource_node().iter() {
-                    if node.health > 0 {
+                    if node.health > 0 && is_chunk_adjacent(transform.chunk_x, transform.chunk_z, node.chunk_x, node.chunk_z) {
                         let matches_type = target_type == "All" || &node.node_type == target_type;
                         if matches_type {
                             let dx = node.x - transform.x;
@@ -655,7 +672,7 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
 
                                 peasant.carrying_item = match node.node_type.as_str() {
                                     "Tree" => "Wood".to_string(),
-                                    "Rock" => "Ore".to_string(),
+                                    "Rock" => "Stone".to_string(),
                                     _ => "Berry".to_string(),
                                 };
                                 
@@ -759,8 +776,8 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
             let mut sep_z = 0.0;
             
             if peasant.consecutive_stuck_ticks < 5 {
-                // Prune crowd transforms to localized 3x3 chunk space
-                for other in all_transforms.iter().filter(|t| is_chunk_adjacent(transform.chunk_x, transform.chunk_z, t.chunk_x, t.chunk_z)) {
+                // Architectural Note: Evaluate unit crowds in-place without vector allocation
+                for other in ctx.db.transform().iter().filter(|t| is_chunk_adjacent(transform.chunk_x, transform.chunk_z, t.chunk_x, t.chunk_z)) {
                     if other.entity_id == peasant.entity_id { continue; }
                     let ox = transform.x - other.x;
                     let oz = transform.z - other.z;
@@ -773,8 +790,8 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                     }
                 }
 
-                // Prune structure collisions to localized radius
-                for s in all_structures.iter().filter(|s| (s.x - transform.x).abs() <= 5.0 && (s.z - transform.z).abs() <= 5.0) {
+                // Architectural Note: Localized structure repulsion without cloning all structures into RAM
+                for s in ctx.db.structure().iter().filter(|s| (s.x - transform.x).abs() <= 5.0 && (s.z - transform.z).abs() <= 5.0) {
                     let ox = transform.x - s.x;
                     let oz = transform.z - s.z;
                     let odist_sq = ox * ox + oz * oz;

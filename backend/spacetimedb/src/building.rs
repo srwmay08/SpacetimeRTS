@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// BUILDING CORE STRUCTURES & IMPORTS
+// BUILDING CORE STRUCTURES & IMPORTS (SpacetimeDB v2.x / Rust 2024 Edition)
 // ----------------------------------------------------------------------------
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
 use crate::movement::player_session;
@@ -9,6 +9,7 @@ use crate::combat_event;
 use crate::nav_event;
 use crate::player_perspective; 
 use crate::waypoint;
+use crate::CameraModeType;
 
 #[derive(SpacetimeType, Clone, Debug)]
 pub struct SocketDef {
@@ -18,21 +19,22 @@ pub struct SocketDef {
     pub offset_z: f32,
 }
 
+// Architectural Note: Added BTree indexes on parent_id and owner_id to optimize
+// structural collapse recursions and ownership permission verification.
 #[table(accessor = structure, public)]
 #[derive(Clone)]
 pub struct Structure {
     #[primary_key] #[auto_inc]
     pub structure_id: u64,
+    #[index(btree)]
     pub parent_id: Option<u64>, 
     pub piece_type: String,
     pub stability: u32,         
     pub is_grounded: bool,      
     
-    // Architectural Note: Commander Blueprints vs Field Construction logic
     pub is_blueprint: bool,
     pub construction_progress: u32,
     
-    // Architectural Note: Durability and Structure Combat
     pub current_health: f32,
     pub max_health: f32,
     
@@ -43,6 +45,7 @@ pub struct Structure {
     pub rot_y: f32,
     pub rot_z: f32,
     pub rot_w: f32,
+    #[index(btree)]
     pub owner_id: u64,
 }
 
@@ -81,8 +84,13 @@ pub fn place_structure(
     ctx: &ReducerContext,
     parent_id: Option<u64>, 
     piece_type: String,
-    x: f32, y: f32, z: f32,
-    rot_x: f32, rot_y: f32, rot_z: f32, rot_w: f32,
+    x: f32, 
+    y: f32, 
+    z: f32,
+    rot_x: f32, 
+    rot_y: f32, 
+    rot_z: f32, 
+    rot_w: f32,
 ) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
         .ok_or_else(|| "Unauthorized: No active session".to_string())?;
@@ -90,8 +98,7 @@ pub fn place_structure(
     let perspective = ctx.db.player_perspective().entity_id().find(session.entity_id)
         .ok_or_else(|| "Perspective not found".to_string())?;
 
-    // Allow placement if in RTS mode OR if holding a Hammer in FPS mode
-    let is_fps_builder = if perspective.camera_mode == "FPS" {
+    let is_fps_builder = if perspective.camera_mode == CameraModeType::Fps {
         if let Some(inv) = ctx.db.inventory().entity_id().find(session.entity_id) {
             inv.slots.iter().any(|s| s.item_type == "Hammer" && s.count > 0)
         } else {
@@ -101,7 +108,7 @@ pub fn place_structure(
         true
     };
 
-    if !is_fps_builder && perspective.camera_mode != "RTS" {
+    if !is_fps_builder && perspective.camera_mode != CameraModeType::Rts {
         return Err("Building blueprints requires RTS Mode or an equipped Hammer.".to_string());
     }
 
@@ -162,8 +169,13 @@ pub fn place_structure(
         piece_type: piece_type.clone(),
         stability, 
         is_grounded, 
-        x, y, z, 
-        rot_x, rot_y, rot_z, rot_w, 
+        x, 
+        y, 
+        z, 
+        rot_x, 
+        rot_y, 
+        rot_z, 
+        rot_w, 
         owner_id: session.entity_id,
         is_blueprint: true, 
         construction_progress: 0,
@@ -174,7 +186,9 @@ pub fn place_structure(
     ctx.db.waypoint().insert(crate::Waypoint {
         waypoint_id: 0,
         commander_id: session.entity_id,
-        x, y: y + 2.0, z,
+        x, 
+        y: y + 2.0, 
+        z,
         order_type: "Build".to_string(),
         expires_at: ctx.timestamp.to_micros_since_unix_epoch() as u64 + 120_000_000, 
     });
@@ -240,8 +254,12 @@ pub fn contribute_construction(ctx: &ReducerContext, structure_id: u64) -> Resul
         
         ctx.db.nav_event().insert(crate::NavEvent {
             id: 0,
-            min_x: structure.x - 3.0, min_y: structure.y - 3.0, min_z: structure.z - 3.0,
-            max_x: structure.x + 3.0, max_y: structure.y + 3.0, max_z: structure.z + 3.0,
+            min_x: structure.x - 3.0, 
+            min_y: structure.y - 3.0, 
+            min_z: structure.z - 3.0,
+            max_x: structure.x + 3.0, 
+            max_y: structure.y + 3.0, 
+            max_z: structure.z + 3.0,
         });
     }
     
@@ -250,8 +268,6 @@ pub fn contribute_construction(ctx: &ReducerContext, structure_id: u64) -> Resul
     Ok(())
 }
 
-/// Architectural Note: Authoritative Structure Repair
-/// Wielding a hammer allows players to restore a structure's health to max without extra cost.
 #[reducer]
 pub fn repair_structure(ctx: &ReducerContext, structure_id: u64) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
@@ -287,7 +303,7 @@ pub fn repair_structure(ctx: &ReducerContext, structure_id: u64) -> Result<(), S
         z: structure.z,
     });
 
-    log::info!("Player {} repaired structure {}", session.entity_id, structure_id);
+    log::debug!("Player {} repaired structure {}", session.entity_id, structure_id);
     Ok(())
 }
 
@@ -295,21 +311,16 @@ pub fn damage_structure(ctx: &ReducerContext, structure_id: u64, amount: f32) {
     if let Some(mut structure) = ctx.db.structure().structure_id().find(structure_id) {
         structure.current_health = (structure.current_health - amount).max(0.0);
         if structure.current_health <= 0.0 {
-            let _ = destroy_structure(ctx, structure_id);
+            let _ = destroy_structure_internal(ctx, structure_id);
         } else {
             ctx.db.structure().structure_id().update(structure);
         }
     }
 }
 
-#[reducer]
-pub fn destroy_structure(
-    ctx: &ReducerContext,
-    target_structure_id: u64
-) -> Result<(), String> {
-    let _session = ctx.db.player_session().identity().find(ctx.sender())
-        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
-
+// Architectural Note: Separated public client RPC from recursive internal demolition
+// to avoid identity validation checks on environmental collapses.
+pub fn destroy_structure_internal(ctx: &ReducerContext, target_structure_id: u64) -> Result<(), String> {
     let mut collapse_queue = vec![target_structure_id];
     let mut index = 0;
 
@@ -335,10 +346,25 @@ pub fn destroy_structure(
 
             ctx.db.nav_event().insert(crate::NavEvent {
                 id: 0,
-                min_x: structure.x - 3.0, min_y: structure.y - 3.0, min_z: structure.z - 3.0,
-                max_x: structure.x + 3.0, max_y: structure.y + 3.0, max_z: structure.z + 3.0,
+                min_x: structure.x - 3.0, 
+                min_y: structure.y - 3.0, 
+                min_z: structure.z - 3.0,
+                max_x: structure.x + 3.0, 
+                max_y: structure.y + 3.0, 
+                max_z: structure.z + 3.0,
             });
         }
     }
     Ok(())
+}
+
+#[reducer]
+pub fn destroy_structure(
+    ctx: &ReducerContext,
+    target_structure_id: u64
+) -> Result<(), String> {
+    let _session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session".to_string())?;
+
+    destroy_structure_internal(ctx, target_structure_id)
 }

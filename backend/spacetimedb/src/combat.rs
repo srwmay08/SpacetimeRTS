@@ -1,5 +1,5 @@
 // ----------------------------------------------------------------------------
-// COMBAT MODULE & AUTHORITATIVE RESOLUTION
+// COMBAT MODULE & AUTHORITATIVE RESOLUTION (SpacetimeDB v2.x / Rust 2024)
 // ----------------------------------------------------------------------------
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
 use crate::movement::player_session;
@@ -8,8 +8,6 @@ use crate::combat_event;
 use crate::movement::transform;
 use crate::inventory;
 use crate::ai::{npc_brain, pet_component, peasant, harvestable_corpse};
-
-// Architectural Note: Bringing table traits into scope to resolve E0599 on ctx.db
 use crate::building::structure;
 
 // ----------------------------------------------------------------------------
@@ -41,15 +39,16 @@ pub struct Health {
     pub max: f32,
 }
 
-#[derive(SpacetimeType, Clone, Debug, PartialEq, Eq)]
+#[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Faction {
+    #[default]
     Player,
     Villager, 
     Wildlife, 
     Goblin,   
 }
 
-#[derive(SpacetimeType, Clone, Debug, PartialEq, Eq)]
+#[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FactionStanding {
     Ally,
     Neutral,
@@ -127,7 +126,7 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
                 ctx.db.transform().entity_id().update(transform);
             }
 
-            log::info!("Player {} died and was respawned at origin coordinates.", target_id);
+            log::debug!("Player {} died and was respawned at origin coordinates.", target_id);
         } else {
             ctx.db.health().entity_id().delete(target_id);
             ctx.db.transform().entity_id().delete(target_id);
@@ -139,7 +138,7 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
                 ctx.db.peasant().entity_id().delete(target_id);
             }
 
-            log::info!("Entity {} reached 0 HP and was cleaned from active database tables.", target_id);
+            log::debug!("Entity {} reached 0 HP and was cleaned from active database tables.", target_id);
         }
     } else {
         ctx.db.health().entity_id().update(hp);
@@ -147,7 +146,7 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
 }
 
 // ----------------------------------------------------------------------------
-// REDUCERS
+// COMBAT REDUCERS
 // ----------------------------------------------------------------------------
 
 #[reducer]
@@ -224,8 +223,6 @@ pub fn fire_weapon(
     Ok(())
 }
 
-/// Architectural Note: Authoritative Bow & Arrow Firing Reducer
-/// Validates equipped Crude Bow and consumes an arrow from inventory.
 #[reducer]
 pub fn fire_bow(
     ctx: &ReducerContext,
@@ -277,7 +274,9 @@ pub fn fire_bow(
 
         if let Some(snap) = closest_snapshot {
             let radius = 1.0_f32;
-            let cx = snap.x; let cy = snap.y + 1.0; let cz = snap.z; 
+            let cx = snap.x; 
+            let cy = snap.y + 1.0; 
+            let cz = snap.z; 
 
             let ocx = origin_x - cx; 
             let ocy = origin_y - cy; 
@@ -307,7 +306,7 @@ pub fn fire_bow(
             y: hit_location.1,
             z: hit_location.2,
         });
-        log::info!("Entity {} shot Entity {} with {} for {} damage.", session.entity_id, target_id, arrow_type, arrow_damage);
+        log::debug!("Entity {} shot Entity {} with {} for {} damage.", session.entity_id, target_id, arrow_type, arrow_damage);
     } else {
         // Check for structure collision
         for s in ctx.db.structure().iter() {

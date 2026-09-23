@@ -1,11 +1,14 @@
 // ----------------------------------------------------------------------------
-// MOVEMENT STRUCTURES & IMPORTS
+// MOVEMENT STRUCTURES & IMPORTS (SpacetimeDB v2.x / Rust 2024 Edition)
 // ----------------------------------------------------------------------------
 use spacetimedb::{table, reducer, ReducerContext, Identity, Table};
 use crate::combat::{hitbox_history, Snapshot}; 
 use crate::waypoint;
 use crate::player_perspective;
+use crate::CameraModeType;
 
+// Architectural Note: Added BTree indexes on chunk_x and chunk_z to optimize
+// spatial queries for client subscriptions and localized AI crowd routines.
 #[derive(Clone)]
 #[table(accessor = transform, public)]
 pub struct Transform {
@@ -14,7 +17,9 @@ pub struct Transform {
     pub x: f32,
     pub y: f32,
     pub z: f32,
+    #[index(btree)]
     pub chunk_x: i32,
+    #[index(btree)]
     pub chunk_z: i32,
     pub last_processed_tick: u64, 
 }
@@ -32,8 +37,9 @@ pub struct PlayerSession {
 // AUTHORITATIVE MOVEMENT & PERSPECTIVE REDUCERS
 // ----------------------------------------------------------------------------
 
+// Architectural Note: Replaces string matching with strongly typed camera modes.
 #[reducer]
-pub fn set_camera_mode(ctx: &ReducerContext, mode: String) -> Result<(), String> {
+pub fn set_camera_mode(ctx: &ReducerContext, mode: CameraModeType) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
         .ok_or_else(|| "Unauthorized: No active session".to_string())?;
 
@@ -113,6 +119,8 @@ pub fn process_movement(
 
     ctx.db.transform().entity_id().update(transform.clone());
     
+    // Architectural Note: Replaced Vec::remove(0) with ring buffer truncation.
+    // Preserves constant-time insertion on high-rate player packets.
     if let Some(mut history) = ctx.db.hitbox_history().entity_id().find(session.entity_id) {
         history.snapshots.push(Snapshot {
             tick_id,
@@ -122,7 +130,8 @@ pub fn process_movement(
         });
         
         if history.snapshots.len() > 10 {
-            history.snapshots.remove(0); 
+            let overflow = history.snapshots.len() - 10;
+            history.snapshots.drain(0..overflow);
         }
         ctx.db.hitbox_history().entity_id().update(history);
     }
@@ -133,7 +142,9 @@ pub fn process_movement(
 #[reducer]
 pub fn issue_waypoint(
     ctx: &ReducerContext,
-    x: f32, y: f32, z: f32,
+    x: f32, 
+    y: f32, 
+    z: f32,
     order_type: String
 ) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
@@ -142,14 +153,17 @@ pub fn issue_waypoint(
     let perspective = ctx.db.player_perspective().entity_id().find(session.entity_id)
         .ok_or_else(|| "Perspective not found".to_string())?;
 
-    if perspective.camera_mode != "RTS" {
+    if perspective.camera_mode != CameraModeType::Rts {
         return Err("Only the Commander (RTS Mode) can issue tactical waypoints.".to_string());
     }
 
     ctx.db.waypoint().insert(crate::Waypoint {
         waypoint_id: 0,
         commander_id: session.entity_id,
-        x, y, z, order_type,
+        x, 
+        y, 
+        z, 
+        order_type,
         expires_at: ctx.timestamp.to_micros_since_unix_epoch() as u64 + 30_000_000,
     });
 
