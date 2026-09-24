@@ -7,13 +7,13 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct CraftItemArgs {
-    pub item_name: String,
+    pub recipe_id: String,
 }
 
 impl From<CraftItemArgs> for super::Reducer {
     fn from(args: CraftItemArgs) -> Self {
         Self::CraftItem {
-            item_name: args.item_name,
+            recipe_id: args.recipe_id,
         }
     }
 }
@@ -33,8 +33,8 @@ pub trait craft_item {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`craft_item:craft_item_then`] to run a callback after the reducer completes.
-    fn craft_item(&self, item_name: String) -> __sdk::Result<()> {
-        self.craft_item_then(item_name, |_, _| {})
+    fn craft_item(&self, recipe_id: String) -> __sdk::Result<()> {
+        self.craft_item_then(recipe_id, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `craft_item` to run as soon as possible,
@@ -45,7 +45,7 @@ pub trait craft_item {
     ///  and its status can be observed with the `callback`.
     fn craft_item_then(
         &self,
-        item_name: String,
+        recipe_id: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -56,13 +56,13 @@ pub trait craft_item {
 impl craft_item for super::RemoteReducers {
     fn craft_item_then(
         &self,
-        item_name: String,
+        recipe_id: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(CraftItemArgs { item_name }, callback)
+            .invoke_reducer_with_callback(CraftItemArgs { recipe_id }, callback)
     }
 }

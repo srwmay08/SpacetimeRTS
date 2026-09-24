@@ -9,10 +9,16 @@ use crate::building::{BuildModeState, ModularPieceType};
 use crate::module_bindings::player_table::PlayerTableAccess; 
 use crate::module_bindings::inventory_table::InventoryTableAccess; 
 use crate::module_bindings::health_table::HealthTableAccess; 
+// Architectural Note: Bringing StructureTableAccess into scope allows
+// `conn.db.db.structure()` to resolve on `RemoteTables` for workbench proximity detection.
+use crate::module_bindings::structure_table::StructureTableAccess; 
 use crate::module_bindings::craft_item_reducer::craft_item;
 use crate::module_bindings::spawn_peasant_reducer::spawn_peasant;
 use crate::module_bindings::command_peasant_reducer::command_peasant;
 use spacetimedb_sdk::Table;
+
+#[derive(Component)]
+pub struct WorkbenchHeaderStatus;
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn(Camera2dBundle {
@@ -132,7 +138,7 @@ pub fn setup_ui(mut commands: Commands) {
     });
 
     // ------------------------------------------------------------------------
-    // 3. INVENTORY & PERSONAL CRAFTING EXPANSION (Docks under Hotbar at Top-Left)
+    // 3. INVENTORY & PERSONAL / WORKBENCH CRAFTING EXPANSION
     // ------------------------------------------------------------------------
     commands.spawn((
         NodeBundle {
@@ -208,25 +214,32 @@ pub fn setup_ui(mut commands: Commands) {
                 row_gap: Val::Px(6.0),
                 padding: UiRect::all(Val::Px(10.0)),
                 border: UiRect::all(Val::Px(2.0)),
-                width: Val::Px(260.0),
+                width: Val::Px(300.0),
                 ..default()
             },
             background_color: Color::srgba(0.08, 0.08, 0.08, 0.95).into(),
             border_color: Color::srgb(0.4, 0.3, 0.15).into(),
             ..default()
         }).with_children(|crafting| {
-            crafting.spawn(TextBundle::from_section(
-                "CRAFTING RECIPES",
-                TextStyle { font_size: 14.0, color: Color::srgb(0.9, 0.8, 0.3), ..default() }
+            crafting.spawn((
+                TextBundle::from_section(
+                    "CRAFTING CATALOG",
+                    TextStyle { font_size: 14.0, color: Color::srgb(0.9, 0.8, 0.3), ..default() }
+                ),
+                WorkbenchHeaderStatus,
             ));
 
             let recipes = [
                 ("Hammer", "1 Branch, 1 Stone"),
                 ("Stone Axe", "1 Branch, 1 Flint"),
+                ("Pickaxe", "2 Branch, 2 Flint"),
                 ("Club", "2 Branch"),
                 ("Torch", "1 Branch, 1 Resin"),
                 ("Wood Arrow", "8 Wood (x20)"),
-                ("Flint Arrow", "8 Wood, 2 Flint (x20)"),
+                ("Crude Bow", "10 Wood, 4 Leather [Workbench]"),
+                ("Flint Arrow", "8 Wood, 2 Flint [Workbench]"),
+                ("Flint Spear", "5 Wood, 2 Flint [Workbench]"),
+                ("Wooden Shield", "10 Wood, 2 Leather [Workbench]"),
             ];
 
             for (item_name, cost) in recipes {
@@ -293,32 +306,38 @@ pub fn setup_ui(mut commands: Commands) {
             ..default()
         }).with_children(|menu_box| {
             menu_box.spawn(TextBundle::from_section(
-                "BUILDING CATALOG [SELECT PIECE]",
+                "BUILDING CATALOG [HAMMER BLUEPRINTS]",
                 TextStyle { font_size: 18.0, color: Color::srgb(0.9, 0.8, 0.4), ..default() }
             ));
 
             menu_box.spawn(NodeBundle {
                 style: Style {
                     flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
                     column_gap: Val::Px(10.0),
+                    row_gap: Val::Px(10.0),
+                    max_width: Val::Px(450.0),
+                    justify_content: JustifyContent::Center,
                     ..default()
                 },
                 ..default()
             }).with_children(|grid| {
                 let pieces = [
                     (ModularPieceType::Foundation, "Foundation", "20 Wood"),
-                    (ModularPieceType::Wall, "Wall", "10 Wood"),
-                    (ModularPieceType::Floor, "Floor", "15 Wood"),
-                    (ModularPieceType::Roof, "Roof", "15 Wood"),
-                    (ModularPieceType::Ramp, "Ramp", "20 Wood"),
+                    (ModularPieceType::Workbench, "Workbench", "8 Wood"),
+                    (ModularPieceType::Campfire, "Campfire", "4 Wood, 4 Stone"),
+                    (ModularPieceType::Wall, "Wall", "8 Wood"),
+                    (ModularPieceType::Floor, "Floor", "12 Wood"),
+                    (ModularPieceType::Roof, "Roof", "12 Wood"),
+                    (ModularPieceType::Ramp, "Ramp", "16 Wood"),
                 ];
 
                 for (piece_type, name, cost) in pieces {
                     grid.spawn((
                         ButtonBundle {
                             style: Style {
-                                width: Val::Px(90.0),
-                                height: Val::Px(90.0),
+                                width: Val::Px(95.0),
+                                height: Val::Px(80.0),
                                 flex_direction: FlexDirection::Column,
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
@@ -333,11 +352,11 @@ pub fn setup_ui(mut commands: Commands) {
                     )).with_children(|btn| {
                         btn.spawn(TextBundle::from_section(
                             name,
-                            TextStyle { font_size: 14.0, color: Color::WHITE, ..default() }
+                            TextStyle { font_size: 13.0, color: Color::WHITE, ..default() }
                         ));
                         btn.spawn(TextBundle::from_section(
                             cost,
-                            TextStyle { font_size: 11.0, color: Color::srgb(0.7, 0.7, 0.4), ..default() }
+                            TextStyle { font_size: 10.0, color: Color::srgb(0.7, 0.7, 0.4), ..default() }
                         ));
                     });
                 }
@@ -386,9 +405,6 @@ pub fn setup_ui(mut commands: Commands) {
         BuildUIText,
     ));
 
-    // Architectural Note: Constrained Action Bar Root Bounds.
-    // Fixed height of 105px anchored to the bottom screen edge prevents this container 
-    // from covering the entire viewport and blocking 3D mouse picking raycasts.
     commands.spawn((NodeBundle {
         style: Style {
             width: Val::Percent(100.0), 
@@ -475,10 +491,6 @@ pub fn handle_crafting_interaction(
     }
 }
 
-// Architectural Note: Optimized Hotbar UI with change detection and caching.
-// - Caches player entity_id to avoid repeated DB lookups
-// - Only updates text when values actually change
-// - Uses Local<> to track previous state
 pub fn update_hotbar_ui(
     conn: Res<SpacetimeConnection>,
     active_slot: Res<ActiveItemSlot>,
@@ -491,7 +503,6 @@ pub fn update_hotbar_ui(
 ) {
     let Some(identity) = &conn.identity else { return; };
     
-    // Fix 1: Cache player entity_id lookup
     let player_entity_id = match cached_player.0 {
         Some(id) => id,
         None => {
@@ -503,7 +514,6 @@ pub fn update_hotbar_ui(
     
     let Some(inventory) = conn.db.db.inventory().entity_id().find(&player_entity_id) else { return; };
     
-    // Compute inventory hash for change detection (Fix 2)
     let inventory_hash = {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -515,7 +525,6 @@ pub fn update_hotbar_ui(
         hasher.finish()
     };
     
-    // Fix 3: Only update slot colors when active_slot changes
     let active_changed = *last_active_slot != Some(active_slot.0);
     if active_changed {
         for (slot_ui, mut border, mut bg) in slot_q.iter_mut() {
@@ -530,7 +539,6 @@ pub fn update_hotbar_ui(
         *last_active_slot = Some(active_slot.0);
     }
     
-    // Fix 2: Only update text when inventory changes
     let inventory_changed = *last_inventory_hash != inventory_hash;
     if inventory_changed {
         for (mut text, name) in name_q.iter_mut() {
@@ -554,9 +562,6 @@ pub fn update_hotbar_ui(
     }
 }
 
-// Architectural Note: Optimized Health Bar with change detection.
-// - Caches player entity_id to avoid repeated DB lookups
-// - Only updates UI when health values actually change
 pub fn update_hud_health_bar(
     conn: Res<SpacetimeConnection>,
     mut cached_player: ResMut<CachedPlayerEntity>,
@@ -566,7 +571,6 @@ pub fn update_hud_health_bar(
 ) {
     let Some(identity) = &conn.identity else { return; };
     
-    // Fix 1: Cache player entity_id lookup
     let player_entity_id = match cached_player.0 {
         Some(id) => id,
         None => {
@@ -578,7 +582,6 @@ pub fn update_hud_health_bar(
     
     let Some(hp) = conn.db.db.health().entity_id().find(&player_entity_id) else { return; };
     
-    // Fix 2: Only update when health changes
     let current_health = (hp.current, hp.max);
     if *last_health == Some(current_health) {
         return;
@@ -752,12 +755,10 @@ pub fn toggle_inventory_ui(
     }
 }
 
-// Architectural Note: Disjoint Inventory Text Queries
-// Adding Without<InventorySlotCount> to name_q and Without<InventorySlotName> to count_q
-// guarantees to Bevy's type system that Text is never concurrently aliased mutably,
-// resolving panic B0001 during system startup.
 pub fn update_inventory_ui(
     conn: Res<SpacetimeConnection>,
+    player_query: Query<&Transform, With<PlayerBody>>,
+    mut header_q: Query<&mut Text, (With<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>)>,
     mut name_q: Query<(&mut Text, &InventorySlotName), Without<InventorySlotCount>>,
     mut count_q: Query<(&mut Text, &InventorySlotCount), Without<InventorySlotName>>,
 ) {
@@ -779,6 +780,27 @@ pub fn update_inventory_ui(
                 } else {
                     text.sections[0].value = "".to_string();
                 }
+            }
+        }
+    }
+
+    if let Ok(player_t) = player_query.get_single() {
+        let near_workbench = conn.db.db.structure().iter().any(|s| {
+            if s.piece_type == "Workbench" && !s.is_blueprint {
+                let dist_sq = (s.x - player_t.translation.x).powi(2) + (s.z - player_t.translation.z).powi(2);
+                dist_sq <= 400.0
+            } else {
+                false
+            }
+        });
+
+        for mut header in header_q.iter_mut() {
+            if near_workbench {
+                header.sections[0].value = "CRAFTING RECIPES [WORKBENCH ACTIVE]".to_string();
+                header.sections[0].style.color = Color::srgb(1.0, 0.85, 0.2);
+            } else {
+                header.sections[0].value = "CRAFTING RECIPES [FIELD CRAFTING]".to_string();
+                header.sections[0].style.color = Color::srgb(0.7, 0.7, 0.7);
             }
         }
     }

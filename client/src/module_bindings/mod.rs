@@ -6,10 +6,13 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod active_projectile_table;
+pub mod active_projectile_type;
 pub mod ai_state_type;
 pub mod ai_type_type;
 pub mod brain_state_type;
 pub mod camera_mode_type_type;
+pub mod cast_high_tier_magic_reducer;
 pub mod change_pet_stance_reducer;
 pub mod combat_event_table;
 pub mod combat_event_type;
@@ -18,10 +21,12 @@ pub mod consume_item_reducer;
 pub mod contribute_construction_reducer;
 pub mod craft_item_reducer;
 pub mod destroy_structure_reducer;
+pub mod detonate_explosive_charge_reducer;
 pub mod faction_component_table;
 pub mod faction_component_type;
 pub mod faction_type;
 pub mod fire_bow_reducer;
+pub mod fire_siege_weapon_reducer;
 pub mod fire_weapon_reducer;
 pub mod global_state_table;
 pub mod global_state_type;
@@ -38,6 +43,7 @@ pub mod inventory_table;
 pub mod inventory_type;
 pub mod issue_waypoint_reducer;
 pub mod low_frequency_timer_type;
+pub mod magic_spell_type_type;
 pub mod nav_event_table;
 pub mod nav_event_type;
 pub mod npc_brain_table;
@@ -56,12 +62,17 @@ pub mod player_table;
 pub mod player_type;
 pub mod position_type;
 pub mod process_movement_reducer;
+pub mod projectile_kind_type;
+pub mod recipe_definition_table;
+pub mod recipe_definition_type;
+pub mod recipe_ingredient_type;
 pub mod repair_structure_reducer;
 pub mod resource_node_table;
 pub mod resource_node_type;
 pub mod respawn_bush_timer_type;
 pub mod set_camera_mode_reducer;
 pub mod set_interior_culling_reducer;
+pub mod siege_weapon_type_type;
 pub mod snapshot_type;
 pub mod spawn_peasant_reducer;
 pub mod structure_table;
@@ -69,13 +80,18 @@ pub mod structure_type;
 pub mod swing_tool_reducer;
 pub mod transform_table;
 pub mod transform_type;
+pub mod voxel_chunk_table;
+pub mod voxel_chunk_type;
 pub mod waypoint_table;
 pub mod waypoint_type;
 
+pub use active_projectile_table::*;
+pub use active_projectile_type::ActiveProjectile;
 pub use ai_state_type::AiState;
 pub use ai_type_type::AiType;
 pub use brain_state_type::BrainState;
 pub use camera_mode_type_type::CameraModeType;
+pub use cast_high_tier_magic_reducer::cast_high_tier_magic;
 pub use change_pet_stance_reducer::change_pet_stance;
 pub use combat_event_table::*;
 pub use combat_event_type::CombatEvent;
@@ -84,10 +100,12 @@ pub use consume_item_reducer::consume_item;
 pub use contribute_construction_reducer::contribute_construction;
 pub use craft_item_reducer::craft_item;
 pub use destroy_structure_reducer::destroy_structure;
+pub use detonate_explosive_charge_reducer::detonate_explosive_charge;
 pub use faction_component_table::*;
 pub use faction_component_type::FactionComponent;
 pub use faction_type::Faction;
 pub use fire_bow_reducer::fire_bow;
+pub use fire_siege_weapon_reducer::fire_siege_weapon;
 pub use fire_weapon_reducer::fire_weapon;
 pub use global_state_table::*;
 pub use global_state_type::GlobalState;
@@ -104,6 +122,7 @@ pub use inventory_table::*;
 pub use inventory_type::Inventory;
 pub use issue_waypoint_reducer::issue_waypoint;
 pub use low_frequency_timer_type::LowFrequencyTimer;
+pub use magic_spell_type_type::MagicSpellType;
 pub use nav_event_table::*;
 pub use nav_event_type::NavEvent;
 pub use npc_brain_table::*;
@@ -122,12 +141,17 @@ pub use player_table::*;
 pub use player_type::Player;
 pub use position_type::Position;
 pub use process_movement_reducer::process_movement;
+pub use projectile_kind_type::ProjectileKind;
+pub use recipe_definition_table::*;
+pub use recipe_definition_type::RecipeDefinition;
+pub use recipe_ingredient_type::RecipeIngredient;
 pub use repair_structure_reducer::repair_structure;
 pub use resource_node_table::*;
 pub use resource_node_type::ResourceNode;
 pub use respawn_bush_timer_type::RespawnBushTimer;
 pub use set_camera_mode_reducer::set_camera_mode;
 pub use set_interior_culling_reducer::set_interior_culling;
+pub use siege_weapon_type_type::SiegeWeaponType;
 pub use snapshot_type::Snapshot;
 pub use spawn_peasant_reducer::spawn_peasant;
 pub use structure_table::*;
@@ -135,6 +159,8 @@ pub use structure_type::Structure;
 pub use swing_tool_reducer::swing_tool;
 pub use transform_table::*;
 pub use transform_type::Transform;
+pub use voxel_chunk_table::*;
+pub use voxel_chunk_type::VoxelChunk;
 pub use waypoint_table::*;
 pub use waypoint_type::Waypoint;
 
@@ -146,6 +172,12 @@ pub use waypoint_type::Waypoint;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    CastHighTierMagic {
+        spell_type: MagicSpellType,
+        target_x: f32,
+        target_y: f32,
+        target_z: f32,
+    },
     ChangePetStance {
         pet_entity_id: u64,
         new_stance: PetStance,
@@ -165,13 +197,29 @@ pub enum Reducer {
         structure_id: u64,
     },
     CraftItem {
-        item_name: String,
+        recipe_id: String,
     },
     DestroyStructure {
         target_structure_id: u64,
     },
+    DetonateExplosiveCharge {
+        pos_x: f32,
+        pos_y: f32,
+        pos_z: f32,
+        power: f32,
+        radius: f32,
+    },
     FireBow {
         client_tick: u64,
+        origin_x: f32,
+        origin_y: f32,
+        origin_z: f32,
+        dir_x: f32,
+        dir_y: f32,
+        dir_z: f32,
+    },
+    FireSiegeWeapon {
+        siege_type: SiegeWeaponType,
         origin_x: f32,
         origin_y: f32,
         origin_z: f32,
@@ -241,13 +289,16 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::CastHighTierMagic { .. } => "cast_high_tier_magic",
             Reducer::ChangePetStance { .. } => "change_pet_stance",
             Reducer::CommandPeasant { .. } => "command_peasant",
             Reducer::ConsumeItem { .. } => "consume_item",
             Reducer::ContributeConstruction { .. } => "contribute_construction",
             Reducer::CraftItem { .. } => "craft_item",
             Reducer::DestroyStructure { .. } => "destroy_structure",
+            Reducer::DetonateExplosiveCharge { .. } => "detonate_explosive_charge",
             Reducer::FireBow { .. } => "fire_bow",
+            Reducer::FireSiegeWeapon { .. } => "fire_siege_weapon",
             Reducer::FireWeapon { .. } => "fire_weapon",
             Reducer::InteractNode { .. } => "interact_node",
             Reducer::IssueWaypoint { .. } => "issue_waypoint",
@@ -264,6 +315,17 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
+            Reducer::CastHighTierMagic {
+                spell_type,
+                target_x,
+                target_y,
+                target_z,
+            } => __sats::bsatn::to_vec(&cast_high_tier_magic_reducer::CastHighTierMagicArgs {
+                spell_type: spell_type.clone(),
+                target_x: target_x.clone(),
+                target_y: target_y.clone(),
+                target_z: target_z.clone(),
+            }),
             Reducer::ChangePetStance {
                 pet_entity_id,
                 new_stance,
@@ -296,9 +358,9 @@ impl __sdk::Reducer for Reducer {
                     structure_id: structure_id.clone(),
                 },
             ),
-            Reducer::CraftItem { item_name } => {
+            Reducer::CraftItem { recipe_id } => {
                 __sats::bsatn::to_vec(&craft_item_reducer::CraftItemArgs {
-                    item_name: item_name.clone(),
+                    recipe_id: recipe_id.clone(),
                 })
             }
             Reducer::DestroyStructure {
@@ -306,6 +368,21 @@ impl __sdk::Reducer for Reducer {
             } => __sats::bsatn::to_vec(&destroy_structure_reducer::DestroyStructureArgs {
                 target_structure_id: target_structure_id.clone(),
             }),
+            Reducer::DetonateExplosiveCharge {
+                pos_x,
+                pos_y,
+                pos_z,
+                power,
+                radius,
+            } => __sats::bsatn::to_vec(
+                &detonate_explosive_charge_reducer::DetonateExplosiveChargeArgs {
+                    pos_x: pos_x.clone(),
+                    pos_y: pos_y.clone(),
+                    pos_z: pos_z.clone(),
+                    power: power.clone(),
+                    radius: radius.clone(),
+                },
+            ),
             Reducer::FireBow {
                 client_tick,
                 origin_x,
@@ -316,6 +393,23 @@ impl __sdk::Reducer for Reducer {
                 dir_z,
             } => __sats::bsatn::to_vec(&fire_bow_reducer::FireBowArgs {
                 client_tick: client_tick.clone(),
+                origin_x: origin_x.clone(),
+                origin_y: origin_y.clone(),
+                origin_z: origin_z.clone(),
+                dir_x: dir_x.clone(),
+                dir_y: dir_y.clone(),
+                dir_z: dir_z.clone(),
+            }),
+            Reducer::FireSiegeWeapon {
+                siege_type,
+                origin_x,
+                origin_y,
+                origin_z,
+                dir_x,
+                dir_y,
+                dir_z,
+            } => __sats::bsatn::to_vec(&fire_siege_weapon_reducer::FireSiegeWeaponArgs {
+                siege_type: siege_type.clone(),
                 origin_x: origin_x.clone(),
                 origin_y: origin_y.clone(),
                 origin_z: origin_z.clone(),
@@ -430,6 +524,7 @@ impl __sdk::Reducer for Reducer {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
+    active_projectile: __sdk::TableUpdate<ActiveProjectile>,
     combat_event: __sdk::TableUpdate<CombatEvent>,
     faction_component: __sdk::TableUpdate<FactionComponent>,
     global_state: __sdk::TableUpdate<GlobalState>,
@@ -444,9 +539,11 @@ pub struct DbUpdate {
     player: __sdk::TableUpdate<Player>,
     player_perspective: __sdk::TableUpdate<PlayerPerspective>,
     player_session: __sdk::TableUpdate<PlayerSession>,
+    recipe_definition: __sdk::TableUpdate<RecipeDefinition>,
     resource_node: __sdk::TableUpdate<ResourceNode>,
     structure: __sdk::TableUpdate<Structure>,
     transform: __sdk::TableUpdate<Transform>,
+    voxel_chunk: __sdk::TableUpdate<VoxelChunk>,
     waypoint: __sdk::TableUpdate<Waypoint>,
 }
 
@@ -456,6 +553,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
+                "active_projectile" => db_update
+                    .active_projectile
+                    .append(active_projectile_table::parse_table_update(table_update)?),
                 "combat_event" => db_update
                     .combat_event
                     .append(combat_event_table::parse_table_update(table_update)?),
@@ -498,6 +598,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "player_session" => db_update
                     .player_session
                     .append(player_session_table::parse_table_update(table_update)?),
+                "recipe_definition" => db_update
+                    .recipe_definition
+                    .append(recipe_definition_table::parse_table_update(table_update)?),
                 "resource_node" => db_update
                     .resource_node
                     .append(resource_node_table::parse_table_update(table_update)?),
@@ -507,6 +610,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "transform" => db_update
                     .transform
                     .append(transform_table::parse_table_update(table_update)?),
+                "voxel_chunk" => db_update
+                    .voxel_chunk
+                    .append(voxel_chunk_table::parse_table_update(table_update)?),
                 "waypoint" => db_update
                     .waypoint
                     .append(waypoint_table::parse_table_update(table_update)?),
@@ -536,6 +642,9 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
+        diff.active_projectile = cache
+            .apply_diff_to_table::<ActiveProjectile>("active_projectile", &self.active_projectile)
+            .with_updates_by_pk(|row| &row.projectile_id);
         diff.combat_event = cache
             .apply_diff_to_table::<CombatEvent>("combat_event", &self.combat_event)
             .with_updates_by_pk(|row| &row.id);
@@ -584,6 +693,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.player_session = cache
             .apply_diff_to_table::<PlayerSession>("player_session", &self.player_session)
             .with_updates_by_pk(|row| &row.identity);
+        diff.recipe_definition = cache
+            .apply_diff_to_table::<RecipeDefinition>("recipe_definition", &self.recipe_definition)
+            .with_updates_by_pk(|row| &row.recipe_id);
         diff.resource_node = cache
             .apply_diff_to_table::<ResourceNode>("resource_node", &self.resource_node)
             .with_updates_by_pk(|row| &row.node_id);
@@ -593,6 +705,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.transform = cache
             .apply_diff_to_table::<Transform>("transform", &self.transform)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.voxel_chunk = cache
+            .apply_diff_to_table::<VoxelChunk>("voxel_chunk", &self.voxel_chunk)
+            .with_updates_by_pk(|row| &row.chunk_key);
         diff.waypoint = cache
             .apply_diff_to_table::<Waypoint>("waypoint", &self.waypoint)
             .with_updates_by_pk(|row| &row.waypoint_id);
@@ -603,6 +718,9 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "active_projectile" => db_update
+                    .active_projectile
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "combat_event" => db_update
                     .combat_event
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -645,6 +763,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "player_session" => db_update
                     .player_session
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "recipe_definition" => db_update
+                    .recipe_definition
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "resource_node" => db_update
                     .resource_node
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -653,6 +774,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "transform" => db_update
                     .transform
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "voxel_chunk" => db_update
+                    .voxel_chunk
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "waypoint" => db_update
                     .waypoint
@@ -670,6 +794,9 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "active_projectile" => db_update
+                    .active_projectile
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "combat_event" => db_update
                     .combat_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -712,6 +839,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "player_session" => db_update
                     .player_session
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "recipe_definition" => db_update
+                    .recipe_definition
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "resource_node" => db_update
                     .resource_node
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -720,6 +850,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "transform" => db_update
                     .transform
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "voxel_chunk" => db_update
+                    .voxel_chunk
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "waypoint" => db_update
                     .waypoint
@@ -739,6 +872,7 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
+    active_projectile: __sdk::TableAppliedDiff<'r, ActiveProjectile>,
     combat_event: __sdk::TableAppliedDiff<'r, CombatEvent>,
     faction_component: __sdk::TableAppliedDiff<'r, FactionComponent>,
     global_state: __sdk::TableAppliedDiff<'r, GlobalState>,
@@ -753,9 +887,11 @@ pub struct AppliedDiff<'r> {
     player: __sdk::TableAppliedDiff<'r, Player>,
     player_perspective: __sdk::TableAppliedDiff<'r, PlayerPerspective>,
     player_session: __sdk::TableAppliedDiff<'r, PlayerSession>,
+    recipe_definition: __sdk::TableAppliedDiff<'r, RecipeDefinition>,
     resource_node: __sdk::TableAppliedDiff<'r, ResourceNode>,
     structure: __sdk::TableAppliedDiff<'r, Structure>,
     transform: __sdk::TableAppliedDiff<'r, Transform>,
+    voxel_chunk: __sdk::TableAppliedDiff<'r, VoxelChunk>,
     waypoint: __sdk::TableAppliedDiff<'r, Waypoint>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
@@ -770,6 +906,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
+        callbacks.invoke_table_row_callbacks::<ActiveProjectile>(
+            "active_projectile",
+            &self.active_projectile,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<CombatEvent>(
             "combat_event",
             &self.combat_event,
@@ -816,6 +957,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.player_session,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<RecipeDefinition>(
+            "recipe_definition",
+            &self.recipe_definition,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<ResourceNode>(
             "resource_node",
             &self.resource_node,
@@ -823,6 +969,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<Structure>("structure", &self.structure, event);
         callbacks.invoke_table_row_callbacks::<Transform>("transform", &self.transform, event);
+        callbacks.invoke_table_row_callbacks::<VoxelChunk>("voxel_chunk", &self.voxel_chunk, event);
         callbacks.invoke_table_row_callbacks::<Waypoint>("waypoint", &self.waypoint, event);
     }
 }
@@ -1484,6 +1631,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
+        active_projectile_table::register_table(client_cache);
         combat_event_table::register_table(client_cache);
         faction_component_table::register_table(client_cache);
         global_state_table::register_table(client_cache);
@@ -1498,12 +1646,15 @@ impl __sdk::SpacetimeModule for RemoteModule {
         player_table::register_table(client_cache);
         player_perspective_table::register_table(client_cache);
         player_session_table::register_table(client_cache);
+        recipe_definition_table::register_table(client_cache);
         resource_node_table::register_table(client_cache);
         structure_table::register_table(client_cache);
         transform_table::register_table(client_cache);
+        voxel_chunk_table::register_table(client_cache);
         waypoint_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "active_projectile",
         "combat_event",
         "faction_component",
         "global_state",
@@ -1518,9 +1669,11 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "player",
         "player_perspective",
         "player_session",
+        "recipe_definition",
         "resource_node",
         "structure",
         "transform",
+        "voxel_chunk",
         "waypoint",
     ];
 }

@@ -29,7 +29,6 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             PhysicsPlugins::default(),
-            // Frame time diagnostics for performance profiling
             bevy::diagnostic::FrameTimeDiagnosticsPlugin,
             bevy::diagnostic::EntityCountDiagnosticsPlugin,
             bevy::diagnostic::SystemInformationDiagnosticsPlugin,
@@ -77,7 +76,7 @@ fn main() {
             handle_build_menu_selection,
             handle_crafting_interaction,
             interior_occlusion_culling_system,
-            update_infinite_terrain_chunks
+            update_infinite_voxel_terrain,
         ).run_if(in_state(GameState::InGame)))
 
         .add_systems(Update, (
@@ -85,12 +84,12 @@ fn main() {
             update_spatial_subscriptions, 
             sync_logical_components,
             sync_resource_nodes, 
+            update_falling_trees,
             update_berry_visuals, 
             sync_structures, 
+            tick_voxel_gibs,
         ).run_if(in_state(GameState::InGame)))
 
-        // Architectural Note: update_floating_health_bars runs in InGame state,
-        // allowing its inner camera_mode check to immediately hide health bars during FPS mode.
         .add_systems(Update, (
             toggle_build_mode, 
             update_build_hologram, 
@@ -115,7 +114,6 @@ fn main() {
             update_marquee_ui,
         ).run_if(in_state(CameraMode::RTS).and_then(in_state(GameState::InGame))))
         
-        // Diagnostic overlay system
         .add_systems(Update, update_diagnostic_overlay.run_if(in_state(GameState::InGame)))
         
         .run();
@@ -130,14 +128,11 @@ fn update_diagnostic_overlay(
     mut existing: Query<(Entity, &mut Text), With<DiagnosticOverlay>>,
     keyboard: Res<ButtonInput<KeyCode>>,
 ) {
-    // Toggle with F3 key
     if keyboard.just_pressed(KeyCode::F3) {
         if let Some((entity, _)) = existing.iter().next() {
-            // Despawn existing overlay
             commands.entity(entity).despawn();
             return;
         } else {
-            // Spawn new overlay
             commands.spawn((
                 TextBundle::from_section(
                     "Loading diagnostics...",
@@ -154,23 +149,19 @@ fn update_diagnostic_overlay(
         }
     }
     
-    // Update existing overlay
     for (_, mut text) in existing.iter_mut() {
         let mut output = String::new();
         
-        // FPS
         if let Some(fps) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS) {
             if let Some(value) = fps.value() {
                 output.push_str(&format!("FPS: {:.1}\n", value));
             }
         }
-        // Frame Time
         if let Some(frame_time) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME) {
             if let Some(value) = frame_time.value() {
                 output.push_str(&format!("Frame: {:.2}ms\n", value));
             }
         }
-        // Entity Count
         if let Some(entities) = diagnostics.get(&bevy::diagnostic::EntityCountDiagnosticsPlugin::ENTITY_COUNT) {
             if let Some(value) = entities.value() {
                 output.push_str(&format!("Entities: {:.0}\n", value));

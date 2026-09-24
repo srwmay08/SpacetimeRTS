@@ -1,6 +1,6 @@
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::ecs::system::SystemParam; 
-use bevy::window::PrimaryWindow;
+use bevy::window::{CursorGrabMode, PrimaryWindow};
 use avian3d::prelude::*;
 use tracing::{info, error};
 
@@ -66,9 +66,16 @@ pub struct ActionContextQueries<'w, 's> {
     pub selected: Query<'w, 's, Entity, With<Selected>>,
 }
 
-// ----------------------------------------------------------------------------
-// HELPER: RESOLVE NODE ID FROM HIT ENTITY
-// ----------------------------------------------------------------------------
+/// Architectural Note: Bundles mutable UI state queries into a single SystemParam.
+/// Enforces Bevy's hard constraint that system functions take at most 16 parameters,
+/// resolving the trait bound failure on IntoSystemConfigs.
+#[derive(SystemParam)]
+pub struct UiActionQueries<'w, 's> {
+    pub build_menu: Query<'w, 's, &'static mut Style, With<BuildMenuRoot>>,
+    pub inventory: Query<'w, 's, &'static mut Style, (With<InventoryUiRoot>, Without<BuildMenuRoot>)>,
+    pub window: Query<'w, 's, &'static mut Window, With<PrimaryWindow>>,
+}
+
 fn resolve_node_id(entity: Entity, node_q: &Query<&ResourceNodeItem>, parent_q: &Query<&Parent>) -> Option<u64> {
     if let Ok(node) = node_q.get(entity) {
         return Some(node.node_id);
@@ -132,9 +139,6 @@ pub fn input_router_system(
     
     let mut is_over_ui = interaction_query.iter().any(|i| *i != Interaction::None);
     
-    // Architectural Note: Intelligent Viewport UI Detection
-    // Ignores inactive UI (Display::None) and fullscreen layout containers (100% width and height).
-    // Prevents transparent HUD/overlay containers from disabling 3D RTS unit selection and drag bounding.
     if !is_over_ui {
         if let Some(pos) = cursor_pos {
             for (node, transform, vis, style) in node_query.iter() {
@@ -190,7 +194,7 @@ pub fn context_aware_action_dispatcher(
     tick: Res<ClientTick>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut build_menu_query: Query<&mut Style, With<BuildMenuRoot>>,
+    mut ui_queries: UiActionQueries,
 ) {
     let multi_select = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let my_player_entity = queries.player.get_single().map(|(e, _)| e).unwrap_or(Entity::PLACEHOLDER);
@@ -208,8 +212,13 @@ pub fn context_aware_action_dispatcher(
                 match event.action {
                     VirtualAction::Secondary if event.state == ActionState::JustPressed => {
                         if is_holding_hammer && !event.is_over_ui {
-                            if let Ok(mut style) = build_menu_query.get_single_mut() {
-                                style.display = if style.display == Display::None { Display::Flex } else { Display::None };
+                            if let Ok(mut style) = ui_queries.build_menu.get_single_mut() {
+                                let opening = style.display == Display::None;
+                                style.display = if opening { Display::Flex } else { Display::None };
+                                if let Ok(mut window) = ui_queries.window.get_single_mut() {
+                                    window.cursor.grab_mode = if opening { CursorGrabMode::None } else { CursorGrabMode::Locked };
+                                    window.cursor.visible = opening;
+                                }
                             }
                         }
                     }
@@ -225,7 +234,7 @@ pub fn context_aware_action_dispatcher(
 
                                     if is_holding_bow {
                                         let arrow_speed = 45.0;
-                                        let tracer_mesh = meshes.add(Cylinder::new(0.015, 0.8));
+                                        let tracer_mesh = meshes.add(bevy::math::primitives::Cylinder::new(0.015, 0.8));
                                         let tracer_mat = materials.add(StandardMaterial {
                                             base_color: Color::srgb(0.8, 0.7, 0.5),
                                             unlit: true,
@@ -281,7 +290,7 @@ pub fn context_aware_action_dispatcher(
                                         
                                         commands.spawn((
                                             PbrBundle {
-                                                mesh: meshes.add(Cylinder::new(0.02, distance)),
+                                                mesh: meshes.add(bevy::math::primitives::Cylinder::new(0.02, distance)),
                                                 material: materials.add(StandardMaterial {
                                                     base_color: Color::srgb(1.0, 0.9, 0.5), unlit: true, ..default()
                                                 }),
@@ -319,8 +328,16 @@ pub fn context_aware_action_dispatcher(
                                             error!("Failed to pick up resource: {:?}", e);
                                         }
                                     } else if let Ok(net_structure) = queries.structure.get(hit_data.entity) {
-                                        if is_holding_hammer {
-                                            if let Some(s) = conn.db.db.structure().structure_id().find(&net_structure.structure_id) {
+                                        if let Some(s) = conn.db.db.structure().structure_id().find(&net_structure.structure_id) {
+                                            if s.piece_type == "Workbench" && !s.is_blueprint {
+                                                if let Ok(mut style) = ui_queries.inventory.get_single_mut() {
+                                                    style.display = Display::Flex;
+                                                    if let Ok(mut window) = ui_queries.window.get_single_mut() {
+                                                        window.cursor.grab_mode = CursorGrabMode::None;
+                                                        window.cursor.visible = true;
+                                                    }
+                                                }
+                                            } else if is_holding_hammer {
                                                 if s.is_blueprint {
                                                     let _ = conn.db.reducers.contribute_construction(s.structure_id);
                                                 } else if s.current_health < s.max_health {
@@ -425,7 +442,7 @@ pub fn context_aware_action_dispatcher(
 
                                     commands.spawn((
                                         PbrBundle {
-                                            mesh: meshes.add(Cylinder::new(0.8, 0.05)),
+                                            mesh: meshes.add(bevy::math::primitives::Cylinder::new(0.8, 0.05)),
                                             material: materials.add(StandardMaterial {
                                                 base_color: if is_node { Color::srgb(0.9, 0.8, 0.1) } else { Color::srgb(0.2, 0.9, 0.3) },
                                                 unlit: true,
@@ -588,8 +605,14 @@ pub fn update_interaction_prompt(
         } else if let Ok(net_structure) = structure_query.get(hit_data.entity) {
             if let Some(s) = conn.db.db.structure().structure_id().find(&net_structure.structure_id) {
                 let is_hammer = active_item.0.as_deref() == Some("Hammer");
-                if s.is_blueprint {
-                    text.sections[0].value = if is_hammer { "[E] Hammer Blueprint" } else { "Equip Hammer to Build" }.to_string();
+                if s.piece_type == "Workbench" && !s.is_blueprint {
+                    text.sections[0].value = "[E] Open Workbench".to_string();
+                } else if s.is_blueprint {
+                    text.sections[0].value = if is_hammer { 
+                        format!("[E] Build {} ({}%)", s.piece_type, s.construction_progress) 
+                    } else { 
+                        "Equip Hammer to Build".to_string() 
+                    };
                 } else if s.current_health < s.max_health {
                     text.sections[0].value = if is_hammer {
                         format!("[E] Repair Structure ({:.0}/{:.0} HP)", s.current_health, s.max_health)

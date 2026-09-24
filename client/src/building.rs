@@ -3,10 +3,10 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::render_asset::RenderAssetUsages;
 use avian3d::prelude::*;
 use tracing::info;
-use spacetimedb_sdk::Table; 
+use spacetimedb_sdk::Table;
 
 use crate::components::*;
-use crate::network::SpacetimeConnection;
+use crate::network::{SpacetimeConnection, VoxelBox, build_voxel_mesh};
 use crate::module_bindings::place_structure_reducer::place_structure; 
 use crate::module_bindings::structure_table::StructureTableAccess; 
 
@@ -17,6 +17,8 @@ use crate::module_bindings::structure_table::StructureTableAccess;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModularPieceType {
     Foundation,
+    Workbench,
+    Campfire,
     Wall,
     Floor,
     Roof,
@@ -27,6 +29,8 @@ impl ModularPieceType {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Foundation => "Foundation",
+            Self::Workbench => "Workbench",
+            Self::Campfire => "Campfire",
             Self::Wall => "Wall",
             Self::Floor => "Floor",
             Self::Roof => "Roof",
@@ -37,10 +41,12 @@ impl ModularPieceType {
     pub fn wood_cost(&self) -> u32 {
         match self {
             Self::Foundation => 20,
-            Self::Wall => 10,
-            Self::Floor => 15,
-            Self::Roof => 15,
-            Self::Ramp => 20,
+            Self::Workbench => 8,
+            Self::Campfire => 4,
+            Self::Wall => 8,
+            Self::Floor => 12,
+            Self::Roof => 12,
+            Self::Ramp => 16,
         }
     }
 
@@ -69,6 +75,8 @@ impl ModularPieceType {
                 Socket { name: "Top".into(), local_offset: Vec3::new(0.0, 1.5, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
                 Socket { name: "Bottom".into(), local_offset: Vec3::new(0.0, -1.5, 2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
+            Self::Workbench => vec![],
+            Self::Campfire => vec![],
         }
     }
 }
@@ -126,6 +134,39 @@ pub fn create_ramp_mesh() -> Mesh {
     mesh
 }
 
+pub fn create_workbench_mesh() -> Mesh {
+    let wood = [0.42, 0.28, 0.16, 1.0];
+    let top_wood = [0.55, 0.38, 0.22, 1.0];
+    let iron = [0.35, 0.35, 0.38, 1.0];
+
+    build_voxel_mesh(&[
+        VoxelBox { min: Vec3::new(-0.70, 0.0, -0.40), max: Vec3::new(-0.52, 0.75, -0.22), color: wood },
+        VoxelBox { min: Vec3::new(0.52, 0.0, -0.40), max: Vec3::new(0.70, 0.75, -0.22), color: wood },
+        VoxelBox { min: Vec3::new(-0.70, 0.0, 0.22), max: Vec3::new(-0.52, 0.75, 0.40), color: wood },
+        VoxelBox { min: Vec3::new(0.52, 0.0, 0.22), max: Vec3::new(0.70, 0.75, 0.40), color: wood },
+        VoxelBox { min: Vec3::new(-0.62, 0.15, -0.32), max: Vec3::new(0.62, 0.22, 0.32), color: wood },
+        VoxelBox { min: Vec3::new(-0.80, 0.75, -0.50), max: Vec3::new(0.80, 0.95, 0.50), color: top_wood },
+        VoxelBox { min: Vec3::new(-0.55, 0.95, -0.25), max: Vec3::new(-0.25, 1.18, 0.05), color: iron },
+        VoxelBox { min: Vec3::new(0.35, 0.95, -0.35), max: Vec3::new(0.65, 1.10, -0.15), color: wood },
+    ])
+}
+
+pub fn create_campfire_mesh() -> Mesh {
+    let stone = [0.48, 0.48, 0.50, 1.0];
+    let wood = [0.32, 0.18, 0.10, 1.0];
+    let embers = [0.88, 0.32, 0.08, 1.0];
+
+    build_voxel_mesh(&[
+        VoxelBox { min: Vec3::new(-0.65, 0.0, -0.65), max: Vec3::new(0.65, 0.25, -0.42), color: stone },
+        VoxelBox { min: Vec3::new(-0.65, 0.0, 0.42), max: Vec3::new(0.65, 0.25, 0.65), color: stone },
+        VoxelBox { min: Vec3::new(-0.65, 0.0, -0.42), max: Vec3::new(-0.42, 0.25, 0.42), color: stone },
+        VoxelBox { min: Vec3::new(0.42, 0.0, -0.42), max: Vec3::new(0.65, 0.25, 0.42), color: stone },
+        VoxelBox { min: Vec3::new(-0.40, 0.0, -0.40), max: Vec3::new(0.40, 0.12, 0.40), color: embers },
+        VoxelBox { min: Vec3::new(-0.45, 0.10, -0.12), max: Vec3::new(0.45, 0.24, 0.12), color: wood },
+        VoxelBox { min: Vec3::new(-0.12, 0.20, -0.45), max: Vec3::new(0.12, 0.34, 0.45), color: wood },
+    ])
+}
+
 // ----------------------------------------------------------------------------
 // BUILD MODE & SNAPPING SYSTEMS
 // ----------------------------------------------------------------------------
@@ -150,7 +191,9 @@ pub fn toggle_build_mode(
     if build_state.is_active {
         if keys.just_pressed(KeyCode::KeyR) {
             build_state.selected_piece = match build_state.selected_piece {
-                ModularPieceType::Foundation => ModularPieceType::Wall,
+                ModularPieceType::Foundation => ModularPieceType::Workbench,
+                ModularPieceType::Workbench => ModularPieceType::Campfire,
+                ModularPieceType::Campfire => ModularPieceType::Wall,
                 ModularPieceType::Wall => ModularPieceType::Floor,
                 ModularPieceType::Floor => ModularPieceType::Roof,
                 ModularPieceType::Roof => ModularPieceType::Ramp,
@@ -199,6 +242,8 @@ pub fn update_build_hologram(
     } else {
         let mesh = match build_state.selected_piece {
             ModularPieceType::Foundation => meshes.add(Cuboid::new(4.0, 1.0, 4.0)),
+            ModularPieceType::Workbench => meshes.add(create_workbench_mesh()),
+            ModularPieceType::Campfire => meshes.add(create_campfire_mesh()),
             ModularPieceType::Wall => meshes.add(Cuboid::new(4.0, 3.0, 0.4)),
             ModularPieceType::Floor => meshes.add(Cuboid::new(4.0, 0.2, 4.0)),
             ModularPieceType::Roof => meshes.add(Cuboid::new(4.0, 0.2, 4.0)),
@@ -271,7 +316,12 @@ pub fn update_build_hologram(
             let snapped_z = (hit_point.z / grid_size).round() * grid_size;
             let true_y = crate::terrain::get_terrain_height(snapped_x, snapped_z);
             
-            target_transform.translation = Vec3::new(snapped_x, true_y, snapped_z);
+            let y_lift = match build_state.selected_piece {
+                ModularPieceType::Foundation => 0.5,
+                _ => 0.0,
+            };
+
+            target_transform.translation = Vec3::new(snapped_x, true_y + y_lift, snapped_z);
             target_transform.rotation = Quat::IDENTITY * manual_rotation_offset;
         }
     } else {
@@ -279,9 +329,30 @@ pub fn update_build_hologram(
         target_transform.rotation = Quat::IDENTITY * manual_rotation_offset;
     }
 
-    // Architectural Note: Quality-of-Play Snapping Indicator Visual
-    // Update hologram material color: Green if snapped to parent or grounded, Red if invalid.
-    let is_valid_placement = snapped || build_state.selected_piece == ModularPieceType::Foundation;
+    // Architectural Note: Realistic Workbench Proximity Validation.
+    // Foundations, Workbenches, and Campfires can be placed anywhere on terrain.
+    // Walls, Floors, Roofs, and Ramps require proximity (< 20m) to a constructed Workbench.
+    let is_starter_piece = matches!(
+        build_state.selected_piece,
+        ModularPieceType::Foundation | ModularPieceType::Workbench | ModularPieceType::Campfire
+    );
+
+    let near_workbench = structure_query.iter().any(|net_struct| {
+        if let Some(s) = conn.db.db.structure().structure_id().find(&net_struct.structure_id) {
+            if s.piece_type == "Workbench" && !s.is_blueprint {
+                let dist_sq = (s.x - target_transform.translation.x).powi(2) + (s.z - target_transform.translation.z).powi(2);
+                return dist_sq <= 400.0;
+            }
+        }
+        false
+    });
+
+    let is_valid_placement = if is_starter_piece {
+        snapped || ray_hit.is_some()
+    } else {
+        snapped && near_workbench
+    };
+
     if let Some(mat) = materials.get_mut(&mat_handle) {
         mat.base_color = if is_valid_placement {
             Color::srgba(0.2, 0.9, 0.2, 0.5)
@@ -301,9 +372,12 @@ pub fn update_build_hologram(
 
         info!("Dispatching place_structure reducer for {} at {:?}", piece_name, pos);
         
-        let _ = conn.db.reducers.place_structure(
+        let res = conn.db.reducers.place_structure(
             target_parent_id, piece_name, pos.x, pos.y, pos.z, rot.x, rot.y, rot.z, rot.w,
         );
+        if let Err(e) = res {
+            tracing::error!("Failed to place structure: {:?}", e);
+        }
     }
 }
 
@@ -324,17 +398,25 @@ pub fn sync_structures(
 
     for s in db_structures {
         if !spawned_ids.contains(&s.structure_id) {
-            
             let (mesh, color, collider) = match s.piece_type.as_str() {
                 "Foundation" => (meshes.add(Cuboid::new(4.0, 1.0, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 1.0, 4.0)),
                 "Wall" => (meshes.add(Cuboid::new(4.0, 3.0, 0.4)), Color::srgb(0.6, 0.5, 0.4), Collider::cuboid(4.0, 3.0, 0.4)),
                 "Floor" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 0.2, 4.0)),
                 "Roof" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.4, 0.3, 0.2), Collider::cuboid(4.0, 0.2, 4.0)),
-                _ => { 
+                "Ramp" => { 
                     let ramp_mesh = create_ramp_mesh();
                     let col = Collider::trimesh_from_mesh(&ramp_mesh).unwrap_or_else(|| Collider::cuboid(4.0, 2.0, 4.0));
                     (meshes.add(ramp_mesh), Color::srgb(0.5, 0.5, 0.5), col)
                 },
+                "Workbench" => {
+                    let wb_mesh = create_workbench_mesh();
+                    (meshes.add(wb_mesh), Color::WHITE, Collider::cuboid(1.6, 1.2, 1.0))
+                },
+                "Campfire" => {
+                    let cf_mesh = create_campfire_mesh();
+                    (meshes.add(cf_mesh), Color::WHITE, Collider::cylinder(0.7, 0.35))
+                },
+                _ => (meshes.add(Cuboid::new(1.0, 1.0, 1.0)), Color::srgb(0.5, 0.5, 0.5), Collider::cuboid(1.0, 1.0, 1.0)),
             };
 
             let transform = Transform::from_xyz(s.x, s.y, s.z)
@@ -345,13 +427,29 @@ pub fn sync_structures(
                 "Wall" => ModularPieceType::Wall.default_sockets(),
                 "Floor" => ModularPieceType::Floor.default_sockets(),
                 "Roof" => ModularPieceType::Roof.default_sockets(),
-                _ => ModularPieceType::Ramp.default_sockets(),
+                "Ramp" => ModularPieceType::Ramp.default_sockets(),
+                _ => Vec::new(),
+            };
+
+            let material = if s.is_blueprint {
+                materials.add(StandardMaterial {
+                    base_color: Color::srgba(0.2, 0.6, 1.0, 0.65),
+                    alpha_mode: AlphaMode::Blend,
+                    unlit: false,
+                    ..default()
+                })
+            } else {
+                materials.add(StandardMaterial {
+                    base_color: color,
+                    perceptual_roughness: 0.85,
+                    ..default()
+                })
             };
 
             commands.spawn((
                 PbrBundle {
                     mesh,
-                    material: materials.add(StandardMaterial { base_color: color, perceptual_roughness: 0.8, ..default() }),
+                    material,
                     transform,
                     ..default()
                 },

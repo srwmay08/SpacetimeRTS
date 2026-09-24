@@ -23,12 +23,6 @@ pub enum Faction {
 #[derive(Component)] pub struct MarqueeUI;
 #[derive(Component)] pub struct NavTarget(pub Vec3);
 
-#[derive(Component)]
-pub struct TerrainChunk {
-    #[allow(dead_code)] pub chunk_x: i32,
-    #[allow(dead_code)] pub chunk_z: i32,
-}
-
 // ----------------------------------------------------------------------------
 // RENDERING MARKERS & CAMERAS
 // ----------------------------------------------------------------------------
@@ -50,8 +44,45 @@ pub struct TerrainChunk {
 #[derive(Component)] pub struct PlayerHead;
 #[derive(Component)] pub struct ViewModelArm;
 #[derive(Component)] pub struct Kcc { pub is_grounded: bool }
-#[derive(Component)] pub struct ResourceNodeItem { pub node_id: u64 } 
+
+#[derive(Component)]
+pub struct ResourceNodeItem {
+    pub node_id: u64,
+    pub node_type: String,
+}
+
 #[derive(Component)] pub struct PeasantUnit { pub entity_id: u64 }
+
+// ----------------------------------------------------------------------------
+// VOXEL WORLD, FALLING LOGS & GIB COMPONENTS
+// ----------------------------------------------------------------------------
+
+#[derive(Component)]
+pub struct VoxelChunkMarker {
+    pub chunk_key: u64,
+    pub chunk_x: i32,
+    pub chunk_y: i32,
+    pub chunk_z: i32,
+    pub last_modified_tick: u64,
+}
+
+#[derive(Component)]
+pub struct VoxelGib {
+    pub timer: Timer,
+}
+
+/// Architectural Note: Attached to felled trees to simulate a majestic, physical
+/// toppling arc. The tree pivots around its root base, accelerating under gravity
+/// until it reaches horizontal parallel alignment with the terrain, at which point
+/// it shatters into dynamic voxel timber and leaf gibs.
+#[derive(Component)]
+pub struct FallingTree {
+    pub base_pos: Vec3,
+    pub fall_dir: Vec3,
+    pub angle: f32,
+    pub angular_vel: f32,
+    pub elapsed: f32,
+}
 
 // ----------------------------------------------------------------------------
 // MODULAR BUILDING & SOCKET COMPONENTS
@@ -85,11 +116,9 @@ pub struct InteriorProp;
 #[derive(Component)] pub struct InventorySlotName(pub usize);
 #[derive(Component)] pub struct InventorySlotCount(pub usize);
 
-// Personal Crafting UI Components
 #[derive(Component)] pub struct CraftRecipeButton(pub String);
 #[derive(Component)] #[allow(dead_code)] pub struct CraftRecipeText;
 
-// Persistent Top-Left Hotbar (Slots 1-8)
 #[derive(Component)] pub struct HotbarRoot;
 #[derive(Component)] pub struct HotbarSlotUi(pub usize);
 #[derive(Component)] pub struct HotbarSlotName(pub usize);
@@ -101,15 +130,12 @@ pub struct ActiveItemSlot(pub usize);
 #[derive(Resource, Component, Clone, Debug, Default)] 
 pub struct ActiveEquippedItem(pub Option<String>);
 
-// Cached player entity ID to avoid repeated DB lookups
 #[derive(Resource, Default)]
 pub struct CachedPlayerEntity(pub Option<u64>);
 
-// Bottom-Left Health Meter
 #[derive(Component)] pub struct HealthBarFill;
 #[derive(Component)] pub struct HealthBarText;
 
-// Visual Building Menu
 #[derive(Component)] pub struct BuildMenuRoot;
 #[derive(Component)] pub struct BuildPieceButton(pub ModularPieceType);
 
