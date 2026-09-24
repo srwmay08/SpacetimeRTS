@@ -46,6 +46,8 @@ fn main() {
         .insert_resource(BuildModeState::default())
         .insert_resource(NetworkCullingState::default()) 
         .insert_resource(CameraTransitionState::default())
+        .insert_resource(ConsoleState::default())
+        .insert_resource(DragDropState::default())
         .insert_resource(ActiveItemSlot(0))
         .insert_resource(CachedPlayerEntity::default())
         .insert_resource(ActiveEquippedItem(None))
@@ -63,6 +65,9 @@ fn main() {
 
         .add_systems(Update, (
             track_telemetry_metrics,
+            toggle_console,
+            handle_console_input,
+            update_console_ui,
             toggle_perspective,
             update_camera_transition,
             hotbar_input_system,
@@ -72,6 +77,8 @@ fn main() {
         ).run_if(in_state(GameState::InGame)))
 
         .add_systems(Update, (
+            handle_inventory_drag_and_drop,
+            update_drag_ghost_ui,
             context_aware_action_dispatcher,
             handle_build_menu_selection,
             handle_crafting_interaction,

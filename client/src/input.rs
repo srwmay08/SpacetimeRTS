@@ -66,9 +66,6 @@ pub struct ActionContextQueries<'w, 's> {
     pub selected: Query<'w, 's, Entity, With<Selected>>,
 }
 
-/// Architectural Note: Bundles mutable UI state queries into a single SystemParam.
-/// Enforces Bevy's hard constraint that system functions take at most 16 parameters,
-/// resolving the trait bound failure on IntoSystemConfigs.
 #[derive(SystemParam)]
 pub struct UiActionQueries<'w, 's> {
     pub build_menu: Query<'w, 's, &'static mut Style, With<BuildMenuRoot>>,
@@ -94,10 +91,15 @@ fn resolve_node_id(entity: Entity, node_q: &Query<&ResourceNodeItem>, parent_q: 
 
 pub fn hotbar_input_system(
     keys: Res<ButtonInput<KeyCode>>,
+    console: Res<ConsoleState>,
     mut active_slot: ResMut<ActiveItemSlot>,
     mut active_item: ResMut<ActiveEquippedItem>,
     conn: Res<SpacetimeConnection>,
 ) {
+    if console.is_open {
+        return;
+    }
+
     let digit_keys = [
         (KeyCode::Digit1, 0),
         (KeyCode::Digit2, 1),
@@ -120,7 +122,9 @@ pub fn hotbar_input_system(
     let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
     let Some(inventory) = conn.db.db.inventory().entity_id().find(&player.entity_id) else { return; };
 
-    active_item.0 = inventory.slots.get(active_slot.0).map(|s| s.item_type.clone());
+    active_item.0 = inventory.slots.get(active_slot.0)
+        .filter(|s| s.count > 0 && !s.item_type.is_empty())
+        .map(|s| s.item_type.clone());
 }
 
 // ----------------------------------------------------------------------------
@@ -130,14 +134,20 @@ pub fn hotbar_input_system(
 pub fn input_router_system(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    console: Res<ConsoleState>,
+    drag_drop: Res<DragDropState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut action_events: EventWriter<ActionEvent>,
     interaction_query: Query<&Interaction>,
     node_query: Query<(&Node, &GlobalTransform, &Visibility, &Style)>,
 ) {
+    if console.is_open {
+        return;
+    }
+
     let cursor_pos = window_query.get_single().ok().and_then(|w| w.cursor_position());
     
-    let mut is_over_ui = interaction_query.iter().any(|i| *i != Interaction::None);
+    let mut is_over_ui = interaction_query.iter().any(|i| *i != Interaction::None) || drag_drop.is_dragging;
     
     if !is_over_ui {
         if let Some(pos) = cursor_pos {
@@ -184,6 +194,7 @@ pub fn context_aware_action_dispatcher(
     mut action_events: EventReader<ActionEvent>,
     camera_mode: Res<State<CameraMode>>,
     build_state: Res<BuildModeState>,
+    console: Res<ConsoleState>,
     keys: Res<ButtonInput<KeyCode>>,
     mut swing_state: ResMut<SwingState>,
     active_item: Res<ActiveEquippedItem>,
@@ -196,6 +207,10 @@ pub fn context_aware_action_dispatcher(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut ui_queries: UiActionQueries,
 ) {
+    if console.is_open {
+        return;
+    }
+
     let multi_select = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
     let my_player_entity = queries.player.get_single().map(|(e, _)| e).unwrap_or(Entity::PLACEHOLDER);
 
@@ -506,6 +521,7 @@ pub fn rts_navmesh_movement_system(
 pub fn player_movement_system(
     keys: Res<ButtonInput<KeyCode>>, 
     camera_mode: Res<State<CameraMode>>,
+    console: Res<ConsoleState>,
     mut query: Query<(Entity, &mut BevyTransform, &mut LinearVelocity, &mut GravityScale, &mut Kcc), With<PlayerBody>>,
     spatial_query: SpatialQuery, 
 ) {
@@ -532,7 +548,7 @@ pub fn player_movement_system(
     }
 
     let mut move_dir = Vec3::ZERO;
-    if *camera_mode.get() == CameraMode::FPS {
+    if *camera_mode.get() == CameraMode::FPS && !console.is_open {
         if keys.pressed(KeyCode::KeyW) { move_dir += *transform.forward(); }
         if keys.pressed(KeyCode::KeyS) { move_dir -= *transform.forward(); }
         if keys.pressed(KeyCode::KeyD) { move_dir += *transform.right(); }
@@ -549,7 +565,7 @@ pub fn player_movement_system(
     }
 
     gravity.0 = 8.0; 
-    if kcc.is_grounded && *camera_mode.get() == CameraMode::FPS && keys.just_pressed(KeyCode::Space) { 
+    if kcc.is_grounded && *camera_mode.get() == CameraMode::FPS && !console.is_open && keys.just_pressed(KeyCode::Space) { 
         lin_vel.y = 10.0; 
         kcc.is_grounded = false; 
     }

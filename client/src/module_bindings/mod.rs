@@ -8,6 +8,15 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod active_projectile_table;
 pub mod active_projectile_type;
+pub mod admin_clear_inventory_reducer;
+pub mod admin_detonate_reducer;
+pub mod admin_give_item_reducer;
+pub mod admin_god_mode_reducer;
+pub mod admin_heal_reducer;
+pub mod admin_kill_all_npcs_reducer;
+pub mod admin_set_time_reducer;
+pub mod admin_spawn_npc_reducer;
+pub mod admin_teleport_reducer;
 pub mod ai_state_type;
 pub mod ai_type_type;
 pub mod brain_state_type;
@@ -22,6 +31,7 @@ pub mod contribute_construction_reducer;
 pub mod craft_item_reducer;
 pub mod destroy_structure_reducer;
 pub mod detonate_explosive_charge_reducer;
+pub mod drop_inventory_item_reducer;
 pub mod faction_component_table;
 pub mod faction_component_type;
 pub mod faction_type;
@@ -77,6 +87,7 @@ pub mod snapshot_type;
 pub mod spawn_peasant_reducer;
 pub mod structure_table;
 pub mod structure_type;
+pub mod swap_inventory_slots_reducer;
 pub mod swing_tool_reducer;
 pub mod transform_table;
 pub mod transform_type;
@@ -87,6 +98,15 @@ pub mod waypoint_type;
 
 pub use active_projectile_table::*;
 pub use active_projectile_type::ActiveProjectile;
+pub use admin_clear_inventory_reducer::admin_clear_inventory;
+pub use admin_detonate_reducer::admin_detonate;
+pub use admin_give_item_reducer::admin_give_item;
+pub use admin_god_mode_reducer::admin_god_mode;
+pub use admin_heal_reducer::admin_heal;
+pub use admin_kill_all_npcs_reducer::admin_kill_all_npcs;
+pub use admin_set_time_reducer::admin_set_time;
+pub use admin_spawn_npc_reducer::admin_spawn_npc;
+pub use admin_teleport_reducer::admin_teleport;
 pub use ai_state_type::AiState;
 pub use ai_type_type::AiType;
 pub use brain_state_type::BrainState;
@@ -101,6 +121,7 @@ pub use contribute_construction_reducer::contribute_construction;
 pub use craft_item_reducer::craft_item;
 pub use destroy_structure_reducer::destroy_structure;
 pub use detonate_explosive_charge_reducer::detonate_explosive_charge;
+pub use drop_inventory_item_reducer::drop_inventory_item;
 pub use faction_component_table::*;
 pub use faction_component_type::FactionComponent;
 pub use faction_type::Faction;
@@ -156,6 +177,7 @@ pub use snapshot_type::Snapshot;
 pub use spawn_peasant_reducer::spawn_peasant;
 pub use structure_table::*;
 pub use structure_type::Structure;
+pub use swap_inventory_slots_reducer::swap_inventory_slots;
 pub use swing_tool_reducer::swing_tool;
 pub use transform_table::*;
 pub use transform_type::Transform;
@@ -172,6 +194,31 @@ pub use waypoint_type::Waypoint;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    AdminClearInventory,
+    AdminDetonate {
+        radius: f32,
+        power: f32,
+    },
+    AdminGiveItem {
+        item_type: String,
+        amount: u32,
+    },
+    AdminGodMode,
+    AdminHeal {
+        amount: f32,
+    },
+    AdminKillAllNpcs,
+    AdminSetTime {
+        time_of_day: f32,
+    },
+    AdminSpawnNpc {
+        ai_type_str: String,
+        count: u32,
+    },
+    AdminTeleport {
+        x: f32,
+        z: f32,
+    },
     CastHighTierMagic {
         spell_type: MagicSpellType,
         target_x: f32,
@@ -208,6 +255,10 @@ pub enum Reducer {
         pos_z: f32,
         power: f32,
         radius: f32,
+    },
+    DropInventoryItem {
+        slot_index: u32,
+        amount: u32,
     },
     FireBow {
         client_tick: u64,
@@ -272,6 +323,10 @@ pub enum Reducer {
         in_interior: bool,
     },
     SpawnPeasant,
+    SwapInventorySlots {
+        from_slot: u32,
+        to_slot: u32,
+    },
     SwingTool {
         px: f32,
         py: f32,
@@ -289,6 +344,15 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::AdminClearInventory => "admin_clear_inventory",
+            Reducer::AdminDetonate { .. } => "admin_detonate",
+            Reducer::AdminGiveItem { .. } => "admin_give_item",
+            Reducer::AdminGodMode => "admin_god_mode",
+            Reducer::AdminHeal { .. } => "admin_heal",
+            Reducer::AdminKillAllNpcs => "admin_kill_all_npcs",
+            Reducer::AdminSetTime { .. } => "admin_set_time",
+            Reducer::AdminSpawnNpc { .. } => "admin_spawn_npc",
+            Reducer::AdminTeleport { .. } => "admin_teleport",
             Reducer::CastHighTierMagic { .. } => "cast_high_tier_magic",
             Reducer::ChangePetStance { .. } => "change_pet_stance",
             Reducer::CommandPeasant { .. } => "command_peasant",
@@ -297,6 +361,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::CraftItem { .. } => "craft_item",
             Reducer::DestroyStructure { .. } => "destroy_structure",
             Reducer::DetonateExplosiveCharge { .. } => "detonate_explosive_charge",
+            Reducer::DropInventoryItem { .. } => "drop_inventory_item",
             Reducer::FireBow { .. } => "fire_bow",
             Reducer::FireSiegeWeapon { .. } => "fire_siege_weapon",
             Reducer::FireWeapon { .. } => "fire_weapon",
@@ -308,6 +373,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetCameraMode { .. } => "set_camera_mode",
             Reducer::SetInteriorCulling { .. } => "set_interior_culling",
             Reducer::SpawnPeasant => "spawn_peasant",
+            Reducer::SwapInventorySlots { .. } => "swap_inventory_slots",
             Reducer::SwingTool { .. } => "swing_tool",
             _ => unreachable!(),
         }
@@ -315,6 +381,49 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
+            Reducer::AdminClearInventory => {
+                __sats::bsatn::to_vec(&admin_clear_inventory_reducer::AdminClearInventoryArgs {})
+            }
+            Reducer::AdminDetonate { radius, power } => {
+                __sats::bsatn::to_vec(&admin_detonate_reducer::AdminDetonateArgs {
+                    radius: radius.clone(),
+                    power: power.clone(),
+                })
+            }
+            Reducer::AdminGiveItem { item_type, amount } => {
+                __sats::bsatn::to_vec(&admin_give_item_reducer::AdminGiveItemArgs {
+                    item_type: item_type.clone(),
+                    amount: amount.clone(),
+                })
+            }
+            Reducer::AdminGodMode => {
+                __sats::bsatn::to_vec(&admin_god_mode_reducer::AdminGodModeArgs {})
+            }
+            Reducer::AdminHeal { amount } => {
+                __sats::bsatn::to_vec(&admin_heal_reducer::AdminHealArgs {
+                    amount: amount.clone(),
+                })
+            }
+            Reducer::AdminKillAllNpcs => {
+                __sats::bsatn::to_vec(&admin_kill_all_npcs_reducer::AdminKillAllNpcsArgs {})
+            }
+            Reducer::AdminSetTime { time_of_day } => {
+                __sats::bsatn::to_vec(&admin_set_time_reducer::AdminSetTimeArgs {
+                    time_of_day: time_of_day.clone(),
+                })
+            }
+            Reducer::AdminSpawnNpc { ai_type_str, count } => {
+                __sats::bsatn::to_vec(&admin_spawn_npc_reducer::AdminSpawnNpcArgs {
+                    ai_type_str: ai_type_str.clone(),
+                    count: count.clone(),
+                })
+            }
+            Reducer::AdminTeleport { x, z } => {
+                __sats::bsatn::to_vec(&admin_teleport_reducer::AdminTeleportArgs {
+                    x: x.clone(),
+                    z: z.clone(),
+                })
+            }
             Reducer::CastHighTierMagic {
                 spell_type,
                 target_x,
@@ -383,6 +492,12 @@ impl __sdk::Reducer for Reducer {
                     radius: radius.clone(),
                 },
             ),
+            Reducer::DropInventoryItem { slot_index, amount } => {
+                __sats::bsatn::to_vec(&drop_inventory_item_reducer::DropInventoryItemArgs {
+                    slot_index: slot_index.clone(),
+                    amount: amount.clone(),
+                })
+            }
             Reducer::FireBow {
                 client_tick,
                 origin_x,
@@ -499,6 +614,12 @@ impl __sdk::Reducer for Reducer {
             }
             Reducer::SpawnPeasant => {
                 __sats::bsatn::to_vec(&spawn_peasant_reducer::SpawnPeasantArgs {})
+            }
+            Reducer::SwapInventorySlots { from_slot, to_slot } => {
+                __sats::bsatn::to_vec(&swap_inventory_slots_reducer::SwapInventorySlotsArgs {
+                    from_slot: from_slot.clone(),
+                    to_slot: to_slot.clone(),
+                })
             }
             Reducer::SwingTool {
                 px,

@@ -71,10 +71,6 @@ pub struct VoxelGib {
     pub timer: Timer,
 }
 
-/// Architectural Note: Attached to felled trees to simulate a majestic, physical
-/// toppling arc. The tree pivots around its root base, accelerating under gravity
-/// until it reaches horizontal parallel alignment with the terrain, at which point
-/// it shatters into dynamic voxel timber and leaf gibs.
 #[derive(Component)]
 pub struct FallingTree {
     pub base_pos: Vec3,
@@ -113,8 +109,12 @@ pub struct InteriorProp;
 // ----------------------------------------------------------------------------
 
 #[derive(Component)] pub struct InventoryUiRoot; 
+#[derive(Component, Clone, Copy, Debug)] pub struct InventorySlotIndex(pub usize);
 #[derive(Component)] pub struct InventorySlotName(pub usize);
 #[derive(Component)] pub struct InventorySlotCount(pub usize);
+
+#[derive(Component)] pub struct DragGhostUi;
+#[derive(Component)] pub struct DragGhostText;
 
 #[derive(Component)] pub struct CraftRecipeButton(pub String);
 #[derive(Component)] #[allow(dead_code)] pub struct CraftRecipeText;
@@ -145,6 +145,15 @@ pub struct CachedPlayerEntity(pub Option<u64>);
 
 #[derive(Component)] pub struct ActionBarUiRoot;
 #[derive(Component)] pub struct ActionBarButton(pub String);
+
+// ----------------------------------------------------------------------------
+// DEVELOPER CONSOLE COMPONENTS
+// ----------------------------------------------------------------------------
+
+#[derive(Component)] pub struct ConsoleRoot;
+#[derive(Component)] pub struct ConsoleLogText;
+#[derive(Component)] pub struct ConsoleInputText;
+#[derive(Component)] pub struct ConsoleSuggestionsText;
 
 #[derive(Component)] 
 pub struct BerryVisual {

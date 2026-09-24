@@ -39,6 +39,7 @@ impl Default for CameraTransitionState {
 pub fn toggle_perspective(
     keys: Res<ButtonInput<KeyCode>>,
     state: Res<State<CameraMode>>,
+    console: Res<ConsoleState>,
     mut next_state: ResMut<NextState<CameraMode>>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     player_query: Query<&BevyTransform, With<PlayerBody>>,
@@ -47,6 +48,10 @@ pub fn toggle_perspective(
     mut culling_state: ResMut<NetworkCullingState>, 
     mut transition: ResMut<CameraTransitionState>,
 ) {
+    if console.is_open {
+        return;
+    }
+
     if keys.just_pressed(KeyCode::KeyV) {
         let Ok(mut window) = window_query.get_single_mut() else { return; };
         let Ok(player_transform) = player_query.get_single() else { return; };
@@ -105,8 +110,6 @@ pub fn update_camera_transition(
     }
 }
 
-// Architectural Note: Clean Camera Mode Transition Hooks.
-// Hides 2D floating health bar overlays instantly when entering FPS perspective.
 pub fn enable_fps_perspective(
     mut fps_cam: Query<&mut Camera, (With<FpsCamera>, Without<RtsCameraChild>)>,
     mut rts_cam: Query<&mut Camera, (With<RtsCameraChild>, Without<FpsCamera>)>,
@@ -177,13 +180,14 @@ pub fn interior_occlusion_culling_system(
 pub fn rts_camera_controller(
     keys: Res<ButtonInput<KeyCode>>, 
     time: Res<Time>,
+    console: Res<ConsoleState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut scroll_evts: EventReader<MouseWheel>,
     mut rig_query: Query<&mut BevyTransform, With<RtsCameraRig>>,
     mut child_camera_query: Query<&mut BevyTransform, (With<RtsCameraChild>, Without<RtsCameraRig>)>,
     transition: Res<CameraTransitionState>,
 ) {
-    if transition.is_transitioning { return; }
+    if transition.is_transitioning || console.is_open { return; }
 
     let Ok(mut rig_transform) = rig_query.get_single_mut() else { return; };
     let Ok(mut cam_transform) = child_camera_query.get_single_mut() else { return; };
@@ -232,6 +236,7 @@ pub fn fps_look(
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>, 
     keys: Res<ButtonInput<KeyCode>>,
+    console: Res<ConsoleState>,
     inv_query: Query<&Style, With<InventoryUiRoot>>,
     build_menu_query: Query<&Style, With<BuildMenuRoot>>,
 ) {
@@ -241,7 +246,7 @@ pub fn fps_look(
 
     let is_inventory_open = inv_query.get_single().map_or(false, |s| s.display != Display::None);
     let is_build_menu_open = build_menu_query.get_single().map_or(false, |s| s.display != Display::None);
-    let ui_active = is_inventory_open || is_build_menu_open;
+    let ui_active = is_inventory_open || is_build_menu_open || console.is_open;
 
     if ui_active {
         if window.cursor.grab_mode != CursorGrabMode::None {

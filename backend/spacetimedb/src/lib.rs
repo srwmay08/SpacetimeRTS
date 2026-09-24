@@ -1,6 +1,10 @@
 // ----------------------------------------------------------------------------
 // CORE MODULE IMPORTS & GLOBAL SCHEMAS (SpacetimeDB v2.x / Rust 2024 Edition)
 // ----------------------------------------------------------------------------
+// Architectural Note: Implements the authoritative server logic for the game.
+// Contains player progression, resource node harvesting, scheduled simulation
+// timers, administrative playtesting reducers, and inventory slot manipulation.
+
 use spacetimedb::{table, reducer, Identity, ReducerContext, Table, ScheduleAt, SpacetimeType};
 use std::time::Duration;
 use noise::{NoiseFn, Perlin};
@@ -13,9 +17,35 @@ pub mod voxel;
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history, faction_component, Faction};
-use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse};
+use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse, peasant, pet_component};
 use crate::building::{structure, Structure};
 use crate::voxel::voxel_chunk;
+
+// Architectural Note: Authoritative registry of all valid items with canonical casing.
+// Prevents non-canonical item formats (e.g. "wood", "branch", "loosestone") from polluting
+// inventory state and enforces deterministic stack behavior across client and server.
+pub const CANONICAL_ITEMS: &[&str] = &[
+    "Berry",
+    "Branch",
+    "Club",
+    "Cooked Meat",
+    "Crude Bow",
+    "Flint",
+    "Flint Arrow",
+    "Flint Spear",
+    "Hammer",
+    "Honey",
+    "Leather Scraps",
+    "LooseStone",
+    "Pickaxe",
+    "Resin",
+    "Stone",
+    "Stone Axe",
+    "Torch",
+    "Wood",
+    "Wood Arrow",
+    "Wooden Shield",
+];
 
 #[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CameraModeType {
@@ -176,13 +206,32 @@ pub struct RecipeDefinition {
     pub ingredients: Vec<RecipeIngredient>,
 }
 
+// ----------------------------------------------------------------------------
+// INVENTORY UTILITIES (Preserves Fixed 16-Slot Deterministic Indices)
+// ----------------------------------------------------------------------------
+
+pub fn ensure_inventory_capacity(inventory: &mut Inventory) {
+    while inventory.slots.len() < 16 {
+        inventory.slots.push(InventorySlot {
+            item_type: String::new(),
+            count: 0,
+        });
+    }
+}
+
 pub fn add_item(inventory: &mut Inventory, item_type: &str, mut amount: u32) {
+    if item_type.is_empty() || amount == 0 {
+        return;
+    }
+
     if !inventory.discovered_items.iter().any(|d| d == item_type) {
         inventory.discovered_items.push(item_type.to_string());
     }
 
+    ensure_inventory_capacity(inventory);
+
     for slot in inventory.slots.iter_mut() {
-        if slot.item_type == item_type && slot.count < 50 {
+        if slot.item_type == item_type && slot.count > 0 && slot.count < 50 {
             let space = 50 - slot.count;
             if amount <= space {
                 slot.count += amount;
@@ -195,19 +244,26 @@ pub fn add_item(inventory: &mut Inventory, item_type: &str, mut amount: u32) {
         }
     }
 
-    while amount > 0 && inventory.slots.len() < 16 {
-        let add_amt = amount.min(50);
-        inventory.slots.push(InventorySlot {
-            item_type: item_type.to_string(),
-            count: add_amt,
-        });
-        amount -= add_amt;
+    if amount > 0 {
+        for slot in inventory.slots.iter_mut() {
+            if slot.count == 0 || slot.item_type.is_empty() {
+                let add_amt = amount.min(50);
+                slot.item_type = item_type.to_string();
+                slot.count = add_amt;
+                amount -= add_amt;
+                if amount == 0 {
+                    break;
+                }
+            }
+        }
     }
 }
 
 pub fn remove_item(inventory: &mut Inventory, item_type: &str, mut amount: u32) -> bool {
+    ensure_inventory_capacity(inventory);
+
     let total: u32 = inventory.slots.iter()
-        .filter(|s| s.item_type == item_type)
+        .filter(|s| s.item_type == item_type && s.count > 0)
         .map(|s| s.count)
         .sum();
 
@@ -216,27 +272,34 @@ pub fn remove_item(inventory: &mut Inventory, item_type: &str, mut amount: u32) 
     }
 
     for slot in inventory.slots.iter_mut() {
-        if slot.item_type == item_type {
+        if slot.item_type == item_type && slot.count > 0 {
             if slot.count >= amount {
                 slot.count -= amount;
+                if slot.count == 0 {
+                    slot.item_type.clear();
+                }
                 break;
             } else {
                 amount -= slot.count;
                 slot.count = 0;
+                slot.item_type.clear();
             }
         }
     }
-    inventory.slots.retain(|s| s.count > 0);
     true
 }
 
 pub fn has_item(inventory: &Inventory, item_type: &str, amount: u32) -> bool {
     let total: u32 = inventory.slots.iter()
-        .filter(|s| s.item_type == item_type)
+        .filter(|s| s.item_type == item_type && s.count > 0)
         .map(|s| s.count)
         .sum();
     total >= amount
 }
+
+// ----------------------------------------------------------------------------
+// LIFECYCLE REDUCERS
+// ----------------------------------------------------------------------------
 
 #[spacetimedb::reducer(init)]
 pub fn init(ctx: &ReducerContext) {
@@ -461,10 +524,6 @@ pub fn client_connected(ctx: &ReducerContext) {
             }
         }
 
-        // Architectural Note: Starter Base Camp Initialization.
-        // Spawns a starter constructed Foundation (ID 1) AND an active constructed Workbench (ID 2).
-        // Establishes an immediate 20m working radius so players can construct walls/floors/roofs
-        // and craft advanced equipment without being blocked.
         let base_x = 0.0;
         let base_z = 15.0;
         let base_y = get_terrain_height(base_x, base_z) + 0.5;
@@ -605,6 +664,21 @@ pub fn client_connected(ctx: &ReducerContext) {
                 entity_id, snapshots: Vec::new(),
             });
         }
+
+        if let Some(mut inv) = ctx.db.inventory().entity_id().find(entity_id) {
+            ensure_inventory_capacity(&mut inv);
+            ctx.db.inventory().entity_id().update(inv);
+        } else {
+            let mut slots = Vec::with_capacity(16);
+            for _ in 0..16 {
+                slots.push(InventorySlot { item_type: String::new(), count: 0 });
+            }
+            ctx.db.inventory().insert(Inventory {
+                entity_id,
+                slots,
+                discovered_items: Vec::new(),
+            });
+        }
     } else {
         let inserted_player = ctx.db.player().insert(Player {
             entity_id: 0, identity: sender, is_online: true
@@ -633,9 +707,14 @@ pub fn client_connected(ctx: &ReducerContext) {
             entity_id, snapshots: Vec::new(),
         });
 
+        let mut slots = Vec::with_capacity(16);
+        for _ in 0..16 {
+            slots.push(InventorySlot { item_type: String::new(), count: 0 });
+        }
+
         ctx.db.inventory().insert(Inventory {
             entity_id,
-            slots: Vec::new(),
+            slots,
             discovered_items: Vec::new(),
         });
 
@@ -657,7 +736,362 @@ pub fn client_disconnected(ctx: &ReducerContext) {
 }
 
 // ----------------------------------------------------------------------------
-// AUTHORITATIVE PROGRESSION REDUCERS
+// INVENTORY INTERACTION & REORGANIZATION REDUCERS
+// ----------------------------------------------------------------------------
+
+#[reducer]
+pub fn swap_inventory_slots(ctx: &ReducerContext, from_slot: u32, to_slot: u32) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    if from_slot >= 16 || to_slot >= 16 {
+        return Err("Slot index out of bounds.".to_string());
+    }
+
+    let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Inventory not found.".to_string())?;
+
+    ensure_inventory_capacity(&mut inv);
+
+    let from_idx = from_slot as usize;
+    let to_idx = to_slot as usize;
+
+    if from_idx == to_idx {
+        return Ok(());
+    }
+
+    if inv.slots[from_idx].item_type == inv.slots[to_idx].item_type
+        && !inv.slots[from_idx].item_type.is_empty()
+        && inv.slots[from_idx].count > 0
+    {
+        let current_to = inv.slots[to_idx].count;
+        let available = 50u32.saturating_sub(current_to);
+        if available > 0 {
+            let move_amt = inv.slots[from_idx].count.min(available);
+            inv.slots[to_idx].count += move_amt;
+            inv.slots[from_idx].count -= move_amt;
+            if inv.slots[from_idx].count == 0 {
+                inv.slots[from_idx].item_type.clear();
+            }
+            ctx.db.inventory().entity_id().update(inv);
+            return Ok(());
+        }
+    }
+
+    inv.slots.swap(from_idx, to_idx);
+    ctx.db.inventory().entity_id().update(inv);
+    Ok(())
+}
+
+#[reducer]
+pub fn drop_inventory_item(ctx: &ReducerContext, slot_index: u32, mut amount: u32) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    if slot_index >= 16 {
+        return Err("Slot index out of bounds.".to_string());
+    }
+
+    let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Inventory not found.".to_string())?;
+
+    ensure_inventory_capacity(&mut inv);
+
+    let slot_idx = slot_index as usize;
+    if inv.slots[slot_idx].count == 0 || inv.slots[slot_idx].item_type.is_empty() {
+        return Err("Slot is empty.".to_string());
+    }
+
+    let item_type = inv.slots[slot_idx].item_type.clone();
+    if amount == 0 || amount > inv.slots[slot_idx].count {
+        amount = inv.slots[slot_idx].count;
+    }
+
+    inv.slots[slot_idx].count -= amount;
+    if inv.slots[slot_idx].count == 0 {
+        inv.slots[slot_idx].item_type.clear();
+    }
+    ctx.db.inventory().entity_id().update(inv);
+
+    let transform = ctx.db.transform().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Player transform missing.".to_string())?;
+
+    let drop_id = ((ctx.timestamp.to_micros_since_unix_epoch() as u64) << 16)
+        ^ (session.entity_id.wrapping_add(slot_index as u64 + 7777));
+
+    let drop_x = transform.x + 1.8;
+    let drop_z = transform.z + 1.8;
+    let drop_y = get_terrain_height(drop_x, drop_z) + 0.35;
+
+    ctx.db.harvestable_corpse().insert(crate::ai::HarvestableCorpse {
+        entity_id: drop_id,
+        loot_item: item_type.clone(),
+        amount,
+    });
+
+    ctx.db.transform().insert(crate::movement::Transform {
+        entity_id: drop_id,
+        x: drop_x,
+        y: drop_y,
+        z: drop_z,
+        chunk_x: (drop_x / 50.0).floor() as i32,
+        chunk_z: (drop_z / 50.0).floor() as i32,
+        last_processed_tick: 0,
+    });
+
+    ctx.db.health().insert(crate::combat::Health {
+        entity_id: drop_id,
+        current: 1.0,
+        max: 1.0,
+    });
+
+    log::debug!("Player {} dropped {}x '{}' into world.", session.entity_id, amount, item_type);
+    Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// ADMIN PLAYTESTING CONSOLE REDUCERS
+// ----------------------------------------------------------------------------
+
+#[reducer]
+pub fn admin_give_item(ctx: &ReducerContext, item_type: String, amount: u32) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    // Architectural Note: Strict Canonical Item Format Verification.
+    // Rejects non-canonical names (e.g. "wood", "branch", "loosestone") directly at the
+    // database boundary to guarantee data integrity in player inventories.
+    if !CANONICAL_ITEMS.contains(&item_type.as_str()) {
+        return Err(format!(
+            "Invalid item format '{}'. Item must match canonical casing exactly: {:?}",
+            item_type, CANONICAL_ITEMS
+        ));
+    }
+
+    let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Inventory not found.".to_string())?;
+
+    add_item(&mut inv, &item_type, amount);
+    ctx.db.inventory().entity_id().update(inv);
+
+    log::debug!("ADMIN: Player {} granted {}x '{}'", session.entity_id, amount, item_type);
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_teleport(ctx: &ReducerContext, x: f32, z: f32) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let mut transform = ctx.db.transform().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Transform not found.".to_string())?;
+
+    transform.x = x;
+    transform.z = z;
+    transform.y = get_terrain_height(x, z) + 1.5;
+    transform.chunk_x = (x / 50.0).floor() as i32;
+    transform.chunk_z = (z / 50.0).floor() as i32;
+
+    ctx.db.transform().entity_id().update(transform);
+    log::debug!("ADMIN: Player {} teleported to ({:.1}, {:.1})", session.entity_id, x, z);
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_heal(ctx: &ReducerContext, amount: f32) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let mut hp = ctx.db.health().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Health record missing.".to_string())?;
+
+    if amount <= 0.0 {
+        hp.current = hp.max;
+    } else {
+        hp.current = (hp.current + amount).min(hp.max);
+    }
+
+    ctx.db.health().entity_id().update(hp);
+    log::debug!("ADMIN: Player {} healed to {:.0} HP", session.entity_id, amount);
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_god_mode(ctx: &ReducerContext) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let mut hp = ctx.db.health().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Health record missing.".to_string())?;
+
+    hp.max = 99999.0;
+    hp.current = 99999.0;
+    ctx.db.health().entity_id().update(hp);
+
+    log::debug!("ADMIN: God mode enabled for player {}", session.entity_id);
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_set_time(ctx: &ReducerContext, time_of_day: f32) -> Result<(), String> {
+    let mut state = ctx.db.global_state().id().find(0)
+        .ok_or_else(|| "Global state missing.".to_string())?;
+
+    state.time_of_day = time_of_day.rem_euclid(24.0);
+    ctx.db.global_state().id().update(state);
+
+    log::debug!("ADMIN: World time updated to {:.1}", time_of_day);
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_clear_inventory(ctx: &ReducerContext) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Inventory not found.".to_string())?;
+
+    inv.slots.clear();
+    ensure_inventory_capacity(&mut inv);
+    ctx.db.inventory().entity_id().update(inv);
+
+    log::debug!("ADMIN: Player {} inventory cleared.", session.entity_id);
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_spawn_npc(ctx: &ReducerContext, ai_type_str: String, count: u32) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let p_transform = ctx.db.transform().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Transform missing.".to_string())?;
+
+    let ai_type = match ai_type_str.to_lowercase().as_str() {
+        "boar" => AiType::Boar,
+        "goblin" => AiType::Goblin,
+        "peasant" => AiType::Peasant,
+        _ => AiType::Deer,
+    };
+
+    let mut seed = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    let spawn_count = count.clamp(1, 25);
+
+    for i in 0..spawn_count {
+        let offset_x = (prng(&mut seed) * 12.0) - 6.0;
+        let offset_z = (prng(&mut seed) * 12.0) - 6.0;
+        let sx = p_transform.x + offset_x;
+        let sz = p_transform.z + offset_z;
+        let sy = get_terrain_height(sx, sz) + 1.2;
+
+        let entity_id = ((ctx.timestamp.to_micros_since_unix_epoch() as u64) << 12)
+            ^ (session.entity_id.wrapping_add(i as u64 * 313 + 555));
+
+        ctx.db.transform().insert(movement::Transform {
+            entity_id,
+            x: sx,
+            y: sy,
+            z: sz,
+            chunk_x: (sx / 50.0).floor() as i32,
+            chunk_z: (sz / 50.0).floor() as i32,
+            last_processed_tick: 0,
+        });
+
+        let hp_val = match ai_type {
+            AiType::Boar => 60.0,
+            AiType::Goblin => 45.0,
+            AiType::Peasant => 50.0,
+            _ => 30.0,
+        };
+
+        ctx.db.health().insert(combat::Health { entity_id, current: hp_val, max: hp_val });
+
+        let faction = match ai_type {
+            AiType::Goblin => Faction::Goblin,
+            AiType::Peasant => Faction::Villager,
+            _ => Faction::Wildlife,
+        };
+        ctx.db.faction_component().insert(combat::FactionComponent { entity_id, faction });
+
+        ctx.db.npc_brain().insert(crate::ai::NpcBrain {
+            entity_id,
+            ai_type,
+            state: BrainState::Idle,
+            target_id: None,
+            timer: 0.0,
+            home_x: sx,
+            home_z: sz,
+            wander_x: sx,
+            wander_z: sz,
+        });
+
+        if ai_type == AiType::Peasant {
+            ctx.db.peasant().insert(crate::ai::Peasant {
+                entity_id,
+                owner_id: session.entity_id,
+                state: crate::ai::AiState::Idle,
+                carrying_item: "None".to_string(),
+                carrying_amount: 0,
+                last_harvest_target: None,
+                consecutive_stuck_ticks: 0,
+                auto_gather_type: "None".to_string(),
+            });
+        }
+    }
+
+    log::debug!("ADMIN: Spawned {}x {:?} around player {}", spawn_count, ai_type, session.entity_id);
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_detonate(ctx: &ReducerContext, radius: f32, power: f32) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let p_transform = ctx.db.transform().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Transform missing.".to_string())?;
+
+    let safe_radius = radius.clamp(1.0, 16.0);
+    crate::voxel::mutate_voxel_sphere(ctx, p_transform.x, p_transform.y - 0.5, p_transform.z, safe_radius, power);
+
+    ctx.db.combat_event().insert(CombatEvent {
+        id: 0,
+        event_type: "ExplosionBlast".to_string(),
+        x: p_transform.x,
+        y: p_transform.y,
+        z: p_transform.z,
+    });
+
+    log::debug!("ADMIN: Blast of radius {:.1} detonated at player {}", safe_radius, session.entity_id);
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_kill_all_npcs(ctx: &ReducerContext) -> Result<(), String> {
+    let victim_ids: Vec<u64> = ctx.db.npc_brain().iter()
+        .map(|b| b.entity_id)
+        .collect();
+
+    for id in victim_ids {
+        ctx.db.npc_brain().entity_id().delete(id);
+        ctx.db.health().entity_id().delete(id);
+        ctx.db.transform().entity_id().delete(id);
+        ctx.db.faction_component().entity_id().delete(id);
+        if ctx.db.peasant().entity_id().find(id).is_some() {
+            ctx.db.peasant().entity_id().delete(id);
+        }
+        if ctx.db.pet_component().entity_id().find(id).is_some() {
+            ctx.db.pet_component().entity_id().delete(id);
+        }
+    }
+
+    log::debug!("ADMIN: Cleaned all active NPC brain entities.");
+    Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// PROGRESSION & INTERACTION REDUCERS
 // ----------------------------------------------------------------------------
 
 #[reducer]
@@ -743,10 +1177,6 @@ pub fn craft_item(ctx: &ReducerContext, recipe_id: String) -> Result<(), String>
     );
     Ok(())
 }
-
-// ----------------------------------------------------------------------------
-// INTERACTION REDUCERS
-// ----------------------------------------------------------------------------
 
 #[reducer]
 pub fn interact_node(ctx: &ReducerContext, node_id: u64) -> Result<(), String> {
@@ -865,7 +1295,9 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
                     ctx.db.health().entity_id().delete(target.entity_id);
                     ctx.db.transform().entity_id().delete(target.entity_id);
                     ctx.db.faction_component().entity_id().delete(target.entity_id);
-                    ctx.db.npc_brain().entity_id().delete(target.entity_id);
+                    if ctx.db.npc_brain().entity_id().find(target.entity_id).is_some() {
+                        ctx.db.npc_brain().entity_id().delete(target.entity_id);
+                    }
                     ctx.db.harvestable_corpse().entity_id().delete(target.entity_id);
                 }
             }
