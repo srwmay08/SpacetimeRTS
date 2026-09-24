@@ -101,6 +101,10 @@ pub struct ActiveItemSlot(pub usize);
 #[derive(Resource, Component, Clone, Debug, Default)] 
 pub struct ActiveEquippedItem(pub Option<String>);
 
+// Cached player entity ID to avoid repeated DB lookups
+#[derive(Resource, Default)]
+pub struct CachedPlayerEntity(pub Option<u64>);
+
 // Bottom-Left Health Meter
 #[derive(Component)] pub struct HealthBarFill;
 #[derive(Component)] pub struct HealthBarText;

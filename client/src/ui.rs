@@ -475,63 +475,126 @@ pub fn handle_crafting_interaction(
     }
 }
 
-// Architectural Note: Disjoint Hotbar Text Queries
-// Mutually exclusive filters (Without<HotbarSlotCount> and Without<HotbarSlotName>)
-// prevent Bevy B0001 mutable aliasing query conflicts.
+// Architectural Note: Optimized Hotbar UI with change detection and caching.
+// - Caches player entity_id to avoid repeated DB lookups
+// - Only updates text when values actually change
+// - Uses Local<> to track previous state
 pub fn update_hotbar_ui(
     conn: Res<SpacetimeConnection>,
     active_slot: Res<ActiveItemSlot>,
+    mut cached_player: ResMut<CachedPlayerEntity>,
     mut slot_q: Query<(&HotbarSlotUi, &mut BorderColor, &mut BackgroundColor)>,
     mut name_q: Query<(&mut Text, &HotbarSlotName), Without<HotbarSlotCount>>,
     mut count_q: Query<(&mut Text, &HotbarSlotCount), Without<HotbarSlotName>>,
+    mut last_active_slot: Local<Option<usize>>,
+    mut last_inventory_hash: Local<u64>,
 ) {
     let Some(identity) = &conn.identity else { return; };
-    let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
-    let Some(inventory) = conn.db.db.inventory().entity_id().find(&player.entity_id) else { return; };
-
-    for (slot_ui, mut border, mut bg) in slot_q.iter_mut() {
-        if slot_ui.0 == active_slot.0 {
-            *border = Color::srgb(1.0, 0.85, 0.2).into();
-            *bg = Color::srgba(0.25, 0.25, 0.15, 0.95).into();
-        } else {
-            *border = Color::srgba(0.4, 0.4, 0.4, 0.8).into();
-            *bg = Color::srgba(0.1, 0.1, 0.1, 0.85).into();
+    
+    // Fix 1: Cache player entity_id lookup
+    let player_entity_id = match cached_player.0 {
+        Some(id) => id,
+        None => {
+            let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
+            cached_player.0 = Some(player.entity_id);
+            player.entity_id
         }
+    };
+    
+    let Some(inventory) = conn.db.db.inventory().entity_id().find(&player_entity_id) else { return; };
+    
+    // Compute inventory hash for change detection (Fix 2)
+    let inventory_hash = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        inventory.slots.len().hash(&mut hasher);
+        for slot in &inventory.slots {
+            slot.item_type.hash(&mut hasher);
+            slot.count.hash(&mut hasher);
+        }
+        hasher.finish()
+    };
+    
+    // Fix 3: Only update slot colors when active_slot changes
+    let active_changed = *last_active_slot != Some(active_slot.0);
+    if active_changed {
+        for (slot_ui, mut border, mut bg) in slot_q.iter_mut() {
+            if slot_ui.0 == active_slot.0 {
+                *border = Color::srgb(1.0, 0.85, 0.2).into();
+                *bg = Color::srgba(0.25, 0.25, 0.15, 0.95).into();
+            } else {
+                *border = Color::srgba(0.4, 0.4, 0.4, 0.8).into();
+                *bg = Color::srgba(0.1, 0.1, 0.1, 0.85).into();
+            }
+        }
+        *last_active_slot = Some(active_slot.0);
     }
-
-    for (mut text, name) in name_q.iter_mut() {
-        if let Some(slot) = inventory.slots.get(name.0) {
-            text.sections[0].value = slot.item_type.clone();
-        } else {
-            text.sections[0].value = "".to_string();
+    
+    // Fix 2: Only update text when inventory changes
+    let inventory_changed = *last_inventory_hash != inventory_hash;
+    if inventory_changed {
+        for (mut text, name) in name_q.iter_mut() {
+            let new_value = inventory.slots.get(name.0)
+                .map(|s| s.item_type.as_str())
+                .unwrap_or("");
+            if text.sections[0].value != new_value {
+                text.sections[0].value = new_value.to_string();
+            }
         }
-    }
-
-    for (mut text, count) in count_q.iter_mut() {
-        if let Some(slot) = inventory.slots.get(count.0) {
-            text.sections[0].value = if slot.count > 1 { slot.count.to_string() } else { "".to_string() };
-        } else {
-            text.sections[0].value = "".to_string();
+        
+        for (mut text, count) in count_q.iter_mut() {
+            let new_value = inventory.slots.get(count.0)
+                .map(|s| if s.count > 1 { s.count.to_string() } else { "".to_string() })
+                .unwrap_or_default();
+            if text.sections[0].value != new_value {
+                text.sections[0].value = new_value;
+            }
         }
+        *last_inventory_hash = inventory_hash;
     }
 }
 
+// Architectural Note: Optimized Health Bar with change detection.
+// - Caches player entity_id to avoid repeated DB lookups
+// - Only updates UI when health values actually change
 pub fn update_hud_health_bar(
     conn: Res<SpacetimeConnection>,
+    mut cached_player: ResMut<CachedPlayerEntity>,
     mut fill_q: Query<&mut Style, With<HealthBarFill>>,
     mut text_q: Query<&mut Text, With<HealthBarText>>,
+    mut last_health: Local<Option<(f32, f32)>>,
 ) {
     let Some(identity) = &conn.identity else { return; };
-    let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
-    let Some(hp) = conn.db.db.health().entity_id().find(&player.entity_id) else { return; };
-
+    
+    // Fix 1: Cache player entity_id lookup
+    let player_entity_id = match cached_player.0 {
+        Some(id) => id,
+        None => {
+            let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
+            cached_player.0 = Some(player.entity_id);
+            player.entity_id
+        }
+    };
+    
+    let Some(hp) = conn.db.db.health().entity_id().find(&player_entity_id) else { return; };
+    
+    // Fix 2: Only update when health changes
+    let current_health = (hp.current, hp.max);
+    if *last_health == Some(current_health) {
+        return;
+    }
+    *last_health = Some(current_health);
+    
     let ratio = (hp.current / hp.max).clamp(0.0, 1.0);
 
     if let Ok(mut style) = fill_q.get_single_mut() {
         style.width = Val::Percent(ratio * 100.0);
     }
     if let Ok(mut text) = text_q.get_single_mut() {
-        text.sections[0].value = format!("{:.0} / {:.0}", hp.current, hp.max);
+        let new_text = format!("{:.0} / {:.0}", hp.current, hp.max);
+        if text.sections[0].value != new_text {
+            text.sections[0].value = new_text;
+        }
     }
 }
 

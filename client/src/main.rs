@@ -48,6 +48,7 @@ fn main() {
         .insert_resource(NetworkCullingState::default()) 
         .insert_resource(CameraTransitionState::default())
         .insert_resource(ActiveItemSlot(0))
+        .insert_resource(CachedPlayerEntity::default())
         .insert_resource(ActiveEquippedItem(None))
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState { is_swinging: false, timer: Timer::from_seconds(0.3, TimerMode::Once) })
