@@ -36,6 +36,10 @@ fn main() {
         .add_plugins(prediction::PredictionPlugin) 
         .insert_resource(Msaa::Off)
         
+        // Architectural Note: Luminous Sky Clear Color.
+        // Synchronized with FogSettings (0.75, 0.84, 0.92) to form an airy, cohesive horizon.
+        .insert_resource(ClearColor(Color::srgb(0.75, 0.84, 0.92)))
+
         .init_state::<GameState>()
         .init_state::<CameraMode>()
         .add_event::<ActionEvent>() 
@@ -53,7 +57,7 @@ fn main() {
         .insert_resource(ActiveEquippedItem(None))
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState { is_swinging: false, timer: Timer::from_seconds(0.3, TimerMode::Once) })
-        .insert_resource(AmbientLight { color: Color::srgb(1.0, 0.95, 0.9), brightness: 400.0 })
+        .insert_resource(AmbientLight { color: Color::srgb(0.95, 0.98, 1.0), brightness: 550.0 })
         .insert_resource(TelemetryTracker { last_frame_time: 0.0, frame_drop_threshold: 0.1 })
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)

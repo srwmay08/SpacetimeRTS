@@ -618,9 +618,12 @@ pub fn client_connected(ctx: &ReducerContext) {
         }
     }
 
+    // Architectural Note: Voxel Chunk Seed Coverage (0.25m / 4.0m Chunks).
+    // Initializing cy across 0..=3 provides complete vertical coverage from 0.0m to 16.0m
+    // at origin spawn, matching 4.0m chunk dimensions without voids.
     if ctx.db.voxel_chunk().iter().count() == 0 {
         for cz in -2..=2 {
-            for cy in 0..=1 {
+            for cy in 0..=3 {
                 for cx in -2..=2 {
                     crate::voxel::ensure_or_create_chunk(ctx, cx, cy, cz);
                 }
@@ -858,9 +861,6 @@ pub fn admin_give_item(ctx: &ReducerContext, item_type: String, amount: u32) -> 
     let session = ctx.db.player_session().identity().find(ctx.sender())
         .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
 
-    // Architectural Note: Strict Canonical Item Format Verification.
-    // Rejects non-canonical names (e.g. "wood", "branch", "loosestone") directly at the
-    // database boundary to guarantee data integrity in player inventories.
     if !CANONICAL_ITEMS.contains(&item_type.as_str()) {
         return Err(format!(
             "Invalid item format '{}'. Item must match canonical casing exactly: {:?}",

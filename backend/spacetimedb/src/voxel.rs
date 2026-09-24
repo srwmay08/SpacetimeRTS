@@ -1,12 +1,10 @@
 // ----------------------------------------------------------------------------
 // VOXEL WORLD & DESTRUCTION MODULE (SpacetimeDB v2.x / Rust 2024 Edition)
 // ----------------------------------------------------------------------------
-// Architectural Note: This module implements a networked voxel data structure
-// representing destructible terrain and volumetric fortifications. Voxel chunks
-// are spatially hashed into 64-bit keys for single-cycle primary key lookups,
-// keeping SpacetimeDB compute energy (TeV) minimal. Explosive charges, siege
-// artillery, and high-tier magic mutate these volumes directly, triggering
-// neighbor-invalidation checks that induce structural collapse when support is lost.
+// Architectural Note: Represents the server-authoritative voxel volumetric system.
+// Coordinates spherical blast excavation, structural support evaluations, and
+// continuous physical invalidation checks. Keeps SpacetimeDB compute energy (TeV)
+// minimal by operating on packed 64-bit chunk keys with deterministic 16^3 indexing.
 
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
 use crate::movement::player_session;
@@ -14,9 +12,6 @@ use crate::CombatEvent;
 use crate::combat_event;
 use crate::nav_event;
 
-// Architectural Note: Bringing the `active_projectile` accessor trait into scope
-// is strictly required by SpacetimeDB v2.x so `ctx.db.active_projectile()` can be
-// called inside `fire_siege_weapon` without generating an E0599 missing method error.
 use crate::combat::active_projectile;
 
 /// Chunk dimensions along each orthogonal axis (16x16x16 = 4,096 voxels per chunk).
@@ -24,6 +19,11 @@ use crate::combat::active_projectile;
 /// with SpacetimeDB BSATN serialization limits and efficient WebSocket packet framing.
 pub const CHUNK_SIZE: usize = 16;
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
+
+// Architectural Note: Authoritative Metric Voxel Scale (0.25m / 25cm).
+// Defines each discrete voxel cell as 0.25m x 0.25m x 0.25m, aligning the backend
+// volume model with the client Surface Nets dual-contouring mesher.
+pub const VOXEL_SIZE: f32 = 0.25;
 
 /// Voxel density and material categorization.
 #[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,11 +109,13 @@ pub fn local_to_index(lx: usize, ly: usize, lz: usize) -> usize {
     lx + (ly * CHUNK_SIZE) + (lz * CHUNK_SIZE * CHUNK_SIZE)
 }
 
-/// Converts world floating-point coordinates into chunk coordinates and local voxel indices.
+// Architectural Note: Metric World-to-Voxel Transformation.
+// Dividing metric world floating point coordinates by `VOXEL_SIZE` (0.25m)
+// maps continuous entity and projectile positions into discrete 25cm grid spaces.
 pub fn world_to_voxel(wx: f32, wy: f32, wz: f32) -> (i32, i32, i32, usize, usize, usize) {
-    let vx = wx.floor() as i32;
-    let vy = wy.floor() as i32;
-    let vz = wz.floor() as i32;
+    let vx = (wx / VOXEL_SIZE).floor() as i32;
+    let vy = (wy / VOXEL_SIZE).floor() as i32;
+    let vz = (wz / VOXEL_SIZE).floor() as i32;
 
     let cx = vx.div_euclid(CHUNK_SIZE as i32);
     let cy = vy.div_euclid(CHUNK_SIZE as i32);
@@ -140,7 +142,9 @@ pub fn get_voxel_at(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32) -> VoxelMat
     VoxelMaterial::Air
 }
 
-/// Generates a solid terrain chunk populated according to procedural elevation heights.
+// Architectural Note: Procedural Chunk Generation with Scaled Voxel Metric Offsets.
+// Each discrete voxel step advances world coordinate elevation queries by `VOXEL_SIZE` (0.25m),
+// populating soil and stone strata that align with sub-meter continuous terrain height.
 pub fn ensure_or_create_chunk(ctx: &ReducerContext, cx: i32, cy: i32, cz: i32) -> VoxelChunk {
     let key = pack_chunk_key(cx, cy, cz);
     if let Some(chunk) = ctx.db.voxel_chunk().chunk_key().find(key) {
@@ -148,18 +152,18 @@ pub fn ensure_or_create_chunk(ctx: &ReducerContext, cx: i32, cy: i32, cz: i32) -
     }
 
     let mut voxels = vec![VoxelMaterial::Air as u8; CHUNK_VOLUME];
-    let base_world_x = cx * CHUNK_SIZE as i32;
-    let base_world_y = cy * CHUNK_SIZE as i32;
-    let base_world_z = cz * CHUNK_SIZE as i32;
+    let base_voxel_x = cx * CHUNK_SIZE as i32;
+    let base_voxel_y = cy * CHUNK_SIZE as i32;
+    let base_voxel_z = cz * CHUNK_SIZE as i32;
 
     for lz in 0..CHUNK_SIZE {
         for lx in 0..CHUNK_SIZE {
-            let wx = (base_world_x + lx as i32) as f32;
-            let wz = (base_world_z + lz as i32) as f32;
+            let wx = (base_voxel_x + lx as i32) as f32 * VOXEL_SIZE;
+            let wz = (base_voxel_z + lz as i32) as f32 * VOXEL_SIZE;
             let terrain_height = crate::get_terrain_height(wx, wz);
 
             for ly in 0..CHUNK_SIZE {
-                let wy = (base_world_y + ly as i32) as f32;
+                let wy = (base_voxel_y + ly as i32) as f32 * VOXEL_SIZE;
                 let idx = local_to_index(lx, ly, lz);
 
                 if wy <= 0.0 {
@@ -188,9 +192,10 @@ pub fn ensure_or_create_chunk(ctx: &ReducerContext, cx: i32, cy: i32, cz: i32) -
     chunk
 }
 
-/// Architectural Note: Mutates voxels within a spherical blast zone and executes
-/// structural neighbor-invalidation validation. High-tier magic, siege weaponry,
-/// and explosive charges invoke this reducer directly.
+// Architectural Note: Sub-Meter Voxel Sphere Mutation.
+// Bounds testing divides metric explosion radius by `VOXEL_SIZE` and measures
+// distances from voxel cell centers `(vx + 0.5) * VOXEL_SIZE` to the detonation epicenter,
+// creating spherical blast cavities with smooth, sub-meter resolution.
 pub fn mutate_voxel_sphere(
     ctx: &ReducerContext,
     center_x: f32,
@@ -202,21 +207,21 @@ pub fn mutate_voxel_sphere(
     let mut modified_chunk_keys = std::collections::HashSet::new();
     let mut invalidated_voxels = Vec::new();
 
-    let min_x = (center_x - radius).floor() as i32;
-    let max_x = (center_x + radius).ceil() as i32;
-    let min_y = (center_y - radius).floor() as i32;
-    let max_y = (center_y + radius).ceil() as i32;
-    let min_z = (center_z - radius).floor() as i32;
-    let max_z = (center_z + radius).ceil() as i32;
+    let min_x = ((center_x - radius) / VOXEL_SIZE).floor() as i32;
+    let max_x = ((center_x + radius) / VOXEL_SIZE).ceil() as i32;
+    let min_y = ((center_y - radius) / VOXEL_SIZE).floor() as i32;
+    let max_y = ((center_y + radius) / VOXEL_SIZE).ceil() as i32;
+    let min_z = ((center_z - radius) / VOXEL_SIZE).floor() as i32;
+    let max_z = ((center_z + radius) / VOXEL_SIZE).ceil() as i32;
 
     let rad_sq = radius * radius;
 
     for vy in min_y..=max_y {
         for vz in min_z..=max_z {
             for vx in min_x..=max_x {
-                let dx = vx as f32 + 0.5 - center_x;
-                let dy = vy as f32 + 0.5 - center_y;
-                let dz = vz as f32 + 0.5 - center_z;
+                let dx = (vx as f32 + 0.5) * VOXEL_SIZE - center_x;
+                let dy = (vy as f32 + 0.5) * VOXEL_SIZE - center_y;
+                let dz = (vz as f32 + 0.5) * VOXEL_SIZE - center_z;
                 let dist_sq = dx * dx + dy * dy + dz * dz;
 
                 if dist_sq <= rad_sq {
@@ -263,15 +268,13 @@ pub fn mutate_voxel_sphere(
     modified_chunk_keys.into_iter().collect()
 }
 
-/// Architectural Note: Structural Collapse Evaluation Algorithm.
-/// When voxels are hollowed out, voxels directly above and surrounding the void
-/// are tested for connection to solid ground. If a cluster loses grounded support,
-/// it collapses, cascading damage to attached modular structural pieces.
+// Architectural Note: Structural Collapse Evaluation with 32-Step Search Depth.
+// Because voxels are 0.25m, search depth extends to 32 steps, maintaining an identical
+// 8.0-meter physical connectivity span before overhangs collapse into falling rubble.
 fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i32, i32)]) {
     let mut check_queue = std::collections::VecDeque::new();
     let mut visited = std::collections::HashSet::new();
 
-    // Collect direct neighbors of destroyed voxels
     for &(rx, ry, rz) in removed_voxels {
         let neighbors = [
             (rx, ry + 1, rz),
@@ -293,31 +296,33 @@ fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i3
     let mut collapsing_voxels = Vec::new();
 
     while let Some((x, y, z)) = check_queue.pop_front() {
-        let mat = get_voxel_at(ctx, x as f32, y as f32, z as f32);
+        let wx = (x as f32 + 0.5) * VOXEL_SIZE;
+        let wy = (y as f32 + 0.5) * VOXEL_SIZE;
+        let wz = (z as f32 + 0.5) * VOXEL_SIZE;
+        let mat = get_voxel_at(ctx, wx, wy, wz);
         if !mat.is_solid() || mat == VoxelMaterial::Bedrock {
             continue;
         }
 
-        // Verify if voxel is anchored to base ground elevation or connected downwards
         let mut has_ground_support = false;
-        let ground_y = crate::get_terrain_height(x as f32, z as f32).floor() as i32;
+        let ground_y = crate::get_terrain_height(wx, wz);
 
-        if y <= ground_y || y <= 0 {
+        if wy <= ground_y || y <= 0 {
             has_ground_support = true;
         } else {
-            // Check downward 6-connectivity support tree (bounded depth of 8)
             let mut search_visited = std::collections::HashSet::new();
             let mut search_queue = std::collections::VecDeque::new();
             search_queue.push_back((x, y, z, 0));
             search_visited.insert((x, y, z));
 
             while let Some((sx, sy, sz, depth)) = search_queue.pop_front() {
-                if sy <= ground_y || sy <= 0 {
+                let swy = (sy as f32 + 0.5) * VOXEL_SIZE;
+                if swy <= ground_y || sy <= 0 {
                     has_ground_support = true;
                     break;
                 }
 
-                if depth >= 8 {
+                if depth >= 32 {
                     continue;
                 }
 
@@ -332,7 +337,10 @@ fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i3
                 for dn in down_neighbors {
                     if !search_visited.contains(&dn) {
                         search_visited.insert(dn);
-                        let neighbor_mat = get_voxel_at(ctx, dn.0 as f32, dn.1 as f32, dn.2 as f32);
+                        let d_wx = (dn.0 as f32 + 0.5) * VOXEL_SIZE;
+                        let d_wy = (dn.1 as f32 + 0.5) * VOXEL_SIZE;
+                        let d_wz = (dn.2 as f32 + 0.5) * VOXEL_SIZE;
+                        let neighbor_mat = get_voxel_at(ctx, d_wx, d_wy, d_wz);
                         if neighbor_mat.is_solid() {
                             search_queue.push_back((dn.0, dn.1, dn.2, depth + 1));
                         }
@@ -346,9 +354,12 @@ fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i3
         }
     }
 
-    // Mutate collapsed voxels to air and trigger collapse visual events
     for (cx_v, cy_v, cz_v) in collapsing_voxels {
-        let (cx, cy, cz, lx, ly, lz) = world_to_voxel(cx_v as f32, cy_v as f32, cz_v as f32);
+        let wx = (cx_v as f32 + 0.5) * VOXEL_SIZE;
+        let wy = (cy_v as f32 + 0.5) * VOXEL_SIZE;
+        let wz = (cz_v as f32 + 0.5) * VOXEL_SIZE;
+
+        let (cx, cy, cz, lx, ly, lz) = world_to_voxel(wx, wy, wz);
         let key = pack_chunk_key(cx, cy, cz);
 
         if let Some(mut chunk) = ctx.db.voxel_chunk().chunk_key().find(key) {
@@ -360,14 +371,13 @@ fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i3
             ctx.db.combat_event().insert(CombatEvent {
                 id: 0,
                 event_type: "VoxelCollapse".to_string(),
-                x: cx_v as f32 + 0.5,
-                y: cy_v as f32 + 0.5,
-                z: cz_v as f32 + 0.5,
+                x: wx,
+                y: wy,
+                z: wz,
             });
         }
 
-        // Trigger structural piece collapse if a Foundation or Wall rested on this voxel
-        crate::building::invalidate_structures_at(ctx, cx_v as f32, cy_v as f32, cz_v as f32);
+        crate::building::invalidate_structures_at(ctx, wx, wy, wz);
     }
 }
 
