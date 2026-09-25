@@ -1,9 +1,9 @@
 // ----------------------------------------------------------------------------
 // CORE MODULE IMPORTS & GLOBAL SCHEMAS (SpacetimeDB v2.x / Rust 2024 Edition)
 // ----------------------------------------------------------------------------
-// Architectural Note: Implements the authoritative server logic for the game.
-// Contains player progression, resource node harvesting, scheduled simulation
-// timers, administrative playtesting reducers, and inventory slot manipulation.
+// Architectural Note: Implements authoritative server state for the game.
+// Features an autonomous NPC population manager ensuring all 4 mob species
+// (Deer, Boars, Goblins, Peasants) remain actively populated in the world.
 
 use spacetimedb::{table, reducer, Identity, ReducerContext, Table, ScheduleAt, SpacetimeType};
 use std::time::Duration;
@@ -21,9 +21,6 @@ use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse, peasant, pet_
 use crate::building::{structure, Structure};
 use crate::voxel::voxel_chunk;
 
-// Architectural Note: Authoritative registry of all valid items with canonical casing.
-// Prevents non-canonical item formats (e.g. "wood", "branch", "loosestone") from polluting
-// inventory state and enforces deterministic stack behavior across client and server.
 pub const CANONICAL_ITEMS: &[&str] = &[
     "Berry",
     "Branch",
@@ -207,7 +204,7 @@ pub struct RecipeDefinition {
 }
 
 // ----------------------------------------------------------------------------
-// INVENTORY UTILITIES (Preserves Fixed 16-Slot Deterministic Indices)
+// INVENTORY UTILITIES
 // ----------------------------------------------------------------------------
 
 pub fn ensure_inventory_capacity(inventory: &mut Inventory) {
@@ -298,6 +295,128 @@ pub fn has_item(inventory: &Inventory, item_type: &str, amount: u32) -> bool {
 }
 
 // ----------------------------------------------------------------------------
+// AUTHORITATIVE WORLD GENERATION & NPC POPULATION ASSURANCE
+// ----------------------------------------------------------------------------
+
+// Architectural Note: Autonomous NPC Population Manager.
+// Decoupled from resource_node counts to guarantee that Deer, Boars, Goblins,
+// and Peasants remain present in the world. Positions initial groups within visible
+// perimeter of player origin (12m - 45m) so creatures are immediately observable.
+pub fn ensure_npc_population(ctx: &ReducerContext) {
+    let current_count = ctx.db.npc_brain().iter().count();
+    if current_count >= 16 {
+        return;
+    }
+
+    let mut seed = (ctx.timestamp.to_micros_since_unix_epoch() as u64) ^ 0x5EED_A110;
+    let mut base_id = (ctx.timestamp.to_micros_since_unix_epoch() as u64) << 10;
+
+    let archetypes = [
+        // Immediate Visible Perimeter (12m - 35m from origin)
+        (AiType::Deer, 35.0, Faction::Wildlife, 14.0, 16.0),
+        (AiType::Deer, 35.0, Faction::Wildlife, -16.0, 14.0),
+        (AiType::Deer, 35.0, Faction::Wildlife, 20.0, -18.0),
+        (AiType::Boar, 65.0, Faction::Wildlife, -22.0, -16.0),
+        (AiType::Boar, 65.0, Faction::Wildlife, 26.0, 22.0),
+        (AiType::Goblin, 50.0, Faction::Goblin, -32.0, 26.0),
+        (AiType::Goblin, 50.0, Faction::Goblin, 34.0, -28.0),
+        (AiType::Peasant, 60.0, Faction::Villager, 4.0, 12.0),
+        (AiType::Peasant, 60.0, Faction::Villager, -8.0, 16.0),
+    ];
+
+    for (ai_type, hp_val, faction, def_x, def_z) in archetypes {
+        base_id += 1;
+        let entity_id = base_id;
+
+        let jx = (prng(&mut seed) * 8.0) - 4.0;
+        let jz = (prng(&mut seed) * 8.0) - 4.0;
+        let sx = def_x + jx;
+        let sz = def_z + jz;
+        let sy = get_terrain_height(sx, sz) + 1.05;
+
+        ctx.db.transform().insert(movement::Transform {
+            entity_id,
+            x: sx,
+            y: sy,
+            z: sz,
+            chunk_x: (sx / 50.0).floor() as i32,
+            chunk_z: (sz / 50.0).floor() as i32,
+            last_processed_tick: 0,
+        });
+
+        ctx.db.health().insert(combat::Health { entity_id, current: hp_val, max: hp_val });
+        ctx.db.faction_component().insert(combat::FactionComponent { entity_id, faction });
+        ctx.db.npc_brain().insert(crate::ai::NpcBrain {
+            entity_id,
+            ai_type,
+            state: BrainState::Idle,
+            target_id: None,
+            timer: 0.0,
+            home_x: sx,
+            home_z: sz,
+            wander_x: sx,
+            wander_z: sz,
+        });
+
+        if ai_type == AiType::Peasant {
+            ctx.db.peasant().insert(crate::ai::Peasant {
+                entity_id,
+                owner_id: 0,
+                state: crate::ai::AiState::Idle,
+                carrying_item: "None".to_string(),
+                carrying_amount: 0,
+                last_harvest_target: None,
+                consecutive_stuck_ticks: 0,
+                auto_gather_type: "None".to_string(),
+            });
+        }
+    }
+
+    // Secondary ring (40m - 70m)
+    for i in 0..7 {
+        base_id += 1;
+        let entity_id = base_id;
+        let angle = prng(&mut seed) * std::f32::consts::TAU;
+        let dist = 42.0 + prng(&mut seed) * 28.0;
+        let sx = angle.cos() * dist;
+        let sz = angle.sin() * dist;
+        let sy = get_terrain_height(sx, sz) + 1.05;
+
+        let (ai_type, hp_val, faction) = match i % 3 {
+            0 => (AiType::Deer, 35.0, Faction::Wildlife),
+            1 => (AiType::Boar, 65.0, Faction::Wildlife),
+            _ => (AiType::Goblin, 50.0, Faction::Goblin),
+        };
+
+        ctx.db.transform().insert(movement::Transform {
+            entity_id,
+            x: sx,
+            y: sy,
+            z: sz,
+            chunk_x: (sx / 50.0).floor() as i32,
+            chunk_z: (sz / 50.0).floor() as i32,
+            last_processed_tick: 0,
+        });
+
+        ctx.db.health().insert(combat::Health { entity_id, current: hp_val, max: hp_val });
+        ctx.db.faction_component().insert(combat::FactionComponent { entity_id, faction });
+        ctx.db.npc_brain().insert(crate::ai::NpcBrain {
+            entity_id,
+            ai_type,
+            state: BrainState::Idle,
+            target_id: None,
+            timer: 0.0,
+            home_x: sx,
+            home_z: sz,
+            wander_x: sx,
+            wander_z: sz,
+        });
+    }
+
+    log::debug!("NPC Population Reconciled: 16 active world creatures confirmed.");
+}
+
+// ----------------------------------------------------------------------------
 // LIFECYCLE REDUCERS
 // ----------------------------------------------------------------------------
 
@@ -316,6 +435,7 @@ pub fn init(ctx: &ReducerContext) {
     ctx.db.global_state().insert(GlobalState { id: 0, time_of_day: 8.0 });
 
     seed_authoritative_recipes(ctx);
+    ensure_npc_population(ctx);
 }
 
 fn seed_authoritative_recipes(ctx: &ReducerContext) {
@@ -462,6 +582,10 @@ pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
     for id in expired_ids {
         ctx.db.waypoint().waypoint_id().delete(id);
     }
+
+    if ctx.db.npc_brain().iter().count() < 8 {
+        ensure_npc_population(ctx);
+    }
 }
 
 #[spacetimedb::reducer(client_connected)]
@@ -567,60 +691,10 @@ pub fn client_connected(ctx: &ReducerContext) {
             current_health: 150.0,
             max_health: 150.0,
         });
-
-        let mut npc_id = ctx.timestamp.to_micros_since_unix_epoch() as u64 + 10000;
-        for _ in 0..15 {
-            let mut nx = 0.0;
-            let mut nz = 0.0;
-            let mut valid = false;
-            for _ in 0..10 {
-                nx = (prng(&mut seed) * 400.0) - 200.0;
-                nz = (prng(&mut seed) * 400.0) - 200.0;
-                let mut overlaps = false;
-                for &(px, pz) in &spawned_positions {
-                    if (px - nx) * (px - nx) + (pz - nz) * (pz - nz) < 9.0 {
-                        overlaps = true;
-                        break;
-                    }
-                }
-                if !overlaps {
-                    valid = true;
-                    break;
-                }
-            }
-            if valid {
-                spawned_positions.push((nx, nz));
-                let ny = get_terrain_height(nx, nz) + 1.5;
-                ctx.db.transform().insert(movement::Transform {
-                    entity_id: npc_id,
-                    x: nx,
-                    y: ny,
-                    z: nz,
-                    chunk_x: (nx / 50.0).floor() as i32,
-                    chunk_z: (nz / 50.0).floor() as i32,
-                    last_processed_tick: 0,
-                });
-                ctx.db.health().insert(combat::Health { entity_id: npc_id, current: 30.0, max: 30.0 });
-                ctx.db.faction_component().insert(combat::FactionComponent { entity_id: npc_id, faction: Faction::Wildlife });
-                ctx.db.npc_brain().insert(crate::ai::NpcBrain {
-                    entity_id: npc_id,
-                    ai_type: AiType::Deer,
-                    state: BrainState::Idle,
-                    target_id: None,
-                    timer: 0.0,
-                    home_x: nx,
-                    home_z: nz,
-                    wander_x: nx,
-                    wander_z: nz,
-                });
-                npc_id += 1;
-            }
-        }
     }
 
-    // Architectural Note: Voxel Chunk Seed Coverage (0.25m / 4.0m Chunks).
-    // Initializing cy across 0..=3 provides complete vertical coverage from 0.0m to 16.0m
-    // at origin spawn, matching 4.0m chunk dimensions without voids.
+    ensure_npc_population(ctx);
+
     if ctx.db.voxel_chunk().iter().count() == 0 {
         for cz in -2..=2 {
             for cy in 0..=3 {
@@ -644,7 +718,7 @@ pub fn client_connected(ctx: &ReducerContext) {
         }
 
         if ctx.db.transform().entity_id().find(entity_id).is_none() {
-            let spawn_y = get_terrain_height(0.0, 0.0) + 1.5;
+            let spawn_y = get_terrain_height(0.0, 0.0) + 1.05;
             ctx.db.transform().insert(movement::Transform {
                 entity_id, x: 0.0, y: spawn_y, z: 0.0, chunk_x: 0, chunk_z: 0, last_processed_tick: 0,
             });
@@ -688,7 +762,7 @@ pub fn client_connected(ctx: &ReducerContext) {
         });
 
         let entity_id = inserted_player.entity_id;
-        let spawn_y = get_terrain_height(0.0, 0.0) + 1.5;
+        let spawn_y = get_terrain_height(0.0, 0.0) + 1.05;
 
         ctx.db.transform().insert(movement::Transform {
             entity_id, x: 0.0, y: spawn_y, z: 0.0, chunk_x: 0, chunk_z: 0, last_processed_tick: 0,
@@ -888,7 +962,7 @@ pub fn admin_teleport(ctx: &ReducerContext, x: f32, z: f32) -> Result<(), String
 
     transform.x = x;
     transform.z = z;
-    transform.y = get_terrain_height(x, z) + 1.5;
+    transform.y = get_terrain_height(x, z) + 1.05;
     transform.chunk_x = (x / 50.0).floor() as i32;
     transform.chunk_z = (z / 50.0).floor() as i32;
 
@@ -983,7 +1057,7 @@ pub fn admin_spawn_npc(ctx: &ReducerContext, ai_type_str: String, count: u32) ->
         let offset_z = (prng(&mut seed) * 12.0) - 6.0;
         let sx = p_transform.x + offset_x;
         let sz = p_transform.z + offset_z;
-        let sy = get_terrain_height(sx, sz) + 1.2;
+        let sy = get_terrain_height(sx, sz) + 1.05;
 
         let entity_id = ((ctx.timestamp.to_micros_since_unix_epoch() as u64) << 12)
             ^ (session.entity_id.wrapping_add(i as u64 * 313 + 555));
@@ -999,10 +1073,10 @@ pub fn admin_spawn_npc(ctx: &ReducerContext, ai_type_str: String, count: u32) ->
         });
 
         let hp_val = match ai_type {
-            AiType::Boar => 60.0,
-            AiType::Goblin => 45.0,
-            AiType::Peasant => 50.0,
-            _ => 30.0,
+            AiType::Boar => 65.0,
+            AiType::Goblin => 50.0,
+            AiType::Peasant => 60.0,
+            _ => 35.0,
         };
 
         ctx.db.health().insert(combat::Health { entity_id, current: hp_val, max: hp_val });

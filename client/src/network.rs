@@ -1,15 +1,21 @@
+// ============================================================================
+// File: network.rs
+// ============================================================================
+// ----------------------------------------------------------------------------
+// CLIENT-SERVER REPLICATION & COMPOSITE MESH GENERATOR (Bevy Engine / SpacetimeDB)
+// ----------------------------------------------------------------------------
+// Architectural Note: Provides genuine high-density micro-voxel rasterization
+// (0.012m–0.024m for items and creatures, 0.06m for trees) with hidden-face culling.
+// Reuses GPU mesh handles in public CachedModelMeshes to preserve 60+ FPS stability.
+
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
 use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
-use bevy::pbr::{
-    FogFalloff, 
-    FogSettings, 
-    ScreenSpaceAmbientOcclusionQualityLevel, 
-    ScreenSpaceAmbientOcclusionSettings,
-};
+use bevy::pbr::{FogFalloff, FogSettings};
 use avian3d::prelude::*;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
 
@@ -35,7 +41,7 @@ pub struct SpacetimeConnection {
 pub struct IdentityStore(pub Arc<Mutex<Option<spacetimedb_sdk::Identity>>>);
 
 // ----------------------------------------------------------------------------
-// PROCEDURAL COMPOSITE VOXEL MESH BUILDER
+// PROCEDURAL COMPOSITE VOXEL MESH BUILDER (Building / Structure Compatibility)
 // ----------------------------------------------------------------------------
 
 pub struct VoxelBox {
@@ -127,253 +133,649 @@ pub fn build_voxel_mesh(boxes: &[VoxelBox]) -> Mesh {
 }
 
 // ----------------------------------------------------------------------------
-// HIGH-FIDELITY 0.25m VOXEL RESOURCE MODELS
+// GENUINE MICRO-VOXEL RASTERIZER & EXPOSED-FACE EXTRACTOR
 // ----------------------------------------------------------------------------
 
-pub fn create_voxel_tree_mesh() -> Mesh {
-    let bark_dark = [0.26, 0.16, 0.08, 1.0];
-    let bark_mid = [0.36, 0.24, 0.14, 1.0];
-    let needle_dark = [0.12, 0.38, 0.12, 1.0];
-    let needle_mid = [0.18, 0.52, 0.18, 1.0];
-    let needle_light = [0.26, 0.65, 0.26, 1.0];
-
-    build_voxel_mesh(&[
-        // Fluted Root Buttresses
-        VoxelBox { min: Vec3::new(-0.625, 0.0, -0.25), max: Vec3::new(-0.25, 0.5, 0.25), color: bark_dark },
-        VoxelBox { min: Vec3::new(0.25, 0.0, -0.25), max: Vec3::new(0.625, 0.5, 0.25), color: bark_dark },
-        VoxelBox { min: Vec3::new(-0.25, 0.0, -0.625), max: Vec3::new(0.25, 0.5, -0.25), color: bark_dark },
-        VoxelBox { min: Vec3::new(-0.25, 0.0, 0.25), max: Vec3::new(0.25, 0.5, 0.625), color: bark_dark },
-        // Lower Trunk Core
-        VoxelBox { min: Vec3::new(-0.30, 0.0, -0.30), max: Vec3::new(0.30, 2.5, 0.30), color: bark_mid },
-        // Mid Trunk Core
-        VoxelBox { min: Vec3::new(-0.25, 2.5, -0.25), max: Vec3::new(0.25, 5.0, 0.25), color: bark_mid },
-        // Upper Trunk Core
-        VoxelBox { min: Vec3::new(-0.15, 5.0, -0.15), max: Vec3::new(0.15, 7.25, 0.15), color: bark_dark },
-
-        // Foliage Tier 1
-        VoxelBox { min: Vec3::new(-1.875, 3.25, -1.375), max: Vec3::new(1.875, 4.0, 1.375), color: needle_dark },
-        VoxelBox { min: Vec3::new(-1.375, 3.25, -1.875), max: Vec3::new(1.375, 4.0, 1.875), color: needle_dark },
-        VoxelBox { min: Vec3::new(-1.625, 4.0, -1.625), max: Vec3::new(1.625, 4.75, 1.625), color: needle_mid },
-
-        // Foliage Tier 2
-        VoxelBox { min: Vec3::new(-1.50, 4.75, -1.0), max: Vec3::new(1.50, 5.375, 1.0), color: needle_dark },
-        VoxelBox { min: Vec3::new(-1.0, 4.75, -1.50), max: Vec3::new(1.0, 5.375, 1.50), color: needle_dark },
-        VoxelBox { min: Vec3::new(-1.25, 5.375, -1.25), max: Vec3::new(1.25, 6.0, 1.25), color: needle_mid },
-
-        // Foliage Tier 3
-        VoxelBox { min: Vec3::new(-1.125, 6.0, -0.75), max: Vec3::new(1.125, 6.625, 0.75), color: needle_mid },
-        VoxelBox { min: Vec3::new(-0.75, 6.0, -1.125), max: Vec3::new(0.75, 6.625, 1.125), color: needle_mid },
-        VoxelBox { min: Vec3::new(-0.875, 6.625, -0.875), max: Vec3::new(0.875, 7.25, 0.875), color: needle_light },
-
-        // Foliage Tier 4
-        VoxelBox { min: Vec3::new(-0.625, 7.25, -0.625), max: Vec3::new(0.625, 8.0, 0.625), color: needle_mid },
-        VoxelBox { min: Vec3::new(-0.50, 8.0, -0.50), max: Vec3::new(0.50, 8.5, 0.50), color: needle_light },
-
-        // Spire Tip
-        VoxelBox { min: Vec3::new(-0.25, 8.5, -0.25), max: Vec3::new(0.25, 9.0, 0.25), color: needle_light },
-        VoxelBox { min: Vec3::new(-0.125, 9.0, -0.125), max: Vec3::new(0.125, 9.35, 0.125), color: needle_light },
-    ])
+pub struct MicroVoxelGrid {
+    pub pitch: f32,
+    pub voxels: HashMap<(i32, i32, i32), [f32; 4]>,
 }
 
-pub fn create_voxel_rock_mesh() -> Mesh {
-    let slate = [0.35, 0.35, 0.38, 1.0];
-    let granite_mid = [0.50, 0.50, 0.53, 1.0];
-    let granite_light = [0.65, 0.65, 0.68, 1.0];
-    let highlight = [0.75, 0.75, 0.78, 1.0];
+impl MicroVoxelGrid {
+    pub fn new(pitch: f32) -> Self {
+        Self {
+            pitch,
+            voxels: HashMap::with_capacity(8192),
+        }
+    }
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.875, 0.0, -0.75), max: Vec3::new(0.875, 0.35, 0.75), color: slate },
-        VoxelBox { min: Vec3::new(-0.65, 0.35, -0.60), max: Vec3::new(0.65, 0.85, 0.60), color: granite_mid },
-        VoxelBox { min: Vec3::new(-0.45, 0.85, -0.40), max: Vec3::new(0.40, 1.25, 0.40), color: granite_light },
-        VoxelBox { min: Vec3::new(-0.20, 1.25, -0.20), max: Vec3::new(0.20, 1.50, 0.20), color: highlight },
-        VoxelBox { min: Vec3::new(0.55, 0.0, -0.35), max: Vec3::new(1.05, 0.60, 0.45), color: slate },
-        VoxelBox { min: Vec3::new(-1.05, 0.0, -0.15), max: Vec3::new(-0.60, 0.50, 0.55), color: granite_mid },
-    ])
+    #[inline]
+    pub fn set(&mut self, x: i32, y: i32, z: i32, color: [f32; 4]) {
+        self.voxels.insert((x, y, z), color);
+    }
+
+    pub fn fill_box(&mut self, min: [i32; 3], max: [i32; 3], color: [f32; 4]) {
+        for x in min[0]..=max[0] {
+            for y in min[1]..=max[1] {
+                for z in min[2]..=max[2] {
+                    self.voxels.insert((x, y, z), color);
+                }
+            }
+        }
+    }
+
+    pub fn fill_cylinder_y(&mut self, cx: i32, cz: i32, y_min: i32, y_max: i32, radius: f32, color: [f32; 4]) {
+        let r_sq = radius * radius;
+        let r_ceil = radius.ceil() as i32;
+        for dx in -r_ceil..=r_ceil {
+            for dz in -r_ceil..=r_ceil {
+                if (dx as f32 * dx as f32 + dz as f32 * dz as f32) <= r_sq {
+                    for y in y_min..=y_max {
+                        self.voxels.insert((cx + dx, y, cz + dz), color);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn fill_sphere(&mut self, cx: i32, cy: i32, cz: i32, radius: f32, color: [f32; 4]) {
+        let r_sq = radius * radius;
+        let r_ceil = radius.ceil() as i32;
+        for dx in -r_ceil..=r_ceil {
+            for dy in -r_ceil..=r_ceil {
+                for dz in -r_ceil..=r_ceil {
+                    if (dx as f32 * dx as f32 + dy as f32 * dy as f32 + dz as f32 * dz as f32) <= r_sq {
+                        self.voxels.insert((cx + dx, cy + dy, cz + dz), color);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn fill_line(&mut self, start: [i32; 3], end: [i32; 3], thickness: i32, color: [f32; 4]) {
+        let dx = (end[0] - start[0]) as f32;
+        let dy = (end[1] - start[1]) as f32;
+        let dz = (end[2] - start[2]) as f32;
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt().max(1.0);
+        let steps = (dist * 2.0).ceil() as usize;
+
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            let cx = (start[0] as f32 + dx * t).round() as i32;
+            let cy = (start[1] as f32 + dy * t).round() as i32;
+            let cz = (start[2] as f32 + dz * t).round() as i32;
+
+            for ox in -thickness..=thickness {
+                for oy in -thickness..=thickness {
+                    for oz in -thickness..=thickness {
+                        self.voxels.insert((cx + ox, cy + oy, cz + oz), color);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn build_mesh(&self) -> Mesh {
+        let p = self.pitch;
+        let mut positions: Vec<[f32; 3]> = Vec::with_capacity(self.voxels.len() * 12);
+        let mut normals: Vec<[f32; 3]> = Vec::with_capacity(self.voxels.len() * 12);
+        let mut colors: Vec<[f32; 4]> = Vec::with_capacity(self.voxels.len() * 12);
+        let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(self.voxels.len() * 12);
+        let mut indices: Vec<u32> = Vec::with_capacity(self.voxels.len() * 18);
+
+        for (&(x, y, z), &col) in &self.voxels {
+            let x0 = x as f32 * p;
+            let x1 = (x + 1) as f32 * p;
+            let y0 = y as f32 * p;
+            let y1 = (y + 1) as f32 * p;
+            let z0 = z as f32 * p;
+            let z1 = (z + 1) as f32 * p;
+
+            // +Y (Top)
+            if !self.voxels.contains_key(&(x, y + 1, z)) {
+                let s = positions.len() as u32;
+                positions.push([x0, y1, z1]);
+                positions.push([x1, y1, z1]);
+                positions.push([x1, y1, z0]);
+                positions.push([x0, y1, z0]);
+                for _ in 0..4 { normals.push([0.0, 1.0, 0.0]); colors.push(col); }
+                uvs.extend_from_slice(&[[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]);
+                indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+            }
+
+            // -Y (Bottom)
+            if !self.voxels.contains_key(&(x, y - 1, z)) {
+                let s = positions.len() as u32;
+                positions.push([x0, y0, z0]);
+                positions.push([x1, y0, z0]);
+                positions.push([x1, y0, z1]);
+                positions.push([x0, y0, z1]);
+                for _ in 0..4 { normals.push([0.0, -1.0, 0.0]); colors.push(col); }
+                uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+                indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+            }
+
+            // +X (East)
+            if !self.voxels.contains_key(&(x + 1, y, z)) {
+                let s = positions.len() as u32;
+                positions.push([x1, y0, z1]);
+                positions.push([x1, y0, z0]);
+                positions.push([x1, y1, z0]);
+                positions.push([x1, y1, z1]);
+                for _ in 0..4 { normals.push([1.0, 0.0, 0.0]); colors.push(col); }
+                uvs.extend_from_slice(&[[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
+                indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+            }
+
+            // -X (West)
+            if !self.voxels.contains_key(&(x - 1, y, z)) {
+                let s = positions.len() as u32;
+                positions.push([x0, y0, z0]);
+                positions.push([x0, y0, z1]);
+                positions.push([x0, y1, z1]);
+                positions.push([x0, y1, z0]);
+                for _ in 0..4 { normals.push([-1.0, 0.0, 0.0]); colors.push(col); }
+                uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+                indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+            }
+
+            // +Z (South)
+            if !self.voxels.contains_key(&(x, y, z + 1)) {
+                let s = positions.len() as u32;
+                positions.push([x0, y0, z1]);
+                positions.push([x1, y0, z1]);
+                positions.push([x1, y1, z1]);
+                positions.push([x0, y1, z1]);
+                for _ in 0..4 { normals.push([0.0, 0.0, 1.0]); colors.push(col); }
+                uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+                indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+            }
+
+            // -Z (North)
+            if !self.voxels.contains_key(&(x, y, z - 1)) {
+                let s = positions.len() as u32;
+                positions.push([x1, y0, z0]);
+                positions.push([x0, y0, z0]);
+                positions.push([x0, y1, z0]);
+                positions.push([x1, y1, z0]);
+                for _ in 0..4 { normals.push([0.0, 0.0, -1.0]); colors.push(col); }
+                uvs.extend_from_slice(&[[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
+                indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+            }
+        }
+
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+        mesh.insert_indices(Indices::U32(indices));
+        mesh
+    }
 }
 
-pub fn create_voxel_bush_mesh() -> Mesh {
-    let green_dark = [0.14, 0.44, 0.14, 1.0];
-    let green_mid = [0.20, 0.56, 0.20, 1.0];
-    let green_bright = [0.26, 0.66, 0.26, 1.0];
+// ----------------------------------------------------------------------------
+// TRUE MICRO-VOXEL TREES (0.06m Voxel Pitch)
+// ----------------------------------------------------------------------------
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.625, 0.0, -0.625), max: Vec3::new(0.625, 0.65, 0.625), color: green_dark },
-        VoxelBox { min: Vec3::new(-0.45, 0.65, -0.45), max: Vec3::new(0.45, 1.0, 0.45), color: green_bright },
-        VoxelBox { min: Vec3::new(0.50, 0.15, -0.40), max: Vec3::new(0.875, 0.60, 0.40), color: green_mid },
-        VoxelBox { min: Vec3::new(-0.875, 0.15, -0.40), max: Vec3::new(-0.50, 0.60, 0.40), color: green_mid },
-        VoxelBox { min: Vec3::new(-0.40, 0.15, -0.875), max: Vec3::new(0.40, 0.60, -0.50), color: green_dark },
-        VoxelBox { min: Vec3::new(-0.40, 0.15, 0.50), max: Vec3::new(0.40, 0.60, 0.875), color: green_bright },
-    ])
+pub fn create_voxel_dead_tree_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.06);
+    let bark_dry = [0.74, 0.60, 0.40, 1.0];
+    let bark_shadow = [0.52, 0.40, 0.25, 1.0];
+
+    grid.fill_box([-7, 0, -2], [-3, 3, 2], bark_dry);
+    grid.fill_box([3, 0, -2], [7, 3, 2], bark_dry);
+    grid.fill_box([-2, 0, 3], [2, 3, 7], bark_dry);
+    grid.fill_box([-2, 0, -7], [2, 3, -3], bark_dry);
+
+    grid.fill_cylinder_y(0, 0, 0, 20, 4.5, bark_dry);
+    grid.fill_cylinder_y(0, 0, 20, 45, 3.8, bark_shadow);
+    grid.fill_cylinder_y(0, 0, 45, 75, 3.0, bark_dry);
+    grid.fill_cylinder_y(0, 0, 75, 105, 2.2, bark_shadow);
+
+    grid.fill_line([-3, 42, 0], [-12, 54, -2], 1, bark_dry);
+    grid.fill_line([-12, 54, -2], [-20, 68, 1], 1, bark_shadow);
+    grid.fill_line([-20, 68, 1], [-27, 85, 3], 0, bark_dry);
+    grid.fill_line([-20, 68, 1], [-16, 78, -6], 0, bark_dry);
+
+    grid.fill_line([3, 48, 1], [14, 58, 6], 1, bark_dry);
+    grid.fill_line([14, 58, 6], [24, 72, 12], 1, bark_shadow);
+    grid.fill_line([24, 72, 12], [32, 88, 16], 0, bark_dry);
+    grid.fill_line([24, 72, 12], [22, 82, 4], 0, bark_dry);
+
+    grid.fill_line([0, 68, 3], [4, 82, 16], 1, bark_dry);
+    grid.fill_line([4, 82, 16], [8, 98, 26], 0, bark_shadow);
+    grid.fill_line([4, 82, 16], [-3, 92, 22], 0, bark_dry);
+
+    grid.fill_line([0, 105, 0], [-8, 125, -4], 1, bark_dry);
+    grid.fill_line([-8, 125, -4], [-14, 142, -6], 0, bark_dry);
+    grid.fill_line([-8, 125, -4], [-4, 138, 4], 0, bark_dry);
+
+    grid.fill_line([0, 105, 0], [7, 126, 3], 1, bark_shadow);
+    grid.fill_line([7, 126, 3], [15, 145, 6], 0, bark_dry);
+    grid.fill_line([7, 126, 3], [4, 140, -5], 0, bark_dry);
+
+    grid.build_mesh()
 }
 
-pub fn create_voxel_branch_mesh() -> Mesh {
-    let bark_dark = [0.28, 0.16, 0.08, 1.0];
-    let bark_mid = [0.42, 0.26, 0.14, 1.0];
-    let sapwood = [0.65, 0.48, 0.28, 1.0];
+pub fn create_voxel_oak_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.06);
+    let bark = [0.44, 0.28, 0.16, 1.0];
+    let amber = [0.94, 0.54, 0.16, 1.0];
+    let orange = [0.86, 0.38, 0.10, 1.0];
+    let gold = [0.96, 0.70, 0.18, 1.0];
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.75, 0.04, -0.11), max: Vec3::new(0.75, 0.26, 0.11), color: bark_mid },
-        VoxelBox { min: Vec3::new(-0.78, 0.04, -0.13), max: Vec3::new(-0.70, 0.28, 0.13), color: sapwood },
-        VoxelBox { min: Vec3::new(-0.25, 0.04, 0.11), max: Vec3::new(-0.05, 0.22, 0.35), color: bark_dark },
-        VoxelBox { min: Vec3::new(-0.05, 0.04, 0.35), max: Vec3::new(0.18, 0.20, 0.58), color: bark_mid },
-        VoxelBox { min: Vec3::new(0.15, 0.04, -0.32), max: Vec3::new(0.35, 0.20, -0.11), color: bark_dark },
-        VoxelBox { min: Vec3::new(0.35, 0.04, -0.52), max: Vec3::new(0.58, 0.18, -0.32), color: bark_mid },
-        VoxelBox { min: Vec3::new(0.72, 0.06, -0.06), max: Vec3::new(0.82, 0.22, 0.06), color: sapwood },
-        VoxelBox { min: Vec3::new(0.16, 0.06, 0.55), max: Vec3::new(0.24, 0.18, 0.65), color: sapwood },
-    ])
+    grid.fill_cylinder_y(0, 0, 0, 38, 6.0, bark);
+    grid.fill_line([0, 32, 0], [15, 52, 6], 2, bark);
+    grid.fill_line([0, 32, 0], [-15, 50, -5], 2, bark);
+    grid.fill_line([0, 34, 0], [-4, 54, 14], 2, bark);
+
+    grid.fill_sphere(0, 72, 0, 24.0, orange);
+    grid.fill_sphere(0, 84, 0, 19.0, amber);
+    grid.fill_sphere(0, 94, 0, 13.0, gold);
+
+    grid.fill_sphere(-20, 64, -8, 16.0, amber);
+    grid.fill_sphere(-24, 76, -6, 12.0, gold);
+
+    grid.fill_sphere(20, 66, 8, 17.0, orange);
+    grid.fill_sphere(24, 78, 6, 13.0, amber);
+
+    grid.fill_sphere(-5, 68, 18, 15.0, amber);
+    grid.fill_sphere(6, 68, -18, 15.0, orange);
+
+    grid.build_mesh()
 }
 
-pub fn create_voxel_flint_mesh() -> Mesh {
-    let obsidian = [0.06, 0.07, 0.10, 1.0];
-    let chert_body = [0.18, 0.32, 0.50, 1.0];
-    let edge_cyan = [0.35, 0.75, 0.95, 1.0];
-    let highlight = [0.75, 0.92, 1.0, 1.0];
+pub fn create_voxel_pine_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.06);
+    let bark = [0.26, 0.16, 0.08, 1.0];
+    let d_green = [0.14, 0.36, 0.16, 1.0];
+    let m_green = [0.20, 0.50, 0.22, 1.0];
+    let l_green = [0.28, 0.62, 0.28, 1.0];
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.25, 0.02, -0.22), max: Vec3::new(0.25, 0.18, 0.22), color: obsidian },
-        VoxelBox { min: Vec3::new(-0.20, 0.18, -0.16), max: Vec3::new(0.20, 0.42, 0.16), color: chert_body },
-        VoxelBox { min: Vec3::new(-0.12, 0.42, -0.10), max: Vec3::new(0.12, 0.65, 0.10), color: edge_cyan },
-        VoxelBox { min: Vec3::new(-0.05, 0.65, -0.05), max: Vec3::new(0.05, 0.76, 0.05), color: highlight },
-        VoxelBox { min: Vec3::new(-0.30, 0.10, -0.06), max: Vec3::new(-0.18, 0.35, 0.14), color: edge_cyan },
-        VoxelBox { min: Vec3::new(0.18, 0.10, -0.14), max: Vec3::new(0.30, 0.35, 0.06), color: edge_cyan },
-    ])
+    grid.fill_cylinder_y(0, 0, 0, 60, 3.5, bark);
+
+    grid.fill_cylinder_y(0, 0, 38, 48, 28.0, d_green);
+    grid.fill_cylinder_y(0, 0, 48, 58, 22.0, m_green);
+    grid.fill_cylinder_y(0, 0, 58, 66, 16.0, m_green);
+
+    grid.fill_cylinder_y(0, 0, 66, 76, 20.0, d_green);
+    grid.fill_cylinder_y(0, 0, 76, 86, 15.0, m_green);
+    grid.fill_cylinder_y(0, 0, 86, 96, 10.0, l_green);
+
+    grid.fill_cylinder_y(0, 0, 96, 106, 12.0, d_green);
+    grid.fill_cylinder_y(0, 0, 106, 116, 8.0, m_green);
+    grid.fill_cylinder_y(0, 0, 116, 126, 4.5, l_green);
+    grid.fill_cylinder_y(0, 0, 126, 134, 1.5, l_green);
+
+    grid.build_mesh()
 }
 
-pub fn create_voxel_stone_mesh() -> Mesh {
-    let granite_dark = [0.34, 0.33, 0.32, 1.0];
-    let granite_mid = [0.52, 0.50, 0.48, 1.0];
-    let granite_light = [0.72, 0.70, 0.66, 1.0];
-    let mineral_white = [0.92, 0.90, 0.86, 1.0];
+pub fn create_voxel_round_tree_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.06);
+    let bark = [0.22, 0.16, 0.10, 1.0];
+    let shadow = [0.45, 0.32, 0.10, 1.0];
+    let gold_mid = [0.88, 0.72, 0.18, 1.0];
+    let gold_bright = [0.96, 0.82, 0.22, 1.0];
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.45, 0.02, -0.38), max: Vec3::new(0.45, 0.36, 0.38), color: granite_mid },
-        VoxelBox { min: Vec3::new(-0.30, 0.36, -0.25), max: Vec3::new(0.28, 0.52, 0.25), color: granite_light },
-        VoxelBox { min: Vec3::new(-0.12, 0.52, -0.12), max: Vec3::new(0.12, 0.60, 0.12), color: mineral_white },
-        VoxelBox { min: Vec3::new(0.35, 0.02, -0.20), max: Vec3::new(0.68, 0.28, 0.28), color: granite_dark },
-        VoxelBox { min: Vec3::new(-0.65, 0.02, 0.08), max: Vec3::new(-0.35, 0.26, 0.42), color: granite_light },
-        VoxelBox { min: Vec3::new(-0.18, 0.02, -0.50), max: Vec3::new(0.28, 0.22, -0.30), color: granite_dark },
-    ])
+    grid.fill_cylinder_y(0, 0, 0, 42, 4.0, bark);
+    grid.fill_sphere(0, 46, 0, 26.0, shadow);
+    grid.fill_sphere(0, 56, 0, 32.0, gold_mid);
+    grid.fill_sphere(0, 70, 0, 24.0, gold_bright);
+    grid.fill_sphere(0, 82, 0, 14.0, gold_bright);
+
+    grid.build_mesh()
+}
+
+// ----------------------------------------------------------------------------
+// TRUE MICRO-VOXEL CREATURES & NPCS (0.024m–0.028m Voxel Pitch)
+// ----------------------------------------------------------------------------
+
+pub fn create_voxel_deer_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.022);
+    let tawny = [0.84, 0.62, 0.42, 1.0];
+    let shadow = [0.65, 0.45, 0.30, 1.0];
+    let white = [0.96, 0.94, 0.90, 1.0];
+    let cream = [0.92, 0.86, 0.78, 1.0];
+    let black = [0.12, 0.12, 0.14, 1.0];
+    let antler = [0.22, 0.14, 0.10, 1.0];
+
+    // Slender cloven hooves
+    grid.fill_box([-7, 0, 9], [-4, 3, 13], black);
+    grid.fill_box([4, 0, 9], [7, 3, 13], black);
+    grid.fill_box([-7, 0, -13], [-4, 3, -9], black);
+    grid.fill_box([4, 0, -13], [7, 3, -9], black);
+
+    // Multi-jointed slender legs
+    grid.fill_box([-7, 3, 9], [-5, 28, 12], shadow);
+    grid.fill_box([5, 3, 9], [7, 28, 12], shadow);
+    grid.fill_box([-7, 3, -13], [-5, 28, -10], shadow);
+    grid.fill_box([5, 3, -13], [7, 28, -10], shadow);
+
+    // Hock joints & knees
+    grid.fill_box([-8, 18, 9], [-4, 22, 13], tawny);
+    grid.fill_box([4, 18, 9], [8, 22, 13], tawny);
+    grid.fill_box([-8, 20, -14], [-4, 24, -9], shadow);
+    grid.fill_box([4, 20, -14], [8, 24, -9], shadow);
+
+    // Contoured muscular haunches
+    grid.fill_box([-9, 28, 7], [-3, 44, 15], tawny);
+    grid.fill_box([3, 28, 7], [9, 44, 15], tawny);
+    grid.fill_box([-9, 28, -15], [-3, 46, -7], shadow);
+    grid.fill_box([3, 28, -15], [9, 46, -7], shadow);
+
+    // Sculpted torso with narrow waist
+    grid.fill_box([-8, 34, -16], [8, 52, 14], tawny);
+    grid.fill_box([-7, 32, -14], [7, 39, 12], cream);
+
+    // Dappled spots along flank
+    let spots = [
+        (-9, 46, -12), (-9, 48, -6), (-9, 44, 0), (-9, 49, 6),
+        (9, 46, -12), (9, 48, -6), (9, 44, 0), (9, 49, 6),
+    ];
+    for (sx, sy, sz) in spots {
+        grid.fill_box([sx, sy, sz], [sx, sy + 1, sz + 1], white);
+    }
+
+    // White chest bib and tail
+    grid.fill_box([-6, 38, 13], [6, 54, 18], white);
+    grid.fill_box([-2, 45, -20], [2, 53, -16], white);
+
+    // Slender forward-angled neck
+    grid.fill_box([-5, 48, 9], [5, 68, 17], tawny);
+    grid.fill_box([-4, 50, 16], [4, 67, 19], white);
+
+    // Head, muzzle, black nose pad
+    grid.fill_box([-5, 62, 15], [5, 72, 26], tawny);
+    grid.fill_box([-4, 62, 21], [4, 67, 30], cream);
+    grid.fill_box([-4, 63, 28], [4, 69, 32], black);
+
+    // Almond eyes & backward ears
+    grid.fill_box([-6, 68, 20], [-5, 71, 22], black);
+    grid.fill_box([5, 68, 20], [6, 71, 22], black);
+    grid.fill_line([-5, 70, 15], [-11, 77, 12], 0, tawny);
+    grid.fill_line([5, 70, 15], [11, 77, 12], 0, tawny);
+    grid.fill_box([-10, 72, 13], [-6, 76, 14], white);
+    grid.fill_box([6, 72, 13], [10, 76, 14], white);
+
+    // Branching antler rack
+    grid.fill_line([-4, 71, 16], [-6, 84, 14], 1, antler);
+    grid.fill_line([4, 71, 16], [6, 84, 14], 1, antler);
+    grid.fill_line([-6, 84, 14], [-13, 98, 11], 0, antler);
+    grid.fill_line([6, 84, 14], [13, 98, 11], 0, antler);
+    grid.fill_line([-6, 84, 14], [-2, 91, 23], 0, antler);
+    grid.fill_line([6, 84, 14], [2, 91, 23], 0, antler);
+    grid.fill_line([-11, 92, 12], [-15, 105, 16], 0, antler);
+    grid.fill_line([11, 92, 12], [15, 105, 16], 0, antler);
+
+    grid.build_mesh()
 }
 
 pub fn create_voxel_boar_mesh() -> Mesh {
-    let hide = [0.26, 0.20, 0.16, 1.0];
-    let mane = [0.18, 0.14, 0.10, 1.0];
-    let snout = [0.55, 0.35, 0.32, 1.0];
-    let tusk = [0.92, 0.90, 0.82, 1.0];
+    let mut grid = MicroVoxelGrid::new(0.024);
+    let umber = [0.28, 0.16, 0.08, 1.0];
+    let ochre = [0.65, 0.44, 0.22, 1.0];
+    let highlight = [0.82, 0.62, 0.36, 1.0];
+    let snout = [0.65, 0.45, 0.40, 1.0];
+    let tusk = [0.96, 0.93, 0.86, 1.0];
+    let hoof = [0.14, 0.12, 0.10, 1.0];
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.38, 0.25, -0.65), max: Vec3::new(0.38, 0.85, 0.55), color: hide },
-        VoxelBox { min: Vec3::new(-0.10, 0.85, -0.55), max: Vec3::new(0.10, 1.02, 0.45), color: mane },
-        VoxelBox { min: Vec3::new(-0.28, 0.32, 0.45), max: Vec3::new(0.28, 0.78, 0.95), color: hide },
-        VoxelBox { min: Vec3::new(-0.16, 0.35, 0.95), max: Vec3::new(0.16, 0.58, 1.12), color: snout },
-        VoxelBox { min: Vec3::new(-0.24, 0.45, 0.88), max: Vec3::new(-0.18, 0.68, 0.96), color: tusk },
-        VoxelBox { min: Vec3::new(0.18, 0.45, 0.88), max: Vec3::new(0.24, 0.68, 0.96), color: tusk },
-        VoxelBox { min: Vec3::new(-0.34, 0.0, 0.22), max: Vec3::new(-0.20, 0.25, 0.42), color: hide },
-        VoxelBox { min: Vec3::new(0.20, 0.0, 0.22), max: Vec3::new(0.34, 0.25, 0.42), color: hide },
-        VoxelBox { min: Vec3::new(-0.34, 0.0, -0.52), max: Vec3::new(-0.20, 0.25, -0.32), color: hide },
-        VoxelBox { min: Vec3::new(0.20, 0.0, -0.52), max: Vec3::new(0.34, 0.25, -0.32), color: hide },
-        VoxelBox { min: Vec3::new(-0.04, 0.55, -0.76), max: Vec3::new(0.04, 0.70, -0.65), color: mane },
-    ])
-}
+    // Hooves
+    grid.fill_box([-11, 0, 8], [-7, 3, 12], hoof);
+    grid.fill_box([7, 0, 8], [11, 3, 12], hoof);
+    grid.fill_box([-11, 0, -14], [-7, 3, -10], hoof);
+    grid.fill_box([7, 0, -14], [11, 3, -10], hoof);
 
-pub fn create_voxel_deer_mesh() -> Mesh {
-    let coat = [0.65, 0.42, 0.24, 1.0];
-    let belly = [0.85, 0.75, 0.62, 1.0];
-    let antler = [0.80, 0.75, 0.65, 1.0];
+    // Sturdy legs
+    grid.fill_box([-10, 3, 8], [-8, 14, 12], umber);
+    grid.fill_box([8, 3, 8], [10, 14, 12], umber);
+    grid.fill_box([-10, 3, -14], [-8, 14, -10], umber);
+    grid.fill_box([8, 3, -14], [10, 14, -10], umber);
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.25, 0.55, -0.55), max: Vec3::new(0.25, 1.15, 0.55), color: coat },
-        VoxelBox { min: Vec3::new(-0.20, 0.50, -0.45), max: Vec3::new(0.20, 0.65, 0.45), color: belly },
-        VoxelBox { min: Vec3::new(-0.16, 0.95, 0.35), max: Vec3::new(0.16, 1.60, 0.70), color: coat },
-        VoxelBox { min: Vec3::new(-0.15, 1.45, 0.55), max: Vec3::new(0.15, 1.80, 0.98), color: coat },
-        VoxelBox { min: Vec3::new(-0.10, 1.45, 0.98), max: Vec3::new(0.10, 1.65, 1.18), color: belly },
-        VoxelBox { min: Vec3::new(-0.25, 1.75, 0.55), max: Vec3::new(-0.15, 2.00, 0.70), color: coat },
-        VoxelBox { min: Vec3::new(0.15, 1.75, 0.55), max: Vec3::new(0.25, 2.00, 0.70), color: coat },
-        VoxelBox { min: Vec3::new(-0.18, 1.80, 0.55), max: Vec3::new(-0.12, 2.30, 0.62), color: antler },
-        VoxelBox { min: Vec3::new(-0.28, 2.10, 0.55), max: Vec3::new(-0.16, 2.20, 0.72), color: antler },
-        VoxelBox { min: Vec3::new(0.12, 1.80, 0.55), max: Vec3::new(0.18, 2.30, 0.62), color: antler },
-        VoxelBox { min: Vec3::new(0.16, 2.10, 0.55), max: Vec3::new(0.28, 2.20, 0.72), color: antler },
-        VoxelBox { min: Vec3::new(-0.22, 0.0, 0.30), max: Vec3::new(-0.12, 0.55, 0.44), color: coat },
-        VoxelBox { min: Vec3::new(0.12, 0.0, 0.30), max: Vec3::new(0.22, 0.55, 0.44), color: coat },
-        VoxelBox { min: Vec3::new(-0.22, 0.0, -0.48), max: Vec3::new(-0.12, 0.55, -0.34), color: coat },
-        VoxelBox { min: Vec3::new(0.12, 0.0, -0.48), max: Vec3::new(0.22, 0.55, -0.34), color: coat },
-        VoxelBox { min: Vec3::new(-0.06, 0.95, -0.65), max: Vec3::new(0.06, 1.15, -0.55), color: belly },
-    ])
+    // Heavy stocky body with ochre stripes
+    grid.fill_box([-13, 12, -20], [13, 30, 16], umber);
+    grid.fill_box([-12, 14, -16], [12, 28, 13], ochre);
+    grid.fill_box([-11, 17, -12], [11, 26, 9], highlight);
+
+    // Raised spine bristle crest
+    grid.fill_box([-3, 30, -18], [3, 37, 13], umber);
+    grid.fill_box([-1, 36, -14], [1, 39, 10], ochre);
+
+    // Sloping wedge head & heavy jowls
+    grid.fill_box([-9, 14, 13], [9, 28, 29], umber);
+    grid.fill_box([-6, 15, 27], [6, 23, 38], snout);
+
+    // Upward-curved ivory tusks
+    grid.fill_box([-8, 16, 28], [-6, 25, 31], tusk);
+    grid.fill_box([6, 16, 28], [8, 25, 31], tusk);
+
+    grid.build_mesh()
 }
 
 pub fn create_voxel_goblin_mesh() -> Mesh {
-    let skin = [0.28, 0.68, 0.25, 1.0];
-    let tunic = [0.42, 0.30, 0.18, 1.0];
-    let eyes = [0.95, 0.85, 0.15, 1.0];
-    let belt = [0.22, 0.16, 0.10, 1.0];
+    let mut grid = MicroVoxelGrid::new(0.024);
+    let skin = [0.38, 0.68, 0.22, 1.0];
+    let skin_shadow = [0.26, 0.48, 0.16, 1.0];
+    let iron = [0.46, 0.48, 0.52, 1.0];
+    let iron_dark = [0.28, 0.30, 0.34, 1.0];
+    let leather = [0.36, 0.22, 0.14, 1.0];
+    let gold = [0.94, 0.78, 0.18, 1.0];
+    let eye = [0.98, 0.92, 0.15, 1.0];
+    let bone = [0.92, 0.88, 0.78, 1.0];
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.25, 0.35, -0.18), max: Vec3::new(0.25, 0.85, 0.18), color: tunic },
-        VoxelBox { min: Vec3::new(-0.26, 0.45, -0.19), max: Vec3::new(0.26, 0.55, 0.19), color: belt },
-        VoxelBox { min: Vec3::new(-0.22, 0.85, -0.16), max: Vec3::new(0.22, 1.25, 0.20), color: skin },
-        VoxelBox { min: Vec3::new(-0.06, 0.92, 0.20), max: Vec3::new(0.06, 1.08, 0.35), color: skin },
-        VoxelBox { min: Vec3::new(-0.45, 1.00, -0.06), max: Vec3::new(-0.22, 1.18, 0.08), color: skin },
-        VoxelBox { min: Vec3::new(0.22, 1.00, -0.06), max: Vec3::new(0.45, 1.18, 0.08), color: skin },
-        VoxelBox { min: Vec3::new(-0.16, 1.05, 0.19), max: Vec3::new(-0.08, 1.15, 0.21), color: eyes },
-        VoxelBox { min: Vec3::new(0.08, 1.05, 0.19), max: Vec3::new(0.16, 1.15, 0.21), color: eyes },
-        VoxelBox { min: Vec3::new(-0.38, 0.32, -0.08), max: Vec3::new(-0.25, 0.82, 0.08), color: skin },
-        VoxelBox { min: Vec3::new(0.25, 0.32, -0.08), max: Vec3::new(0.38, 0.82, 0.08), color: skin },
-        VoxelBox { min: Vec3::new(-0.22, 0.0, -0.12), max: Vec3::new(-0.06, 0.35, 0.12), color: tunic },
-        VoxelBox { min: Vec3::new(0.06, 0.0, -0.12), max: Vec3::new(0.22, 0.35, 0.12), color: tunic },
-    ])
+    // Armored boots
+    grid.fill_box([-8, 0, -5], [-3, 6, 5], iron_dark);
+    grid.fill_box([3, 0, -5], [8, 6, 5], iron_dark);
+    grid.fill_box([-7, 6, -4], [-4, 18, 4], skin);
+    grid.fill_box([4, 6, -4], [7, 18, 4], skin);
+
+    // Studded war belt, gold buckle & tassets
+    grid.fill_box([-8, 18, -6], [8, 23, 6], leather);
+    grid.fill_box([-4, 18, 6], [4, 23, 7], gold);
+    grid.fill_box([-4, 11, 5], [4, 18, 6], leather);
+
+    // Segmented breastplate
+    grid.fill_box([-8, 23, -5], [8, 38, 5], iron);
+    grid.fill_box([-7, 24, -6], [7, 37, -5], iron_dark);
+
+    // Rounded dual-tier pauldrons
+    grid.fill_box([-14, 33, -5], [-8, 41, 5], iron_dark);
+    grid.fill_box([-15, 35, -4], [-8, 40, 4], iron);
+    grid.fill_box([8, 33, -5], [14, 41, 5], iron_dark);
+    grid.fill_box([8, 35, -4], [15, 40, 4], iron);
+
+    // Arms & bracers
+    grid.fill_box([-13, 21, -4], [-8, 33, 4], skin);
+    grid.fill_box([8, 21, -4], [13, 33, 4], skin);
+    grid.fill_box([-13, 16, -4], [-8, 22, 4], iron);
+    grid.fill_box([8, 16, -4], [13, 22, 4], iron);
+
+    // Goblin head & jaw
+    grid.fill_box([-8, 38, -5], [8, 52, 6], skin);
+    grid.fill_box([-7, 38, 4], [7, 43, 7], skin_shadow);
+
+    // Lower jaw tusks
+    grid.fill_box([-5, 40, 6], [-4, 44, 7], bone);
+    grid.fill_box([4, 40, 6], [5, 44, 7], bone);
+
+    // Glowing eyes
+    grid.fill_box([-6, 45, 6], [-4, 47, 7], eye);
+    grid.fill_box([4, 45, 6], [6, 47, 7], eye);
+
+    // Pointed lateral ears
+    grid.fill_line([-8, 44, 0], [-16, 50, -1], 0, skin);
+    grid.fill_line([8, 44, 0], [16, 50, -1], 0, skin);
+
+    // Horned iron helmet
+    grid.fill_box([-8, 49, -6], [8, 56, 6], iron);
+    grid.fill_line([-6, 54, 0], [-12, 64, 4], 0, bone);
+    grid.fill_line([6, 54, 0], [12, 64, 4], 0, bone);
+
+    grid.build_mesh()
 }
 
 pub fn create_voxel_peasant_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.026);
     let skin = [0.86, 0.72, 0.60, 1.0];
     let shirt = [0.22, 0.42, 0.85, 1.0];
     let pants = [0.32, 0.26, 0.20, 1.0];
     let hair = [0.28, 0.18, 0.10, 1.0];
     let boots = [0.18, 0.12, 0.08, 1.0];
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.28, 0.65, -0.18), max: Vec3::new(0.28, 1.25, 0.18), color: shirt },
-        VoxelBox { min: Vec3::new(-0.20, 1.25, -0.18), max: Vec3::new(0.20, 1.65, 0.18), color: skin },
-        VoxelBox { min: Vec3::new(-0.22, 1.55, -0.20), max: Vec3::new(0.22, 1.72, 0.20), color: hair },
-        VoxelBox { min: Vec3::new(-0.42, 0.60, -0.10), max: Vec3::new(-0.28, 1.22, 0.10), color: shirt },
-        VoxelBox { min: Vec3::new(0.28, 0.60, -0.10), max: Vec3::new(0.42, 1.22, 0.10), color: shirt },
-        VoxelBox { min: Vec3::new(-0.24, 0.15, -0.14), max: Vec3::new(-0.04, 0.65, 0.14), color: pants },
-        VoxelBox { min: Vec3::new(0.04, 0.15, -0.14), max: Vec3::new(0.24, 0.65, 0.14), color: pants },
-        VoxelBox { min: Vec3::new(-0.25, 0.0, -0.15), max: Vec3::new(-0.03, 0.15, 0.18), color: boots },
-        VoxelBox { min: Vec3::new(0.03, 0.0, -0.15), max: Vec3::new(0.25, 0.15, 0.18), color: boots },
-    ])
+    grid.fill_box([-7, 0, -4], [-2, 5, 4], boots);
+    grid.fill_box([2, 0, -4], [7, 5, 4], boots);
+    grid.fill_box([-6, 5, -3], [-2, 18, 3], pants);
+    grid.fill_box([2, 5, -3], [6, 18, 3], pants);
+
+    grid.fill_box([-8, 18, -5], [8, 34, 5], shirt);
+    grid.fill_box([-12, 18, -3], [-8, 33, 3], shirt);
+    grid.fill_box([8, 18, -3], [12, 33, 3], shirt);
+    grid.fill_box([-12, 14, -3], [-8, 18, 3], skin);
+    grid.fill_box([8, 14, -3], [12, 18, 3], skin);
+
+    grid.fill_box([-5, 34, -5], [5, 44, 5], skin);
+    grid.fill_box([-6, 42, -6], [6, 47, 6], hair);
+
+    grid.build_mesh()
 }
 
 pub fn create_voxel_pet_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.026);
     let coat = [0.86, 0.52, 0.18, 1.0];
     let cream = [0.95, 0.90, 0.80, 1.0];
     let nose = [0.10, 0.10, 0.10, 1.0];
     let ears = [0.68, 0.38, 0.12, 1.0];
 
-    build_voxel_mesh(&[
-        VoxelBox { min: Vec3::new(-0.22, 0.22, -0.38), max: Vec3::new(0.22, 0.55, 0.38), color: coat },
-        VoxelBox { min: Vec3::new(-0.16, 0.20, -0.30), max: Vec3::new(0.16, 0.36, 0.35), color: cream },
-        VoxelBox { min: Vec3::new(-0.18, 0.45, 0.22), max: Vec3::new(0.18, 0.72, 0.44), color: coat },
-        VoxelBox { min: Vec3::new(-0.18, 0.60, 0.30), max: Vec3::new(0.18, 0.92, 0.62), color: coat },
-        VoxelBox { min: Vec3::new(-0.10, 0.60, 0.62), max: Vec3::new(0.10, 0.76, 0.82), color: cream },
-        VoxelBox { min: Vec3::new(-0.05, 0.70, 0.80), max: Vec3::new(0.05, 0.78, 0.85), color: nose },
-        VoxelBox { min: Vec3::new(-0.24, 0.68, 0.32), max: Vec3::new(-0.16, 0.90, 0.52), color: ears },
-        VoxelBox { min: Vec3::new(0.16, 0.68, 0.32), max: Vec3::new(0.24, 0.90, 0.52), color: ears },
-        VoxelBox { min: Vec3::new(-0.20, 0.0, 0.20), max: Vec3::new(-0.10, 0.25, 0.32), color: coat },
-        VoxelBox { min: Vec3::new(0.10, 0.0, 0.20), max: Vec3::new(0.20, 0.25, 0.32), color: coat },
-        VoxelBox { min: Vec3::new(-0.20, 0.0, -0.32), max: Vec3::new(-0.10, 0.25, -0.20), color: coat },
-        VoxelBox { min: Vec3::new(0.10, 0.0, -0.32), max: Vec3::new(0.20, 0.25, -0.20), color: coat },
-        VoxelBox { min: Vec3::new(-0.06, 0.45, -0.48), max: Vec3::new(0.06, 0.72, -0.36), color: coat },
-    ])
+    grid.fill_box([-4, 0, -6], [-2, 5, -4], coat);
+    grid.fill_box([2, 0, -6], [4, 5, -4], coat);
+    grid.fill_box([-4, 0, 4], [-2, 5, 6], coat);
+    grid.fill_box([2, 0, 4], [4, 5, 6], coat);
+
+    grid.fill_box([-4, 5, -8], [4, 11, 8], coat);
+    grid.fill_box([-3, 4, -6], [3, 7, 6], cream);
+
+    grid.fill_box([-3, 10, 5], [3, 16, 11], coat);
+    grid.fill_box([-2, 10, 11], [2, 13, 14], cream);
+    grid.set(0, 13, 14, nose);
+
+    grid.fill_box([-5, 14, 6], [-3, 18, 9], ears);
+    grid.fill_box([3, 14, 6], [5, 18, 9], ears);
+
+    grid.build_mesh()
+}
+
+pub fn create_voxel_rock_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.045);
+    let slate = [0.35, 0.35, 0.38, 1.0];
+    let granite_mid = [0.50, 0.50, 0.53, 1.0];
+    let highlight = [0.75, 0.75, 0.78, 1.0];
+
+    grid.fill_sphere(0, 10, 0, 17.0, slate);
+    grid.fill_sphere(0, 15, 0, 13.0, granite_mid);
+    grid.fill_sphere(-3, 20, -3, 8.0, highlight);
+    grid.build_mesh()
+}
+
+pub fn create_voxel_bush_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.045);
+    let dark = [0.14, 0.44, 0.14, 1.0];
+    let bright = [0.26, 0.66, 0.26, 1.0];
+    let berry = [0.92, 0.10, 0.10, 1.0];
+
+    grid.fill_sphere(0, 10, 0, 16.0, dark);
+    grid.fill_sphere(0, 15, 0, 11.0, bright);
+
+    grid.fill_box([10, 12, 0], [12, 14, 2], berry);
+    grid.fill_box([-11, 13, 2], [-9, 15, 4], berry);
+    grid.fill_box([0, 17, 9], [2, 19, 11], berry);
+    grid.fill_box([-3, 15, -10], [-1, 17, -8], berry);
+
+    grid.build_mesh()
+}
+
+pub fn create_voxel_branch_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.015);
+    let bark_dark = [0.34, 0.22, 0.12, 1.0];
+    let bark_mid = [0.46, 0.30, 0.16, 1.0];
+    let broken_sapwood = [0.78, 0.65, 0.46, 1.0];
+
+    grid.fill_cylinder_y(-18, 0, 1, 4, 3.0, broken_sapwood);
+    grid.fill_cylinder_y(-18, 0, 0, 1, 3.5, bark_dark);
+
+    grid.fill_line([-18, 2, 0], [-6, 3, 2], 1, bark_mid);
+    grid.fill_line([-6, 3, 2], [6, 2, -1], 1, bark_dark);
+    grid.fill_line([6, 2, -1], [18, 4, 3], 1, bark_mid);
+    grid.fill_line([18, 4, 3], [28, 5, 1], 0, bark_dark);
+
+    grid.fill_line([-4, 3, 2], [2, 5, 8], 0, bark_mid);
+    grid.fill_line([2, 5, 8], [6, 7, 14], 0, bark_mid);
+    grid.fill_line([8, 3, 0], [14, 5, -8], 0, bark_dark);
+    grid.fill_line([14, 5, -8], [19, 6, -14], 0, bark_mid);
+
+    grid.build_mesh()
+}
+
+pub fn create_voxel_flint_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.012);
+    let chert_black = [0.06, 0.08, 0.10, 1.0];
+    let chert_dark = [0.14, 0.22, 0.32, 1.0];
+    let chert_blue = [0.24, 0.42, 0.58, 1.0];
+    let cyan_facet = [0.42, 0.72, 0.88, 1.0];
+    let highlight = [0.82, 0.94, 1.0, 1.0];
+
+    grid.fill_box([-7, 1, -6], [7, 6, 6], chert_black);
+    grid.fill_box([-5, 6, -5], [5, 11, 5], chert_dark);
+    grid.fill_box([-4, 11, -4], [4, 16, 4], chert_blue);
+    grid.fill_box([-2, 16, -2], [2, 21, 2], cyan_facet);
+    grid.fill_box([-1, 21, -1], [1, 25, 1], highlight);
+
+    grid.fill_line([-7, 3, 6], [0, 23, 2], 0, cyan_facet);
+    grid.fill_line([7, 3, -6], [0, 23, -2], 0, cyan_facet);
+    grid.fill_line([-7, 3, -6], [0, 23, -2], 0, cyan_facet);
+    grid.fill_line([7, 3, 6], [0, 23, 2], 0, cyan_facet);
+
+    grid.build_mesh()
+}
+
+pub fn create_voxel_stone_mesh() -> Mesh {
+    let mut grid = MicroVoxelGrid::new(0.02);
+    let granite = [0.52, 0.50, 0.48, 1.0];
+    let granite_dark = [0.38, 0.36, 0.35, 1.0];
+    let quartz_fleck = [0.85, 0.85, 0.82, 1.0];
+
+    grid.fill_sphere(0, 5, 0, 7.0, granite);
+    grid.fill_box([-3, 2, -2], [4, 7, 3], granite_dark);
+    grid.set(2, 6, 3, quartz_fleck);
+    grid.set(-2, 7, -1, quartz_fleck);
+
+    grid.build_mesh()
+}
+
+// ----------------------------------------------------------------------------
+// STATIC MESH CACHING (Public Interface for Bevy SystemParam Safety)
+// ----------------------------------------------------------------------------
+
+pub struct CachedModelMeshes {
+    pub dead_tree: Handle<Mesh>,
+    pub oak_tree: Handle<Mesh>,
+    pub pine_tree: Handle<Mesh>,
+    pub round_tree: Handle<Mesh>,
+    pub rock: Handle<Mesh>,
+    pub bush: Handle<Mesh>,
+    pub branch: Handle<Mesh>,
+    pub flint: Handle<Mesh>,
+    pub stone: Handle<Mesh>,
+    pub deer: Handle<Mesh>,
+    pub boar: Handle<Mesh>,
+    pub goblin: Handle<Mesh>,
+    pub peasant: Handle<Mesh>,
+    pub pet: Handle<Mesh>,
 }
 
 // ----------------------------------------------------------------------------
 // NETWORK CONNECTION SYSTEM
 // ----------------------------------------------------------------------------
 
-// Architectural Note: Lightened, Non-Dense Atmospheric Fog Tuning.
-// Uses a clean, luminous sky palette (0.75, 0.84, 0.92) with a wide falloff band
-// (start: 35.0m, end: 65.0m). This preserves crystal-clear foreground visibility
-// without dark fog walls, while smoothly blending the terrain perimeter into the sky.
 pub fn init_network_connection(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -479,20 +881,21 @@ pub fn init_network_connection(
         PlayerBody,
         RigidBody::Dynamic, 
         Collider::capsule(0.4, 1.2),
+        ColliderDensity(1.0),
         SweptCcd::default(),
-        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Unit, GameLayer::Environment]),
+        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment]),
         LockedAxes::ROTATION_LOCKED,
         GravityScale(0.0),
         LinearVelocity::ZERO,
         ExternalForce::default().with_persistence(false),
         Kcc { is_grounded: false },
+    ));
+
+    player_entity_commands.insert((
         LogicalPosition(Vec3::new(0.0, 25.0, 0.0)),
         LogicalRotation(Quat::IDENTITY),
         crate::components::Faction::Player, 
         Selectable, 
-    ));
-
-    player_entity_commands.insert((
         crate::prediction::InputBuffer::default(),
         crate::prediction::AuthoritativeState::default(),
         crate::prediction::LocalMovementTracker { last_position: Vec3::new(0.0, 25.0, 0.0) },
@@ -504,6 +907,7 @@ pub fn init_network_connection(
             PbrBundle {
                 mesh: meshes.add(create_voxel_peasant_mesh()),
                 material: materials.add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.85, ..default() }),
+                transform: BevyTransform::from_xyz(0.0, -1.05, 0.0),
                 ..default()
             },
             RenderLayers::layer(2), 
@@ -539,7 +943,6 @@ pub fn init_network_connection(
             },
             RenderLayers::from_layers(&[0, 1]),
             DepthPrepass, NormalPrepass,
-            ScreenSpaceAmbientOcclusionSettings { quality_level: ScreenSpaceAmbientOcclusionQualityLevel::High },
         )).with_children(|cam| {
             cam.spawn((
                 PbrBundle {
@@ -557,7 +960,7 @@ pub fn init_network_connection(
     });
 
     commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight { illuminance: 8_000.0, shadows_enabled: true, ..default() },
+        directional_light: DirectionalLight { illuminance: 9_000.0, shadows_enabled: true, ..default() },
         transform: BevyTransform::from_xyz(10.0, 20.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
@@ -584,7 +987,7 @@ pub fn wait_for_connection(
                 next_state.set(GameState::InGame);
                 info!("Bootstrapping complete. Entering In-Game State.");
                 
-                let spawn_y = crate::terrain::get_terrain_height(0.0, 0.0) + 1.5;
+                let spawn_y = crate::terrain::get_terrain_height(0.0, 0.0) + 1.05;
                 
                 if let Ok((mut transform, mut velocity, mut gravity, mut tracker, mut buffer)) = player_query.get_single_mut() {
                     transform.translation = Vec3::new(0.0, spawn_y, 0.0);
@@ -638,10 +1041,6 @@ pub fn sync_logical_components(
     }
 }
 
-// Architectural Note: Zero-Allocation Creature Synchronization Loop.
-// Reuses persistent collections to eliminate per-frame heap churn.
-// Dynamic creatures are bounded strictly within 40m load / 44m unload so they never
-// populate the distant horizon line or draw silhouettes through the lightened fog.
 pub fn sync_transforms(
     mut commands: Commands, 
     conn: Res<SpacetimeConnection>, 
@@ -652,6 +1051,7 @@ pub fn sync_transforms(
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut spawned_ids: Local<std::collections::HashSet<u64>>,
+    mut model_cache: Local<Option<CachedModelMeshes>>,
 ) {
     let _ = conn.db.frame_tick();
     
@@ -661,12 +1061,30 @@ pub fn sync_transforms(
 
     let player_pos = player_body_query.get_single().map(|t| t.translation).unwrap_or(Vec3::ZERO);
 
-    const CREATURE_LOAD_RADIUS_SQ: f32 = 40.0 * 40.0;
-    const CREATURE_UNLOAD_RADIUS_SQ: f32 = 44.0 * 44.0;
+    const CREATURE_LOAD_RADIUS_SQ: f32 = 75.0 * 75.0;
+    const CREATURE_UNLOAD_RADIUS_SQ: f32 = 80.0 * 80.0;
+
+    let cache = model_cache.get_or_insert_with(|| {
+        CachedModelMeshes {
+            dead_tree: meshes.add(create_voxel_dead_tree_mesh()),
+            oak_tree: meshes.add(create_voxel_oak_mesh()),
+            pine_tree: meshes.add(create_voxel_pine_mesh()),
+            round_tree: meshes.add(create_voxel_round_tree_mesh()),
+            rock: meshes.add(create_voxel_rock_mesh()),
+            bush: meshes.add(create_voxel_bush_mesh()),
+            branch: meshes.add(create_voxel_branch_mesh()),
+            flint: meshes.add(create_voxel_flint_mesh()),
+            stone: meshes.add(create_voxel_stone_mesh()),
+            deer: meshes.add(create_voxel_deer_mesh()),
+            boar: meshes.add(create_voxel_boar_mesh()),
+            goblin: meshes.add(create_voxel_goblin_mesh()),
+            peasant: meshes.add(create_voxel_peasant_mesh()),
+            pet: meshes.add(create_voxel_pet_mesh()),
+        }
+    });
 
     spawned_ids.clear();
 
-    // 1. Update existing local entities or despawn those exiting view bounds
     for (entity, net_entity, mut log_pos, _) in query.iter_mut() {
         if Some(net_entity.0) == my_entity_id {
             spawned_ids.insert(net_entity.0);
@@ -692,7 +1110,6 @@ pub fn sync_transforms(
         }
     }
 
-    // 2. Stream new creatures only when within visible perimeter
     for db_t in conn.db.db.transform().iter() {
         let id = db_t.entity_id;
         if Some(id) == my_entity_id { 
@@ -714,33 +1131,42 @@ pub fn sync_transforms(
         let is_pet = conn.db.db.pet_component().entity_id().find(&id).is_some();
         let npc_brain = conn.db.db.npc_brain().entity_id().find(&id);
         
-        let mut visual_transform = BevyTransform::default();
+        let mut visual_transform = BevyTransform::from_xyz(0.0, -1.05, 0.0);
+
         let (mesh_handle, root_collider) = if is_pet {
-            (meshes.add(create_voxel_pet_mesh()), Collider::cuboid(0.5, 0.8, 0.9))
+            visual_transform.translation.y = -0.45;
+            (cache.pet.clone(), Collider::cuboid(0.5, 0.8, 0.9))
         } else if let Some(brain) = npc_brain {
             let m = match brain.ai_type {
                 crate::module_bindings::AiType::Boar => {
-                    (meshes.add(create_voxel_boar_mesh()), Collider::cuboid(0.8, 0.8, 1.4))
+                    visual_transform.translation.y = -1.05;
+                    (cache.boar.clone(), Collider::cuboid(0.8, 0.8, 1.4))
                 }
                 crate::module_bindings::AiType::Deer => {
-                    (meshes.add(create_voxel_deer_mesh()), Collider::cuboid(0.6, 1.8, 1.2))
+                    visual_transform.translation.y = -1.05;
+                    (cache.deer.clone(), Collider::cuboid(0.6, 1.8, 1.2))
                 }
                 crate::module_bindings::AiType::Goblin => {
-                    (meshes.add(create_voxel_goblin_mesh()), Collider::capsule(0.4, 1.3))
+                    visual_transform.translation.y = -1.05;
+                    (cache.goblin.clone(), Collider::capsule(0.4, 1.3))
                 }
                 crate::module_bindings::AiType::Friendly | crate::module_bindings::AiType::Peasant => {
-                    (meshes.add(create_voxel_peasant_mesh()), Collider::capsule(0.4, 1.8))
+                    visual_transform.translation.y = -1.05;
+                    (cache.peasant.clone(), Collider::capsule(0.4, 1.8))
                 }
             };
 
             if brain.state == crate::module_bindings::BrainState::Corpse {
-                visual_transform.rotation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+                visual_transform.translation.y = -0.35;
+                visual_transform.rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
             }
             m
         } else if is_peasant {
-            (meshes.add(create_voxel_peasant_mesh()), Collider::capsule(0.4, 1.8))
+            visual_transform.translation.y = -1.05;
+            (cache.peasant.clone(), Collider::capsule(0.4, 1.8))
         } else {
-            (meshes.add(create_voxel_peasant_mesh()), Collider::capsule(0.4, 1.8))
+            visual_transform.translation.y = -1.05;
+            (cache.peasant.clone(), Collider::capsule(0.4, 1.8))
         };
 
         let mut entity_cmds = commands.spawn((
@@ -751,7 +1177,7 @@ pub fn sync_transforms(
             Selectable, 
             RigidBody::Kinematic, 
             root_collider,
-            CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment]),
+            CollisionLayers::new([GameLayer::Unit], [GameLayer::Terrain]),
         ));
 
         if is_peasant {
@@ -785,11 +1211,9 @@ pub fn sync_transforms(
     }
 }
 
-// Architectural Note: Spatial Distance Culling for Resource Nodes.
-// Nodes load within 42m and unload beyond 46m, keeping total scene entities bounded
-// under ~150 and eliminating heap memory stalls.
 pub fn sync_resource_nodes(
     mut commands: Commands, 
+    time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
     node_query: Query<(Entity, &ResourceNodeItem, &BevyTransform)>, 
@@ -797,9 +1221,35 @@ pub fn sync_resource_nodes(
     conn: Res<SpacetimeConnection>,
     mut default_node_mat: Local<Option<Handle<StandardMaterial>>>,
     mut local_nodes: Local<std::collections::HashSet<u64>>,
+    mut scan_timer: Local<Option<Timer>>,
+    mut model_cache: Local<Option<CachedModelMeshes>>,
 ) {
     let Ok(player_transform) = player_query.get_single() else { return; };
     let player_pos = player_transform.translation;
+
+    let timer = scan_timer.get_or_insert_with(|| Timer::from_seconds(0.1, TimerMode::Repeating));
+    if !timer.tick(time.delta()).just_finished() {
+        return;
+    }
+
+    let cache = model_cache.get_or_insert_with(|| {
+        CachedModelMeshes {
+            dead_tree: meshes.add(create_voxel_dead_tree_mesh()),
+            oak_tree: meshes.add(create_voxel_oak_mesh()),
+            pine_tree: meshes.add(create_voxel_pine_mesh()),
+            round_tree: meshes.add(create_voxel_round_tree_mesh()),
+            rock: meshes.add(create_voxel_rock_mesh()),
+            bush: meshes.add(create_voxel_bush_mesh()),
+            branch: meshes.add(create_voxel_branch_mesh()),
+            flint: meshes.add(create_voxel_flint_mesh()),
+            stone: meshes.add(create_voxel_stone_mesh()),
+            deer: meshes.add(create_voxel_deer_mesh()),
+            boar: meshes.add(create_voxel_boar_mesh()),
+            goblin: meshes.add(create_voxel_goblin_mesh()),
+            peasant: meshes.add(create_voxel_peasant_mesh()),
+            pet: meshes.add(create_voxel_pet_mesh()),
+        }
+    });
 
     let node_mat = default_node_mat.get_or_insert_with(|| {
         materials.add(StandardMaterial {
@@ -815,7 +1265,6 @@ pub fn sync_resource_nodes(
 
     local_nodes.clear();
 
-    // 1. Process active scene nodes
     for (entity, node_item, transform) in node_query.iter() {
         let origin = transform.translation;
         let dist_sq = (origin.x - player_pos.x).powi(2) + (origin.z - player_pos.z).powi(2);
@@ -833,9 +1282,17 @@ pub fn sync_resource_nodes(
                         let angle_rand = ((seed as f32) / (u32::MAX as f32)) * std::f32::consts::TAU;
                         let fall_dir = Vec3::new(angle_rand.cos(), 0.0, angle_rand.sin()).normalize();
 
+                        let tree_style = (node_item.node_id % 4) as u8;
+                        let tree_mesh = match tree_style {
+                            0 => cache.dead_tree.clone(),
+                            1 => cache.oak_tree.clone(),
+                            2 => cache.pine_tree.clone(),
+                            _ => cache.round_tree.clone(),
+                        };
+
                         commands.spawn((
                             PbrBundle {
-                                mesh: meshes.add(create_voxel_tree_mesh()),
+                                mesh: tree_mesh,
                                 material: node_mat.clone(),
                                 transform: *transform,
                                 ..default()
@@ -884,7 +1341,6 @@ pub fn sync_resource_nodes(
         }
     }
 
-    // 2. Stream new nodes within loading perimeter
     for node in conn.db.db.resource_node().iter() {
         let dist_sq = (node.x - player_pos.x).powi(2) + (node.z - player_pos.z).powi(2);
         if dist_sq > NODE_LOAD_RADIUS_SQ || local_nodes.contains(&node.node_id) {
@@ -894,38 +1350,47 @@ pub fn sync_resource_nodes(
         let clean_type = node.node_type.trim();
 
         let (mesh, collider, y_offset) = match clean_type {
-            "Tree" => (
-                meshes.add(create_voxel_tree_mesh()),
-                Collider::cylinder(0.35, 9.35),
-                0.0,
-            ),
+            "Tree" => {
+                let tree_style = (node.node_id % 4) as u8;
+                let tree_mesh = match tree_style {
+                    0 => cache.dead_tree.clone(),
+                    1 => cache.oak_tree.clone(),
+                    2 => cache.pine_tree.clone(),
+                    _ => cache.round_tree.clone(),
+                };
+                (
+                    tree_mesh,
+                    Collider::cylinder(0.40, 8.5),
+                    0.0,
+                )
+            }
             "Rock" => (
-                meshes.add(create_voxel_rock_mesh()),
+                cache.rock.clone(),
                 Collider::cuboid(1.5, 1.4, 1.4),
                 0.0,
             ),
             "Bush" => (
-                meshes.add(create_voxel_bush_mesh()),
+                cache.bush.clone(),
                 Collider::sphere(0.85),
                 0.0,
             ),
             "Branch" => (
-                meshes.add(create_voxel_branch_mesh()),
+                cache.branch.clone(),
                 Collider::cuboid(1.5, 0.28, 0.9),
                 0.02,
             ),
             "Flint" => (
-                meshes.add(create_voxel_flint_mesh()),
+                cache.flint.clone(),
                 Collider::cuboid(0.55, 0.75, 0.45),
                 0.02,
             ),
             "LooseStone" => (
-                meshes.add(create_voxel_stone_mesh()),
+                cache.stone.clone(),
                 Collider::cuboid(1.2, 0.58, 0.95),
                 0.02,
             ),
             _ => (
-                meshes.add(create_voxel_stone_mesh()),
+                cache.stone.clone(),
                 Collider::cuboid(0.5, 0.5, 0.5),
                 0.0,
             )
@@ -945,34 +1410,7 @@ pub fn sync_resource_nodes(
             RigidBody::Static,
             collider,
             CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
-        )).with_children(|parent| {
-            if clean_type == "Bush" {
-                let offsets = [
-                    Vec3::new(0.55, 0.35, 0.0), Vec3::new(-0.35, 0.55, 0.45), 
-                    Vec3::new(0.0, 0.30, 0.65), Vec3::new(0.45, 0.45, -0.45), 
-                    Vec3::new(-0.55, 0.40, -0.45),
-                ];
-                
-                let berry_mesh = meshes.add(bevy::math::primitives::Cuboid::new(0.18, 0.18, 0.18));
-                let red_material = materials.add(StandardMaterial { 
-                    base_color: Color::srgb(0.88, 0.08, 0.08), 
-                    perceptual_roughness: 0.6,
-                    ..default() 
-                });
-
-                for offset in offsets {
-                    parent.spawn((
-                        PbrBundle {
-                            mesh: berry_mesh.clone(),
-                            material: red_material.clone(),
-                            transform: BevyTransform::from_translation(offset),
-                            ..default()
-                        },
-                        BerryVisual { node_id: node.node_id }
-                    ));
-                }
-            }
-        });
+        ));
         local_nodes.insert(node.node_id);
     }
 }
@@ -1057,15 +1495,9 @@ pub fn update_falling_trees(
 }
 
 pub fn update_berry_visuals(
-    conn: Res<SpacetimeConnection>,
-    mut query: Query<(&mut Visibility, &BerryVisual)>,
-) {
-    for (mut vis, berry) in query.iter_mut() {
-        if let Some(node) = conn.db.db.resource_node().node_id().find(&berry.node_id) {
-            *vis = if node.health > 0 { Visibility::Inherited } else { Visibility::Hidden };
-        }
-    }
-}
+    _conn: Res<SpacetimeConnection>,
+    _query: Query<(&mut Visibility, &BerryVisual)>,
+) {}
 
 pub fn process_combat_events(
     mut commands: Commands,
@@ -1138,7 +1570,10 @@ pub fn process_combat_events(
                                 transform: BevyTransform::from_xyz(event.x, event.y + 0.5, event.z),
                                 ..default()
                             },
-                            RigidBody::Dynamic, Collider::cuboid(0.1, 0.1, 0.1), LinearVelocity(vel),
+                            RigidBody::Dynamic,
+                            Collider::cuboid(0.1, 0.1, 0.1),
+                            ColliderDensity(1.0),
+                            LinearVelocity(vel),
                             Particle { timer: Timer::from_seconds(0.5, TimerMode::Once) }, 
                         ));
                     }

@@ -1,3 +1,10 @@
+// ============================================================================
+// File: components.rs
+// ============================================================================
+// ----------------------------------------------------------------------------
+// CORE ECS LOGICAL, RENDERING & NETWORK COMPONENTS
+// ----------------------------------------------------------------------------
+
 use bevy::prelude::*;
 use crate::building::ModularPieceType;
 
@@ -60,8 +67,11 @@ pub struct ResourceNodeItem {
 #[derive(Component)]
 pub struct VoxelChunkMarker {
     pub chunk_key: u64,
+    #[allow(dead_code)]
     pub chunk_x: i32,
+    #[allow(dead_code)]
     pub chunk_y: i32,
+    #[allow(dead_code)]
     pub chunk_z: i32,
     pub last_modified_tick: u64,
 }
@@ -157,10 +167,11 @@ pub struct CachedPlayerEntity(pub Option<u64>);
 
 #[derive(Component)] 
 pub struct BerryVisual {
-    pub node_id: u64
+    #[allow(dead_code)]
+    pub node_id: u64,
 }
 
 #[derive(Component)] 
 pub struct Particle { 
-    pub timer: Timer 
+    pub timer: Timer, 
 }

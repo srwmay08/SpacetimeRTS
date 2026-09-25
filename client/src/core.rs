@@ -1,4 +1,11 @@
-#![allow(unexpected_cfgs)] // Architectural Note: Suppresses third-party Avian3D macro warnings.
+// ============================================================================
+// File: core.rs
+// ============================================================================
+// ----------------------------------------------------------------------------
+// GAME CORE STATE, GLOBAL RESOURCES & CONSOLE DEFINITIONS
+// ----------------------------------------------------------------------------
+
+#![allow(unexpected_cfgs)]
 
 use bevy::prelude::*;
 use avian3d::prelude::*;
@@ -65,6 +72,7 @@ pub struct SelectionState {
 
 #[derive(Resource, Default)]
 pub struct GeneratedChunks {
+    #[allow(dead_code)]
     pub chunks: std::collections::HashSet<(i32, i32)>,
 }
 
@@ -104,6 +112,7 @@ pub struct ConsoleState {
     pub cursor_timer: Timer,
     pub show_cursor: bool,
     pub tab_completion_index: usize,
+    #[allow(dead_code)]
     pub last_tab_input: String,
 }
 

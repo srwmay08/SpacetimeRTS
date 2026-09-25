@@ -1,14 +1,15 @@
 // ----------------------------------------------------------------------------
 // MOVEMENT STRUCTURES & IMPORTS (SpacetimeDB v2.x / Rust 2024 Edition)
 // ----------------------------------------------------------------------------
+// Architectural Note: Provides server-authoritative position validation with
+// speed-hack throttling calibrated to match the client's 15.0 m/s movement speed.
+
 use spacetimedb::{table, reducer, ReducerContext, Identity, Table};
 use crate::combat::{hitbox_history, Snapshot}; 
 use crate::waypoint;
 use crate::player_perspective;
 use crate::CameraModeType;
 
-// Architectural Note: Added BTree indexes on chunk_x and chunk_z to optimize
-// spatial queries for client subscriptions and localized AI crowd routines.
 #[derive(Clone)]
 #[table(accessor = transform, public)]
 pub struct Transform {
@@ -37,7 +38,6 @@ pub struct PlayerSession {
 // AUTHORITATIVE MOVEMENT & PERSPECTIVE REDUCERS
 // ----------------------------------------------------------------------------
 
-// Architectural Note: Replaces string matching with strongly typed camera modes.
 #[reducer]
 pub fn set_camera_mode(ctx: &ReducerContext, mode: CameraModeType) -> Result<(), String> {
     let session = ctx.db.player_session().identity().find(ctx.sender())
@@ -90,14 +90,19 @@ pub fn process_movement(
         return Ok(());
     }
 
+    // Architectural Note: Synchronized Anti-Cheat Speed Ceiling.
+    // The client moves horizontally at 15.0 m/s with vertical jumps up to 10.0 m/s.
+    // Setting max allowable speed to 22.0 m/s accommodates natural slopes and jumps
+    // without clamping legitimate inputs and causing false rollback loops.
     let elapsed_ticks = (tick_id - transform.last_processed_tick).min(20) as f32;
-    let max_speed_per_tick = 5.0_f32 * (elapsed_ticks * 0.05).max(0.05);
-    let max_speed_sq = max_speed_per_tick * max_speed_per_tick;
+    let max_speed_mps = 22.0_f32;
+    let max_dist_per_tick = max_speed_mps * (elapsed_ticks * 0.05).max(0.05);
+    let max_dist_sq = max_dist_per_tick * max_dist_per_tick;
     let magnitude_sq = (delta_x * delta_x) + (delta_y * delta_y) + (delta_z * delta_z);
 
-    let (dx, dy, dz) = if magnitude_sq > max_speed_sq {
+    let (dx, dy, dz) = if magnitude_sq > max_dist_sq {
         let magnitude = magnitude_sq.sqrt(); 
-        let scale = max_speed_per_tick / magnitude;
+        let scale = max_dist_per_tick / magnitude;
         log::debug!("Speed-hack throttled for entity {}. Clamping delta magnitude.", session.entity_id);
         (delta_x * scale, delta_y * scale, delta_z * scale)
     } else {
@@ -119,8 +124,6 @@ pub fn process_movement(
 
     ctx.db.transform().entity_id().update(transform.clone());
     
-    // Architectural Note: Replaced Vec::remove(0) with ring buffer truncation.
-    // Preserves constant-time insertion on high-rate player packets.
     if let Some(mut history) = ctx.db.hitbox_history().entity_id().find(session.entity_id) {
         history.snapshots.push(Snapshot {
             tick_id,

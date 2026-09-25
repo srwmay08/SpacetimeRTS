@@ -1,3 +1,14 @@
+// ============================================================================
+// File: terrain.rs
+// ============================================================================
+// ----------------------------------------------------------------------------
+// PROCEDURAL VOXEL & CONTINUOUS TERRAIN SYSTEM (Bevy Engine / Avian3D)
+// ----------------------------------------------------------------------------
+// Architectural Note: Provides seamless, crack-free terrain meshing by anchoring
+// 2D horizontal column chunks at y = 0.0 with analytic central-difference normal
+// sampling. Decouples heavy Avian3D trimesh collision generation to a tight 16m
+// radius around the player avatar, while rendering visual-only meshes out to 48m.
+
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
@@ -14,30 +25,15 @@ use crate::network::{SpacetimeConnection, create_voxel_pet_mesh};
 use crate::module_bindings::voxel_chunk_table::VoxelChunkTableAccess;
 use crate::module_bindings::VoxelChunk;
 
-// ----------------------------------------------------------------------------
-// CONSTANTS & PROCEDURAL CONFIGURATIONS
-// ----------------------------------------------------------------------------
 pub const VOXEL_CHUNK_SIZE: usize = 16;
-
-// Architectural Note: Voxel Resolution Scale (0.25m / 25cm).
-// Defines each discrete voxel cell as 0.25m x 0.25m x 0.25m.
-// A 16x16 chunk spans 4.0m x 4.0m horizontally. Combined with continuous analytic
-// heightfield triangulation, this produces smooth natural grades without terracing.
 pub const VOXEL_SIZE: f32 = 0.25;
 
-// ----------------------------------------------------------------------------
-// GLOBAL NOISE SINGLETON
-// ----------------------------------------------------------------------------
 static PERLIN: OnceLock<Perlin> = OnceLock::new();
 
 #[inline]
 pub fn get_perlin() -> &'static Perlin {
     PERLIN.get_or_init(|| Perlin::new(42))
 }
-
-// ----------------------------------------------------------------------------
-// PROCEDURAL TERRAIN HEIGHTMAP DENSITY FUNCTION
-// ----------------------------------------------------------------------------
 
 pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     let scale = 0.015; 
@@ -68,10 +64,6 @@ pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     y
 }
 
-// ----------------------------------------------------------------------------
-// PROCEDURAL TERRAIN MESHER & ANALYTIC GRADIENT SHADING
-// ----------------------------------------------------------------------------
-
 #[inline]
 pub fn pack_chunk_key(cx: i32, cy: i32, cz: i32) -> u64 {
     let x_bits = (cx as i64 + 0x800000) as u64 & 0xFFFFFF;
@@ -80,47 +72,22 @@ pub fn pack_chunk_key(cx: i32, cy: i32, cz: i32) -> u64 {
     (x_bits << 40) | (y_bits << 24) | z_bits
 }
 
-// Architectural Note: Analytic Gradient Normal Computation.
-// Replaced per-triangle cross product accumulation with direct analytic sampling
-// of the noise function gradient. This is 10x faster to compute, mathematically
-// guarantees continuous C1 normal vectors across chunk boundaries with zero seam artifacts,
-// and drastically accelerates mesh generation.
+#[inline]
+pub fn unpack_chunk_key(key: u64) -> (i32, i32, i32) {
+    let x_bits = ((key >> 40) & 0xFFFFFF) as i64 - 0x800000;
+    let y_bits = ((key >> 24) & 0xFFFF) as i64 - 0x8000;
+    let z_bits = (key & 0xFFFFFF) as i64 - 0x800000;
+    (x_bits as i32, y_bits as i32, z_bits as i32)
+}
+
 pub fn mesh_voxel_chunk_surface_nets(
     db_chunks: &std::collections::HashMap<u64, VoxelChunk>,
     cx: i32,
-    cy: i32,
     cz: i32,
 ) -> Option<Mesh> {
     let chunk_world_span = VOXEL_CHUNK_SIZE as f32 * VOXEL_SIZE; // 4.0m
     let chunk_base_x = cx as f32 * chunk_world_span;
     let chunk_base_z = cz as f32 * chunk_world_span;
-
-    let mut min_h = f32::MAX;
-    let mut max_h = f32::MIN;
-    let mut height_grid = [[0.0f32; 17]; 17];
-
-    for lz in 0..=16 {
-        for lx in 0..=16 {
-            let wx = chunk_base_x + (lx as f32 * VOXEL_SIZE);
-            let wz = chunk_base_z + (lz as f32 * VOXEL_SIZE);
-            let h = get_terrain_height(wx, wz);
-            height_grid[lx][lz] = h;
-            if h < min_h { min_h = h; }
-            if h > max_h { max_h = h; }
-        }
-    }
-
-    let chunk_bottom_y = cy as f32 * chunk_world_span;
-    let chunk_top_y = (cy + 1) as f32 * chunk_world_span;
-
-    let key = pack_chunk_key(cx, cy, cz);
-    let is_in_db = db_chunks.contains_key(&key);
-
-    if !is_in_db {
-        if chunk_bottom_y > max_h + 0.1 || chunk_top_y < min_h - 0.1 {
-            return None;
-        }
-    }
 
     let grid_dim = 17;
     let num_verts = grid_dim * grid_dim;
@@ -132,36 +99,41 @@ pub fn mesh_voxel_chunk_surface_nets(
 
     const DELTA: f32 = 0.15;
 
-    // 1. Generate smooth grid vertices with analytic gradient normals
     for lz in 0..=16 {
         for lx in 0..=16 {
             let local_x = lx as f32 * VOXEL_SIZE;
             let local_z = lz as f32 * VOXEL_SIZE;
             let wx = chunk_base_x + local_x;
             let wz = chunk_base_z + local_z;
-            let mut world_y = height_grid[lx][lz];
+            let mut world_y = get_terrain_height(wx, wz);
 
-            // Voxel destruction override check
-            if let Some(db_chunk) = db_chunks.get(&key) {
-                let slx = lx.min(15);
-                let slz = lz.min(15);
-                for sly in (0..16).rev() {
-                    let idx = slx + (sly * VOXEL_CHUNK_SIZE) + (slz * VOXEL_CHUNK_SIZE * VOXEL_CHUNK_SIZE);
-                    if let Some(&mat_byte) = db_chunk.voxels.get(idx) {
-                        if mat_byte == 0 {
-                            let air_top = chunk_bottom_y + (sly as f32 * VOXEL_SIZE);
-                            if air_top < world_y {
-                                world_y = air_top;
+            let vx = (wx / VOXEL_SIZE).floor() as i32;
+            let vz = (wz / VOXEL_SIZE).floor() as i32;
+            let v_cx = vx.div_euclid(VOXEL_CHUNK_SIZE as i32);
+            let v_cz = vz.div_euclid(VOXEL_CHUNK_SIZE as i32);
+            let v_lx = vx.rem_euclid(VOXEL_CHUNK_SIZE as i32) as usize;
+            let v_lz = vz.rem_euclid(VOXEL_CHUNK_SIZE as i32) as usize;
+
+            let surface_cy = (world_y / chunk_world_span).floor() as i32;
+            for cy_check in (surface_cy.saturating_sub(1)..=surface_cy).rev() {
+                let v_key = pack_chunk_key(v_cx, cy_check, v_cz);
+                if let Some(db_chunk) = db_chunks.get(&v_key) {
+                    for sly in (0..16).rev() {
+                        let idx = v_lx + (sly * VOXEL_CHUNK_SIZE) + (v_lz * VOXEL_CHUNK_SIZE * VOXEL_CHUNK_SIZE);
+                        if let Some(&mat_byte) = db_chunk.voxels.get(idx) {
+                            if mat_byte == 0 {
+                                let air_top = (cy_check as f32 * chunk_world_span) + (sly as f32 * VOXEL_SIZE);
+                                if air_top < world_y {
+                                    world_y = air_top;
+                                }
                             }
                         }
                     }
                 }
             }
 
-            let local_y = world_y - chunk_bottom_y;
-            positions.push([local_x, local_y, local_z]);
+            positions.push([local_x, world_y, local_z]);
 
-            // Analytic normal sampling
             let h_l = get_terrain_height(wx - DELTA, wz);
             let h_r = get_terrain_height(wx + DELTA, wz);
             let h_d = get_terrain_height(wx, wz - DELTA);
@@ -173,9 +145,9 @@ pub fn mesh_voxel_chunk_surface_nets(
             uvs.push([wx * 0.25, wz * 0.25]);
 
             let color = if world_y < 2.5 && normal.y >= 0.55 {
-                [0.76, 0.70, 0.50, 1.0] // Shoreline sand
+                [0.76, 0.70, 0.50, 1.0]
             } else if normal.y >= 0.45 {
-                [0.26, 0.62, 0.26, 1.0] // Vibrant grass
+                [0.26, 0.62, 0.26, 1.0]
             } else if normal.y >= 0.30 {
                 let t = (normal.y - 0.30) / 0.15;
                 [
@@ -185,14 +157,13 @@ pub fn mesh_voxel_chunk_surface_nets(
                     1.0,
                 ]
             } else {
-                [0.48, 0.45, 0.42, 1.0] // Rocky cliff
+                [0.48, 0.45, 0.42, 1.0]
             };
 
             colors.push(color);
         }
     }
 
-    // 2. Generate quad indices
     for lz in 0..16 {
         for lx in 0..16 {
             let i00 = (lx + lz * grid_dim) as u32;
@@ -213,23 +184,12 @@ pub fn mesh_voxel_chunk_surface_nets(
     Some(mesh)
 }
 
-// ----------------------------------------------------------------------------
-// UNIFIED HIGH-PERFORMANCE VOXEL STREAMING SYSTEM
-// ----------------------------------------------------------------------------
-
 #[derive(Component)]
 pub struct TerrainChunkVisual;
 
 #[derive(Component)]
 pub struct TerrainChunkHasCollider;
 
-// Architectural Note: Decoupled Physics / Visual Chunk Streaming.
-// Evaluates chunks horizontally across radius_h = 16 (64m visible envelope).
-// To prevent framerate lag spikes:
-// 1. Chunks within 20m spawn with static colliders for walking/combat.
-// 2. Chunks beyond 20m spawn as purely visual meshes with NO collider.
-// 3. Batched at up to 24 chunks per frame, loading the entire visible world in ~0.3s
-//    at a continuous, locked 60 FPS.
 pub fn update_infinite_voxel_terrain(
     mut commands: Commands,
     player_query: Query<&BevyTransform, With<PlayerBody>>,
@@ -238,10 +198,15 @@ pub fn update_infinite_voxel_terrain(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut chunk_query: Query<(Entity, &mut VoxelChunkMarker, &mut Handle<Mesh>, Option<&TerrainChunkHasCollider>)>,
     mut default_material: Local<Option<Handle<StandardMaterial>>>,
-    mut empty_chunks: Local<std::collections::HashSet<u64>>,
     mut loaded_entities: Local<std::collections::HashMap<u64, (Entity, u64, bool)>>,
+    mut last_player_chunk: Local<Option<(i32, i32)>>,
+    mut scan_throttle: Local<Option<Timer>>,
+    time: Res<Time>,
 ) {
     let Ok(player_transform) = player_query.get_single() else { return; };
+
+    let timer = scan_throttle.get_or_insert_with(|| Timer::from_seconds(0.08, TimerMode::Repeating));
+    let timer_fired = timer.tick(time.delta()).just_finished();
 
     let mat_handle = default_material.get_or_insert_with(|| {
         materials.add(StandardMaterial {
@@ -251,6 +216,26 @@ pub fn update_infinite_voxel_terrain(
             ..default()
         })
     }).clone();
+
+    let chunk_world_span = VOXEL_CHUNK_SIZE as f32 * VOXEL_SIZE; // 4.0m
+    let p_pos = player_transform.translation;
+    let p_cx = (p_pos.x / chunk_world_span).floor() as i32;
+    let p_cz = (p_pos.z / chunk_world_span).floor() as i32;
+
+    const RADIUS_H: i32 = 12; // 48m radius
+    const RADIUS_H_SQ: f32 = (RADIUS_H * RADIUS_H) as f32;
+    const NEAR_COLLIDER_DIST_SQ: f32 = 16.0 * 16.0;
+    const FAR_COLLIDER_UNLOAD_SQ: f32 = 20.0 * 20.0;
+
+    let player_moved_chunks = match *last_player_chunk {
+        Some(c) => c != (p_cx, p_cz),
+        None => true,
+    };
+
+    if !timer_fired && !player_moved_chunks {
+        return;
+    }
+    *last_player_chunk = Some((p_cx, p_cz));
 
     let db_chunks: std::collections::HashMap<u64, VoxelChunk> = conn.db.db.voxel_chunk()
         .iter()
@@ -262,46 +247,29 @@ pub fn update_infinite_voxel_terrain(
         loaded_entities.insert(marker.chunk_key, (entity, marker.last_modified_tick, has_col.is_some()));
     }
 
-    let chunk_world_span = VOXEL_CHUNK_SIZE as f32 * VOXEL_SIZE; // 4.0m
-    let p_pos = player_transform.translation;
-    let p_cx = (p_pos.x / chunk_world_span).floor() as i32;
-    let p_cz = (p_pos.z / chunk_world_span).floor() as i32;
-
-    const RADIUS_H: i32 = 16;
-    const RADIUS_H_SQ: f32 = (RADIUS_H * RADIUS_H) as f32;
-    const NEAR_COLLIDER_DIST_SQ: f32 = 20.0 * 20.0;
-    const FAR_COLLIDER_UNLOAD_SQ: f32 = 24.0 * 24.0;
-
-    // 1. Maintain existing chunks: update voxel modifications and manage dynamic colliders
     for (&key, &(existing_entity, last_tick, has_collider)) in loaded_entities.iter() {
-        let (cx, cy, cz) = unpack_chunk_key(key);
+        let (cx, _cy, cz) = unpack_chunk_key(key);
         let chunk_center_x = (cx as f32 + 0.5) * chunk_world_span;
         let chunk_center_z = (cz as f32 + 0.5) * chunk_world_span;
         let dist_sq = (chunk_center_x - p_pos.x).powi(2) + (chunk_center_z - p_pos.z).powi(2);
 
-        // Update modified voxels if server ticked
-        if let Some(db_chunk) = db_chunks.get(&key) {
-            if db_chunk.last_modified_tick > last_tick {
-                if let Some(new_mesh) = mesh_voxel_chunk_surface_nets(&db_chunks, cx, cy, cz) {
-                    let mesh_handle = meshes.add(new_mesh.clone());
-                    let mut entity_cmds = commands.entity(existing_entity);
-                    entity_cmds.insert(mesh_handle);
-                    if dist_sq <= NEAR_COLLIDER_DIST_SQ {
-                        if let Some(col) = Collider::trimesh_from_mesh(&new_mesh) {
-                            entity_cmds.insert((col, TerrainChunkHasCollider));
-                        }
+        let server_mod_tick = db_chunks.get(&key).map(|c| c.last_modified_tick).unwrap_or(0);
+        if server_mod_tick > last_tick {
+            if let Some(new_mesh) = mesh_voxel_chunk_surface_nets(&db_chunks, cx, cz) {
+                let mesh_handle = meshes.add(new_mesh.clone());
+                let mut entity_cmds = commands.entity(existing_entity);
+                entity_cmds.insert(mesh_handle);
+                if dist_sq <= NEAR_COLLIDER_DIST_SQ {
+                    if let Some(col) = Collider::trimesh_from_mesh(&new_mesh) {
+                        entity_cmds.insert((col, TerrainChunkHasCollider));
                     }
-                    if let Ok((_, mut marker, _, _)) = chunk_query.get_mut(existing_entity) {
-                        marker.last_modified_tick = db_chunk.last_modified_tick;
-                    }
-                } else {
-                    commands.entity(existing_entity).despawn_recursive();
-                    continue;
+                }
+                if let Ok((_, mut marker, _, _)) = chunk_query.get_mut(existing_entity) {
+                    marker.last_modified_tick = server_mod_tick;
                 }
             }
         }
 
-        // Dynamic collider attachment / detachment based on player proximity
         if has_collider && dist_sq > FAR_COLLIDER_UNLOAD_SQ {
             commands.entity(existing_entity).remove::<Collider>().remove::<TerrainChunkHasCollider>();
         } else if !has_collider && dist_sq <= NEAR_COLLIDER_DIST_SQ {
@@ -315,8 +283,7 @@ pub fn update_infinite_voxel_terrain(
         }
     }
 
-    // 2. Candidate collection: surface-targeted column evaluation
-    let mut candidates: Vec<(i32, i32, i32, f32, u64)> = Vec::with_capacity(384);
+    let mut candidates: Vec<(i32, i32, f32, u64)> = Vec::with_capacity(192);
 
     for cz in (p_cz - RADIUS_H)..=(p_cz + RADIUS_H) {
         let dz = (cz - p_cz) as f32;
@@ -327,25 +294,19 @@ pub fn update_infinite_voxel_terrain(
                 continue;
             }
 
-            let center_wx = (cx as f32 + 0.5) * chunk_world_span;
-            let center_wz = (cz as f32 + 0.5) * chunk_world_span;
-            let surface_y = get_terrain_height(center_wx, center_wz);
-            let approx_cy = (surface_y / chunk_world_span).floor() as i32;
-
-            let key = pack_chunk_key(cx, approx_cy, cz);
-            if !loaded_entities.contains_key(&key) && !empty_chunks.contains(&key) {
-                candidates.push((cx, approx_cy, cz, dist_sq, key));
+            let key = pack_chunk_key(cx, 0, cz);
+            if !loaded_entities.contains_key(&key) {
+                candidates.push((cx, cz, dist_sq, key));
             }
         }
     }
 
-    candidates.sort_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Fast batch spawn: 24 chunks per frame with minimal CPU overhead
-    const MAX_CHUNKS_PER_FRAME: usize = 24;
-    for (cx, cy, cz, dist_sq_chunks, key) in candidates.into_iter().take(MAX_CHUNKS_PER_FRAME) {
+    const MAX_CHUNKS_PER_FRAME: usize = 16;
+    for (cx, cz, dist_sq_chunks, key) in candidates.into_iter().take(MAX_CHUNKS_PER_FRAME) {
         let db_mod_tick = db_chunks.get(&key).map(|c| c.last_modified_tick).unwrap_or(0);
-        if let Some(new_mesh) = mesh_voxel_chunk_surface_nets(&db_chunks, cx, cy, cz) {
+        if let Some(new_mesh) = mesh_voxel_chunk_surface_nets(&db_chunks, cx, cz) {
             let dist_world_sq = dist_sq_chunks * chunk_world_span * chunk_world_span;
             let needs_collider = dist_world_sq <= NEAR_COLLIDER_DIST_SQ;
 
@@ -357,14 +318,13 @@ pub fn update_infinite_voxel_terrain(
 
             let mesh_handle = meshes.add(new_mesh);
             let chunk_world_x = cx as f32 * chunk_world_span;
-            let chunk_world_y = cy as f32 * chunk_world_span;
             let chunk_world_z = cz as f32 * chunk_world_span;
 
             let mut entity_cmds = commands.spawn((
                 PbrBundle {
                     mesh: mesh_handle,
                     material: mat_handle.clone(),
-                    transform: BevyTransform::from_xyz(chunk_world_x, chunk_world_y, chunk_world_z),
+                    transform: BevyTransform::from_xyz(chunk_world_x, 0.0, chunk_world_z),
                     ..default()
                 },
                 RigidBody::Static,
@@ -372,7 +332,7 @@ pub fn update_infinite_voxel_terrain(
                 VoxelChunkMarker {
                     chunk_key: key,
                     chunk_x: cx,
-                    chunk_y: cy,
+                    chunk_y: 0,
                     chunk_z: cz,
                     last_modified_tick: db_mod_tick,
                 },
@@ -382,36 +342,16 @@ pub fn update_infinite_voxel_terrain(
             if let Some(col) = collider {
                 entity_cmds.insert((col, TerrainChunkHasCollider));
             }
-        } else {
-            empty_chunks.insert(key);
         }
     }
 
-    // 3. Despawn chunks moving outside the visible perimeter
     for (&key, &(entity, _, _)) in loaded_entities.iter() {
         let (cx, _cy, cz) = unpack_chunk_key(key);
         if (cx - p_cx).abs() > RADIUS_H + 1 || (cz - p_cz).abs() > RADIUS_H + 1 {
             commands.entity(entity).despawn_recursive();
         }
     }
-
-    empty_chunks.retain(|&key| {
-        let (cx, _cy, cz) = unpack_chunk_key(key);
-        (cx - p_cx).abs() <= RADIUS_H + 1 && (cz - p_cz).abs() <= RADIUS_H + 1
-    });
 }
-
-#[inline]
-pub fn unpack_chunk_key(key: u64) -> (i32, i32, i32) {
-    let x_bits = ((key >> 40) & 0xFFFFFF) as i64 - 0x800000;
-    let y_bits = ((key >> 24) & 0xFFFF) as i64 - 0x8000;
-    let z_bits = (key & 0xFFFFFF) as i64 - 0x800000;
-    (x_bits as i32, y_bits as i32, z_bits as i32)
-}
-
-// ----------------------------------------------------------------------------
-// INITIAL WORLD SPAWN SYSTEM
-// ----------------------------------------------------------------------------
 
 pub fn spawn_initial_world(
     mut commands: Commands, 
@@ -452,10 +392,6 @@ pub fn spawn_initial_world(
         ));
     });
 }
-
-// ----------------------------------------------------------------------------
-// HIGH-PERFORMANCE 0.10m VOXEL DEBRIS SYSTEM
-// ----------------------------------------------------------------------------
 
 pub fn spawn_voxel_gibs(
     commands: &mut Commands,
