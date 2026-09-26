@@ -208,7 +208,14 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
 /// Architectural Note: Server-Authoritative Ballistic Simulation Loop.
 /// Executed during the high-frequency server tick (16ms) to integrate trajectory,
 /// execute swept raycasts against entities, and mutate the voxel grid on impact.
+/// P1 Fix: Early exit when no projectiles exist to avoid unnecessary table scans.
 pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
+    // P1 Fix: Skip entire tick if no active projectiles
+    let projectile_count = ctx.db.active_projectile().iter().count();
+    if projectile_count == 0 {
+        return;
+    }
+    
     let projectiles: Vec<ActiveProjectile> = ctx.db.active_projectile().iter().collect();
 
     for mut proj in projectiles {
