@@ -583,8 +583,19 @@ pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
         ctx.db.waypoint().waypoint_id().delete(id);
     }
 
-    if ctx.db.npc_brain().iter().count() < 8 {
-        ensure_npc_population(ctx);
+    // P2 Fix: Throttle NPC population checks to every 10 seconds instead of every 100ms tick
+    // This prevents server hitches from counting all NPCs and potentially spawning 16+ NPCs synchronously
+    static LAST_NPC_CHECK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now_micros = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    let last_check = LAST_NPC_CHECK.load(std::sync::atomic::Ordering::Relaxed);
+    
+    // Check every 10 seconds (10_000_000 microseconds)
+    if now_micros.saturating_sub(last_check) > 10_000_000 {
+        LAST_NPC_CHECK.store(now_micros, std::sync::atomic::Ordering::Relaxed);
+        
+        if ctx.db.npc_brain().iter().count() < 8 {
+            ensure_npc_population(ctx);
+        }
     }
 }
 
