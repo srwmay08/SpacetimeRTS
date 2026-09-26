@@ -5,3 +5,25 @@ members = [
     "backend/logic",
 ]
 resolver = "2"
+
+# P0 Fix: Optimized build profiles for faster compiles and better runtime performance
+# These must be at the workspace root to apply to all members
+[profile.dev]
+debug = 0
+strip = "debuginfo"
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+panic = 'abort'
+debug = 0
+strip = "debuginfo"
+
+[profile.distribution]
+inherits = "release"
+strip = true
+lto = "thin"
+codegen-units = 1

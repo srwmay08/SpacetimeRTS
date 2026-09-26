@@ -24,6 +24,21 @@ use crate::terrain::*;
 use crate::ui::*;
 use crate::building::*;
 
+// P2 Fix: SystemSets for explicit ordering and predictable behavior
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum UpdateSet {
+    /// Input handling (keyboard, mouse, gamepad)
+    Input,
+    /// Network synchronization (SpacetimeDB)
+    Network,
+    /// Game logic (AI, combat, building)
+    Logic,
+    /// Physics and movement
+    Physics,
+    /// Visual/UI updates
+    Rendering,
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -43,6 +58,15 @@ fn main() {
         .init_state::<GameState>()
         .init_state::<CameraMode>()
         .add_event::<ActionEvent>() 
+        
+        // P2 Fix: Configure SystemSets for explicit ordering
+        .configure_sets(Update, (
+            UpdateSet::Input,
+            UpdateSet::Network,
+            UpdateSet::Logic,
+            UpdateSet::Physics,
+            UpdateSet::Rendering,
+        ).chain())
         
         .insert_resource(EventTracker::default()) 
         .insert_resource(GeneratedChunks::default())

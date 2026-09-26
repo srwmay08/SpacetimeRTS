@@ -1136,7 +1136,7 @@ pub fn sync_transforms(
         let (mesh_handle, root_collider) = if is_pet {
             visual_transform.translation.y = -0.45;
             (cache.pet.clone(), Collider::cuboid(0.5, 0.8, 0.9))
-        } else if let Some(brain) = npc_brain {
+        } else if let Some(ref brain) = npc_brain {
             let m = match brain.ai_type {
                 crate::module_bindings::AiType::Boar => {
                     visual_transform.translation.y = -1.05;
@@ -1169,7 +1169,27 @@ pub fn sync_transforms(
             (cache.peasant.clone(), Collider::capsule(0.4, 1.8))
         };
 
+        // P1 Fix: Determine NPC type name for debuggability before spawn
+        let npc_type_name = if is_pet {
+            "Pet"
+        } else if let Some(ref brain) = npc_brain {
+            match brain.ai_type {
+                crate::module_bindings::AiType::Boar => "Boar",
+                crate::module_bindings::AiType::Deer => "Deer",
+                crate::module_bindings::AiType::Goblin => "Goblin",
+                crate::module_bindings::AiType::Friendly | crate::module_bindings::AiType::Peasant => "Peasant",
+            }
+        } else if is_peasant {
+            "Peasant"
+        } else {
+            "NPC"
+        };
+
         let mut entity_cmds = commands.spawn((
+            // P1 Fix: Add Name component for debuggability
+            Name::new(format!("NPC_{}_{}", npc_type_name, id)),
+            // P1 Fix: Add StateScoped for automatic cleanup on state exit
+            StateScoped(GameState::InGame),
             NetworkEntity(id),
             SpatialBundle::from_transform(BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)),
             LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
