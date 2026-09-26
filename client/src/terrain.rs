@@ -30,12 +30,56 @@ pub const VOXEL_SIZE: f32 = 0.25;
 
 static PERLIN: OnceLock<Perlin> = OnceLock::new();
 
+// P0 Fix 1: Terrain height cache to avoid redundant Perlin noise calculations
+// Key: (x, z) quantized to 0.25m grid (VOXEL_SIZE), Value: terrain height
+static TERRAIN_HEIGHT_CACHE: OnceLock<std::sync::RwLock<std::collections::HashMap<(i32, i32), f32>>> = OnceLock::new();
+
+#[inline]
+pub fn get_terrain_height_cache() -> &'static std::sync::RwLock<std::collections::HashMap<(i32, i32), f32>> {
+    TERRAIN_HEIGHT_CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::with_capacity(10000)))
+}
+
 #[inline]
 pub fn get_perlin() -> &'static Perlin {
     PERLIN.get_or_init(|| Perlin::new(42))
 }
 
+// P0 Fix 1: Cached terrain height lookup — quantizes to 0.25m grid for cache efficiency
 pub fn get_terrain_height(x: f32, z: f32) -> f32 {
+    // Quantize to 0.25m grid for cache key
+    let qx = (x / VOXEL_SIZE).round() as i32;
+    let qz = (z / VOXEL_SIZE).round() as i32;
+    
+    // Try cache first (read lock)
+    {
+        let cache = get_terrain_height_cache();
+        if let Ok(cache) = cache.read() {
+            if let Some(&height) = cache.get(&(qx, qz)) {
+                return height;
+            }
+        }
+    }
+    
+    // Cache miss — compute height
+    let height = compute_terrain_height(x, z);
+    
+    // Store in cache (write lock)
+    {
+        let cache = get_terrain_height_cache();
+        if let Ok(mut cache) = cache.write() {
+            // Limit cache size to prevent unbounded growth
+            if cache.len() > 50000 {
+                cache.clear();
+            }
+            cache.insert((qx, qz), height);
+        }
+    }
+    
+    height
+}
+
+// Original terrain height computation (renamed for internal use)
+fn compute_terrain_height(x: f32, z: f32) -> f32 {
     let scale = 0.015; 
     let base_height_amp = 18.0; 
     let noise = get_perlin();
