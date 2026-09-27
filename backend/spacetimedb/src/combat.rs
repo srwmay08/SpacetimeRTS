@@ -247,12 +247,20 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
             let ndy = segment_dy / segment_len;
             let ndz = segment_dz / segment_len;
 
-            // 1. Ray sweep against entity hitboxes
-            for history in ctx.db.hitbox_history().iter() {
-                if history.entity_id == proj.shooter_id {
+            // P1 Fix: Use spatial grid for broad-phase entity lookup instead of full table scan
+            let nearby_entities = crate::spatial::get_nearby_entities(proj.pos_x, proj.pos_z, segment_len + 2.0);
+            
+            // 1. Ray sweep against entity hitboxes (only nearby entities from spatial grid)
+            for entity_id in nearby_entities {
+                if entity_id == proj.shooter_id {
                     continue;
                 }
-                if ctx.db.harvestable_corpse().entity_id().find(history.entity_id).is_some() {
+                
+                let Some(history) = ctx.db.hitbox_history().entity_id().find(entity_id) else {
+                    continue;
+                };
+                
+                if ctx.db.harvestable_corpse().entity_id().find(entity_id).is_some() {
                     continue;
                 }
 
@@ -271,7 +279,7 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
                         if dist > 0.0 && dist <= segment_len {
                             hit_detected = true;
                             hit_point = (prev_x + ndx * dist, prev_y + ndy * dist, prev_z + ndz * dist);
-                            hit_target_id = Some(history.entity_id);
+                            hit_target_id = Some(entity_id);
                             break;
                         }
                     }
@@ -287,9 +295,13 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
                 }
             }
 
-            // 3. Check collision with modular structures
+            // 3. Check collision with modular structures (using spatial grid)
             if !hit_detected {
-                for s in ctx.db.structure().iter() {
+                let nearby_structures = crate::spatial::get_nearby_entities(proj.pos_x, proj.pos_z, 2.0);
+                for structure_id in nearby_structures {
+                    let Some(s) = ctx.db.structure().structure_id().find(structure_id) else {
+                        continue;
+                    };
                     let dx = s.x - proj.pos_x;
                     let dy = s.y - proj.pos_y;
                     let dz = s.z - proj.pos_z;

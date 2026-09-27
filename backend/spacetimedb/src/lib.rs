@@ -14,6 +14,7 @@ pub mod combat;
 pub mod building;
 pub mod ai;
 pub mod voxel;
+pub mod spatial;
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history, faction_component, Faction};
@@ -557,6 +558,8 @@ fn seed_authoritative_recipes(ctx: &ReducerContext) {
 
 #[reducer]
 pub fn high_frequency_tick(ctx: &ReducerContext, _timer: HighFrequencyTimer) {
+    // P1 Fix: Rebuild spatial grid at start of tick for broad-phase optimization
+    crate::spatial::rebuild_spatial_grid(ctx);
     crate::combat::process_projectiles_tick(ctx, 0.016);
 }
 
