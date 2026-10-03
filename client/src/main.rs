@@ -156,6 +156,7 @@ fn main() {
             update_build_ui, 
             update_hotbar_ui,
             update_hud_health_bar,
+            update_celestial_hud_ui,
             update_interaction_prompt,
             animate_view_model, 
             update_inventory_ui, 

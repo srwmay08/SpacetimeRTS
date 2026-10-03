@@ -125,6 +125,11 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "night",
     "midnight",
     "weather",
+    "aurora",
+    "rain",
+    "storm",
+    "clearsky",
+    "haze",
     "timescale",
     "speed",
     "help",
@@ -148,6 +153,7 @@ pub struct ClientEquippedBags {
 #[derive(Component, Clone, Copy, Debug)] pub struct PaperdollBagText(pub usize);
 #[derive(Component, Clone, Copy, Debug)] pub struct PaperdollBagTooltip(pub usize);
 #[derive(Component)] pub struct InventoryCapacityHeader;
+#[derive(Component)] pub struct CelestialHudText;
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn(Camera2dBundle {
@@ -264,6 +270,38 @@ pub fn setup_ui(mut commands: Commands) {
                 ..default()
             }),
             HealthBarText,
+        ));
+    });
+
+    // ------------------------------------------------------------------------
+    // CELESTIAL CLOCK & ATMOSPHERIC WEATHER HUD PILL (Top-Right)
+    // ------------------------------------------------------------------------
+    commands.spawn(NodeBundle {
+        style: Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(15.0),
+            right: Val::Px(15.0),
+            padding: UiRect::new(Val::Px(14.0), Val::Px(14.0), Val::Px(6.0), Val::Px(6.0)),
+            border: UiRect::all(Val::Px(1.5)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        background_color: Color::srgba(0.08, 0.08, 0.12, 0.85).into(),
+        border_color: Color::srgba(0.40, 0.50, 0.70, 0.60).into(),
+        z_index: ZIndex::Global(10),
+        ..default()
+    }).with_children(|pill| {
+        pill.spawn((
+            TextBundle::from_section(
+                "12:00 (High Noon) | Clear Sky [F8/F9]",
+                TextStyle {
+                    font_size: 13.0,
+                    color: Color::srgb(0.92, 0.95, 1.0),
+                    ..default()
+                },
+            ),
+            CelestialHudText,
         ));
     });
 
@@ -1486,27 +1524,55 @@ pub fn handle_console_input(
                         match w_type.to_lowercase().as_str() {
                             "clear" | "clearsky" => {
                                 w.weather_type = crate::binary_sky::WeatherType::ClearSky;
-                                console.logs.push("[Weather] Set to ClearSky (high visibility, deep Rayleigh blues).".into());
+                                console.logs.push("[Weather] Set to ClearSky (pristine visibility, deep Rayleigh blues).".into());
                             }
                             "haze" | "aerosol" => {
                                 w.weather_type = crate::binary_sky::WeatherType::AerosolHaze;
                                 console.logs.push("[Weather] Set to AerosolHaze (golden horizon, diffuse Mie halo).".into());
                             }
-                            "aurora" | "storm" => {
+                            "aurora" | "storm_aurora" => {
                                 w.weather_type = crate::binary_sky::WeatherType::StellarWindAurora;
                                 console.logs.push("[Weather] Set to StellarWindAurora (binary magnetic curtains).".into());
+                                console.logs.push("[Tip] Enter 'night' or press [F8] for deep darkness view.".into());
                             }
-                            "rain" | "overcast" => {
+                            "rain" | "storm" | "overcast" => {
                                 w.weather_type = crate::binary_sky::WeatherType::OvercastPrecipitation;
-                                console.logs.push("[Weather] Set to OvercastPrecipitation (cloud extinction).".into());
+                                console.logs.push("[Weather] Set to OvercastPrecipitation (rain streaks, heavy overcast).".into());
                             }
                             _ => {
-                                console.logs.push("[Syntax Error] Options: clear, haze, aurora, rain".into());
+                                console.logs.push("[Syntax Error] Options: clear, haze, aurora, rain (or press [F9])".into());
                             }
                         }
                     }
+                } else if let Some(ref w) = sky_weather {
+                    console.logs.push(format!("[Weather] Current: {:?}. Options: clear, haze, aurora, rain (or press [F9])", w.weather_type));
                 } else {
                     console.logs.push("[Syntax Error] Usage: weather <clear|haze|aurora|rain> (or press [F9])".into());
+                }
+            }
+            "aurora" => {
+                if let Some(ref mut w) = sky_weather {
+                    w.weather_type = crate::binary_sky::WeatherType::StellarWindAurora;
+                    console.logs.push("[Weather] StellarWindAurora activated! Shimmering aurora curtains glowing in the sky.".into());
+                    console.logs.push("[Tip] Enter 'night' or press [F8] for deep darkness view.".into());
+                }
+            }
+            "rain" | "storm" => {
+                if let Some(ref mut w) = sky_weather {
+                    w.weather_type = crate::binary_sky::WeatherType::OvercastPrecipitation;
+                    console.logs.push("[Weather] OvercastPrecipitation activated! Heavy rain streaks and stormy overcast.".into());
+                }
+            }
+            "clearsky" => {
+                if let Some(ref mut w) = sky_weather {
+                    w.weather_type = crate::binary_sky::WeatherType::ClearSky;
+                    console.logs.push("[Weather] ClearSky activated! Pristine visibility and deep Rayleigh blues.".into());
+                }
+            }
+            "haze" => {
+                if let Some(ref mut w) = sky_weather {
+                    w.weather_type = crate::binary_sky::WeatherType::AerosolHaze;
+                    console.logs.push("[Weather] AerosolHaze activated! Golden horizon and dense Mie halo.".into());
                 }
             }
             "clearinv" | "clear" => {
@@ -1564,9 +1630,10 @@ pub fn handle_console_input(
                 console.logs.push("tp <x> <z>             : Teleports player to world coordinate".into());
                 console.logs.push("heal [amt]             : Restores player health points".into());
                 console.logs.push("god                    : Sets health to 99999 HP".into());
-                console.logs.push("time <0-24>            : Sets diurnal world clock ([ [ ] and [ ] ])".into());
-                console.logs.push("day / night            : Quick toggle between High Noon and Midnight [F8]".into());
+                console.logs.push("time <0-24>            : Sets in-game world clock ([ [ ] and [ ] ])".into());
+                console.logs.push("day / night            : Quick toggle High Noon / Midnight [F8]".into());
                 console.logs.push("weather <clear|aurora> : Sets atmospheric weather preset [F9]".into());
+                console.logs.push("aurora / rain / haze   : Direct weather command shortcuts".into());
                 console.logs.push("timescale <speed>      : Sets cycle rate (e.g. 1.0, 60.0) [ - / = ]".into());
                 console.logs.push("spawn <mob> [amt]      : Spawns Deer, Boar, Goblin, Peasant".into());
                 console.logs.push("nuke [radius]          : Demolishes terrain with spherical blast".into());
@@ -1946,6 +2013,40 @@ pub fn update_hud_health_bar(
         if text.sections[0].value != new_text {
             text.sections[0].value = new_text;
         }
+    }
+}
+
+pub fn update_celestial_hud_ui(
+    ephemeris: Option<Res<crate::binary_sky::BinaryEphemerisState>>,
+    weather: Option<Res<crate::binary_sky::AtmosphericWeather>>,
+    mut text_q: Query<&mut Text, With<CelestialHudText>>,
+) {
+    let (Some(eph), Some(wth)) = (ephemeris, weather) else { return; };
+    let Ok(mut text) = text_q.get_single_mut() else { return; };
+
+    let hours = eph.clock_time_hours();
+    let h = hours.floor() as u32;
+    let m = ((hours.fract()) * 60.0).floor() as u32;
+
+    let icon = match eph.sky_state {
+        crate::binary_sky::DynamicSkyState::DualDay => "Dual Day",
+        crate::binary_sky::DynamicSkyState::StarAPrimaryDay => "Day",
+        crate::binary_sky::DynamicSkyState::StarBSecondaryDay => "Dwarf Day",
+        crate::binary_sky::DynamicSkyState::BinaryAlignment => "Conjunction",
+        crate::binary_sky::DynamicSkyState::CivilTwilight | crate::binary_sky::DynamicSkyState::NauticalTwilight => "Twilight",
+        crate::binary_sky::DynamicSkyState::TrueNight => "Night",
+    };
+
+    let weather_str = match wth.weather_type {
+        crate::binary_sky::WeatherType::ClearSky => "Clear Sky",
+        crate::binary_sky::WeatherType::AerosolHaze => "Aerosol Haze",
+        crate::binary_sky::WeatherType::StellarWindAurora => "Aurora Active",
+        crate::binary_sky::WeatherType::OvercastPrecipitation => "Overcast Rain",
+    };
+
+    let formatted = format!("{:02}:{:02} ({}) | {} [F8/F9]", h, m, icon, weather_str);
+    if text.sections[0].value != formatted {
+        text.sections[0].value = formatted;
     }
 }
 

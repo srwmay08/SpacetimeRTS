@@ -378,6 +378,14 @@ pub struct CosmicStarfield;
 #[derive(Component, Debug, Default)]
 pub struct AuroraCurtain;
 
+/// Component tag for the procedural atmospheric sky dome rendering Rayleigh/Mie scattering.
+#[derive(Component, Debug, Default)]
+pub struct AtmosphericSkyDome;
+
+/// Component tag for the dynamic volumetric rain precipitation streaks.
+#[derive(Component, Debug, Default)]
+pub struct PrecipitationStreaks;
+
 // ============================================================================
 // 4. RADIATIVE TRANSFER & SCATTERING MATHEMATICS (RDR2 METHODOLOGY)
 // ============================================================================
@@ -479,15 +487,15 @@ pub fn multi_octave_stellar_glare(cos_theta: f32, is_secondary_star: bool) -> f3
     }
 }
 
-/// Generates a procedural 3D starfield mesh consisting of distant astronomical stars
-/// distributed over the celestial upper hemisphere with spectral color variations.
-pub fn create_starfield_mesh(star_count: usize) -> Mesh {
+/// Generates an astronomical 3D starfield mesh consisting of billboarded diamond stars
+/// distributed over the celestial sphere, perfectly facing the observer at the center.
+pub fn create_billboard_starfield_mesh(star_count: usize) -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    let mut positions = Vec::with_capacity(star_count * 3);
-    let mut colors = Vec::with_capacity(star_count * 3);
-    let mut indices = Vec::with_capacity(star_count * 3);
+    let mut positions = Vec::with_capacity(star_count * 4);
+    let mut colors = Vec::with_capacity(star_count * 4);
+    let mut indices = Vec::with_capacity(star_count * 6);
 
-    let mut seed = 123456789u64;
+    let mut seed = 987654321u64;
     let mut xorshift = || {
         seed ^= seed << 13;
         seed ^= seed >> 7;
@@ -497,42 +505,72 @@ pub fn create_starfield_mesh(star_count: usize) -> Mesh {
 
     let spectral_colors = [
         [0.75, 0.85, 1.0, 1.0], // O/B Blue-White
-        [1.0, 1.0, 1.0, 1.0],   // A White
+        [1.0, 1.0, 1.0, 1.0],   // A Pure White
         [1.0, 0.96, 0.82, 1.0], // F/G Yellow-White (Sol-like)
-        [1.0, 0.78, 0.45, 1.0], // K Amber
-        [1.0, 0.55, 0.35, 1.0], // M Red
-        [0.60, 0.90, 1.0, 1.0], // Cyan flare
+        [1.0, 0.80, 0.50, 1.0], // K Amber
+        [1.0, 0.55, 0.35, 1.0], // M Crimson Supergiant
+        [0.60, 0.95, 1.0, 1.0], // Cyan flare
     ];
 
-    let radius = 450.0;
+    let radius = 440.0;
     for i in 0..star_count {
         let u1 = ((xorshift() % 10000) as f32) / 10000.0;
         let u2 = ((xorshift() % 10000) as f32) / 10000.0;
         let u3 = ((xorshift() % 10000) as f32) / 10000.0;
+        let u4 = ((xorshift() % 10000) as f32) / 10000.0;
 
         let azim = u1 * 2.0 * PI;
-        let elev = 0.04 + u2 * (PI * 0.5 - 0.04);
+        let elev = -0.04 + u2 * (PI * 0.5 + 0.04);
 
         let cos_el = elev.cos();
-        let center = Vec3::new(
-            cos_el * azim.sin() * radius,
-            elev.sin() * radius,
-            -cos_el * azim.cos() * radius,
-        );
+        let dir = Vec3::new(
+            cos_el * azim.sin(),
+            elev.sin(),
+            -cos_el * azim.cos(),
+        ).normalize();
 
-        let size = 0.5 + u3 * 1.5;
+        let center = dir * radius;
+
+        // Construct orthonormal billboard basis facing camera at origin
+        let up = if dir.y.abs() > 0.95 { Vec3::Z } else { Vec3::Y };
+        let right = dir.cross(up).normalize();
+        let star_up = right.cross(dir).normalize();
+
+        // Astrometric magnitude hierarchy:
+        // Top 5% are prominent guide stars (3.0m - 4.5m)
+        // Next 20% are medium navigational stars (1.8m - 2.8m)
+        // Remaining 75% are background field stars (1.0m - 1.6m)
+        let size = if u3 > 0.95 {
+            3.0 + u4 * 1.5
+        } else if u3 > 0.75 {
+            1.8 + u4 * 1.0
+        } else {
+            1.0 + u4 * 0.6
+        };
+
         let color_idx = (xorshift() % (spectral_colors.len() as u64)) as usize;
-        let c = spectral_colors[color_idx];
+        let mut c = spectral_colors[color_idx];
+        if u3 <= 0.75 {
+            let dim = 0.55 + u4 * 0.40;
+            c[0] *= dim;
+            c[1] *= dim;
+            c[2] *= dim;
+        }
 
-        let base_idx = (i * 3) as u32;
-        let v0 = center + Vec3::new(-size, -size * 0.5, 0.0);
-        let v1 = center + Vec3::new(size, -size * 0.5, 0.0);
-        let v2 = center + Vec3::new(0.0, size, 0.0);
+        // Diamond quad (4 vertices, 2 triangles) strictly perpendicular to view ray
+        let v_top = center + star_up * size;
+        let v_bottom = center - star_up * size;
+        let v_left = center - right * (size * 0.65);
+        let v_right = center + right * (size * 0.65);
 
-        positions.push([v0.x, v0.y, v0.z]);
-        positions.push([v1.x, v1.y, v1.z]);
-        positions.push([v2.x, v2.y, v2.z]);
+        let base_idx = (i * 4) as u32;
 
+        positions.push([v_top.x, v_top.y, v_top.z]);
+        positions.push([v_left.x, v_left.y, v_left.z]);
+        positions.push([v_bottom.x, v_bottom.y, v_bottom.z]);
+        positions.push([v_right.x, v_right.y, v_right.z]);
+
+        colors.push(c);
         colors.push(c);
         colors.push(c);
         colors.push(c);
@@ -540,6 +578,10 @@ pub fn create_starfield_mesh(star_count: usize) -> Mesh {
         indices.push(base_idx);
         indices.push(base_idx + 1);
         indices.push(base_idx + 2);
+
+        indices.push(base_idx);
+        indices.push(base_idx + 2);
+        indices.push(base_idx + 3);
     }
 
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
@@ -548,37 +590,175 @@ pub fn create_starfield_mesh(star_count: usize) -> Mesh {
     mesh
 }
 
-/// Generates an undulating ribbon curtain mesh for the binary stellar wind aurora.
+/// Compatibility alias preserving external API and test suite expectations.
+pub fn create_starfield_mesh(star_count: usize) -> Mesh {
+    create_billboard_starfield_mesh(star_count)
+}
+
+/// Generates an inverted procedural hemisphere mesh for the unified participating medium sky dome.
+pub fn create_sky_dome_mesh() -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let rings = 12;
+    let sectors = 24;
+    let radius = 460.0;
+
+    let mut positions = Vec::with_capacity((rings + 1) * (sectors + 1));
+    let mut colors = Vec::with_capacity((rings + 1) * (sectors + 1));
+    let mut indices = Vec::with_capacity(rings * sectors * 6);
+
+    for r in 0..=rings {
+        let phi = -0.15 + (r as f32 / rings as f32) * (PI * 0.5 + 0.15);
+        let cos_phi = phi.cos();
+        let sin_phi = phi.sin();
+
+        for s in 0..=sectors {
+            let theta = (s as f32 / sectors as f32) * 2.0 * PI;
+            let sin_theta = theta.sin();
+            let cos_theta = theta.cos();
+
+            let x = radius * cos_phi * sin_theta;
+            let y = radius * sin_phi;
+            let z = -radius * cos_phi * cos_theta;
+
+            positions.push([x, y, z]);
+            colors.push([0.15, 0.40, 0.85, 1.0]); // Default daytime sky blue
+        }
+    }
+
+    for r in 0..rings {
+        for s in 0..sectors {
+            let cur = (r * (sectors + 1) + s) as u32;
+            let next = cur + sectors as u32 + 1;
+
+            indices.push(cur);
+            indices.push(cur + 1);
+            indices.push(next);
+
+            indices.push(cur + 1);
+            indices.push(next + 1);
+            indices.push(next);
+        }
+    }
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+/// Generates a dual undulating ribbon curtain mesh for the binary stellar wind aurora.
 pub fn create_aurora_mesh() -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     let segments = 64;
-    let mut positions = Vec::with_capacity((segments + 1) * 2);
-    let mut colors = Vec::with_capacity((segments + 1) * 2);
-    let mut indices = Vec::with_capacity(segments * 6);
+    let mut positions = Vec::with_capacity((segments + 1) * 4);
+    let mut colors = Vec::with_capacity((segments + 1) * 4);
+    let mut indices = Vec::with_capacity(segments * 12);
 
-    let radius = 350.0;
-    let height = 75.0;
-
+    // Curtain 1: Emerald & Cyan Northern Curtain
+    let r1 = 335.0;
+    let h1 = 90.0;
     for i in 0..=segments {
-        let theta = (i as f32 / segments as f32) * PI * 1.4 - PI * 0.7; // Arc across north
-        let wave = (theta * 4.0).sin() * 25.0;
-        let r = radius + wave;
+        let theta = (i as f32 / segments as f32) * PI * 1.5 - PI * 0.75;
+        let wave = (theta * 4.5).sin() * 22.0 + (theta * 2.0).cos() * 12.0;
+        let r = r1 + wave;
 
         let x = r * theta.sin();
         let z = -r * theta.cos();
 
-        // Bottom vertex
-        positions.push([x, 120.0, z]);
-        colors.push([0.15, 0.85, 0.55, 0.0]); // Transparent base
+        positions.push([x, 90.0, z]);
+        colors.push([0.05, 0.80, 0.45, 0.0]); // Transparent base
 
-        // Top vertex
-        positions.push([x, 120.0 + height, z]);
-        colors.push([0.30, 0.95, 0.75, 0.45]); // Shimmering emerald top
+        positions.push([x, 90.0 + h1, z]);
+        colors.push([0.20, 0.98, 0.75, 0.85]); // Luminous emerald crest
     }
 
     for i in 0..segments {
         let b = (i * 2) as u32;
         indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
+    }
+
+    // Curtain 2: Violet & Rose High-Altitude Polar Ribbon
+    let r2 = 360.0;
+    let h2 = 110.0;
+    let base_idx_c2 = ((segments + 1) * 2) as u32;
+    for i in 0..=segments {
+        let theta = (i as f32 / segments as f32) * PI * 1.3 - PI * 0.65;
+        let wave = (theta * 3.5 + 1.2).sin() * 28.0;
+        let r = r2 + wave;
+
+        let x = r * theta.sin();
+        let z = -r * theta.cos();
+
+        positions.push([x, 140.0, z]);
+        colors.push([0.45, 0.15, 0.75, 0.0]);
+
+        positions.push([x, 140.0 + h2, z]);
+        colors.push([0.85, 0.30, 0.95, 0.75]); // Radiant magenta crown
+    }
+
+    for i in 0..segments {
+        let b = base_idx_c2 + (i * 2) as u32;
+        indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
+    }
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+/// Generates a cylindrical volume of downward precipitation streaks for stormy weather.
+pub fn create_precipitation_mesh(drop_count: usize) -> Mesh {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    let mut positions = Vec::with_capacity(drop_count * 4);
+    let mut colors = Vec::with_capacity(drop_count * 4);
+    let mut indices = Vec::with_capacity(drop_count * 6);
+
+    let mut seed = 5544332211u64;
+    let mut xorshift = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+
+    let w = 0.035;
+    let slant_x = 0.06;
+    let slant_z = 0.03;
+
+    for i in 0..drop_count {
+        let u1 = ((xorshift() % 10000) as f32) / 10000.0;
+        let u2 = ((xorshift() % 10000) as f32) / 10000.0;
+        let u3 = ((xorshift() % 10000) as f32) / 10000.0;
+        let u4 = ((xorshift() % 10000) as f32) / 10000.0;
+
+        let angle = u1 * 2.0 * PI;
+        let dist = 1.0 + u2.sqrt() * 15.0; // 1m to 16m radius around player
+        let x = angle.cos() * dist;
+        let z = angle.sin() * dist;
+        let y = -2.0 + u3 * 24.0; // -2m to +22m height
+        let len = 0.65 + u4 * 0.45; // Streak length
+
+        let base_idx = (i * 4) as u32;
+
+        positions.push([x - w, y, z]);
+        positions.push([x + w, y, z]);
+        positions.push([x - w + slant_x, y - len, z + slant_z]);
+        positions.push([x + w + slant_x, y - len, z + slant_z]);
+
+        let col = [0.80, 0.88, 1.0, 0.45];
+        colors.push(col);
+        colors.push(col);
+        colors.push(col);
+        colors.push(col);
+
+        indices.push(base_idx);
+        indices.push(base_idx + 1);
+        indices.push(base_idx + 2);
+
+        indices.push(base_idx + 1);
+        indices.push(base_idx + 3);
+        indices.push(base_idx + 2);
     }
 
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
@@ -635,11 +815,13 @@ pub fn setup_binary_sky_environment(
     // Spawn Host Star A Visual Volumetric Disk
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(Sphere::new(16.0)),
+            mesh: meshes.add(Sphere::new(18.0)),
             material: materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.98, 0.90),
                 emissive: LinearRgba::new(4.0, 3.8, 3.2, 1.0),
                 unlit: true,
+                fog_enabled: false,
+                cull_mode: None,
                 ..default()
             }),
             transform: Transform::from_xyz(0.0, 300.0, -300.0),
@@ -653,11 +835,13 @@ pub fn setup_binary_sky_environment(
     // Spawn Companion Star B Visual Dwarf Disk
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(Sphere::new(10.0)),
+            mesh: meshes.add(Sphere::new(12.0)),
             material: materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.65, 0.30),
                 emissive: LinearRgba::new(3.5, 2.0, 0.8, 1.0),
                 unlit: true,
+                fog_enabled: false,
+                cull_mode: None,
                 ..default()
             }),
             transform: Transform::from_xyz(100.0, 200.0, -250.0),
@@ -668,13 +852,15 @@ pub fn setup_binary_sky_environment(
         Name::new("Companion Star B Dwarf Disk"),
     ));
 
-    // Spawn Cosmic Background Starfield Dome (1,500 distant glittering stars)
+    // Spawn Cosmic Background Starfield Dome (1,500 diamond stars with astrometric magnitudes)
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(create_starfield_mesh(1500)),
+            mesh: meshes.add(create_billboard_starfield_mesh(1500)),
             material: materials.add(StandardMaterial {
                 base_color: Color::srgba(1.0, 1.0, 1.0, 0.0), // Starts invisible in noon daylight
                 unlit: true,
+                fog_enabled: false,
+                cull_mode: None,
                 alpha_mode: AlphaMode::Blend,
                 ..default()
             }),
@@ -686,26 +872,67 @@ pub fn setup_binary_sky_environment(
         Name::new("Cosmic Starfield Dome"),
     ));
 
-    // Spawn Binary Stellar Wind Aurora Ribbon Curtain
+    // Spawn Procedural Atmospheric Sky Dome Mesh (Inverted hemisphere delivering Rayleigh/Mie gradients)
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(create_sky_dome_mesh()),
+            material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                unlit: true,
+                fog_enabled: false,
+                cull_mode: None,
+                ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            ..default()
+        },
+        AtmosphericSkyDome,
+        RenderLayers::from_layers(&[0, 1, 2]),
+        Name::new("Atmospheric Sky Dome"),
+    ));
+
+    // Spawn Binary Stellar Wind Aurora Ribbon Curtains
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(create_aurora_mesh()),
             material: materials.add(StandardMaterial {
-                base_color: Color::srgba(0.2, 0.9, 0.6, 0.35),
+                base_color: Color::srgba(1.0, 1.0, 1.0, 0.95),
                 emissive: LinearRgba::new(0.5, 2.5, 1.5, 1.0),
                 unlit: true,
+                fog_enabled: false,
                 alpha_mode: AlphaMode::Blend,
                 double_sided: true,
                 cull_mode: None,
                 ..default()
             }),
-            transform: Transform::from_xyz(0.0, 120.0, 0.0),
+            transform: Transform::from_xyz(0.0, 40.0, 0.0),
             visibility: Visibility::Hidden,
             ..default()
         },
         AuroraCurtain,
         RenderLayers::from_layers(&[0, 1, 2]),
-        Name::new("Stellar Wind Aurora Curtain"),
+        Name::new("Stellar Wind Aurora Curtains"),
+    ));
+
+    // Spawn Volumetric Precipitation Streaks (Stormy Rain Weather System)
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(create_precipitation_mesh(450)),
+            material: materials.add(StandardMaterial {
+                base_color: Color::srgba(0.85, 0.92, 1.0, 0.55),
+                unlit: true,
+                fog_enabled: false,
+                alpha_mode: AlphaMode::Blend,
+                cull_mode: None,
+                ..default()
+            }),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        PrecipitationStreaks,
+        RenderLayers::from_layers(&[0, 1, 2]),
+        Name::new("Volumetric Rain Streaks"),
     ));
 }
 
@@ -1002,9 +1229,10 @@ pub fn sync_stellar_directional_lights(
     }
 }
 
-/// Synchronizes visual celestial disc meshes, background cosmic starfield, and aurora ribbons
-/// so they remain at astronomical infinity relative to the active camera.
+/// Synchronizes visual celestial disc meshes, background cosmic starfield, atmospheric sky dome,
+/// aurora ribbons, and precipitation streaks relative to the active camera.
 pub fn sync_celestial_visuals(
+    time: Res<Time>,
     ephemeris: Res<BinaryEphemerisState>,
     cache: Res<AtmosphericRadianceCache>,
     weather: Res<AtmosphericWeather>,
@@ -1013,8 +1241,11 @@ pub fn sync_celestial_visuals(
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<StarAVolumetricDisk>>,
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<StarBVolumetricDisk>>,
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<CosmicStarfield>>,
+        Query<(&mut Transform, &mut Visibility, &Handle<Mesh>), With<AtmosphericSkyDome>>,
         Query<(&mut Transform, &mut Visibility), With<AuroraCurtain>>,
+        Query<(&mut Transform, &mut Visibility), With<PrecipitationStreaks>>,
     )>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let cam_pos = if let Ok(cam_tf) = celestial_set.p0().get_single() {
@@ -1023,59 +1254,174 @@ pub fn sync_celestial_visuals(
         return;
     };
 
-    // 1. Sync Host Star A Disk
+    // 1. Sync Host Star A Disk (Luminous solar sphere with Rayleigh sunset chromaticity)
     if let Ok((mut tf_a, mut vis_a, mat_handle_a)) = celestial_set.p1().get_single_mut() {
         if ephemeris.star_a_elevation < -0.10 {
             *vis_a = Visibility::Hidden;
         } else {
             *vis_a = Visibility::Visible;
-            tf_a.translation = cam_pos + ephemeris.star_a_direction * 420.0;
+            tf_a.translation = cam_pos + ephemeris.star_a_direction * 410.0;
             tf_a.look_at(cam_pos, Vec3::Y);
             if let Some(mat) = materials.get_mut(mat_handle_a) {
-                mat.base_color = cache.star_a_color;
-                mat.emissive = LinearRgba::from(cache.star_a_color) * 4.0;
+                let chrom = if ephemeris.star_a_elevation > 0.15 {
+                    Color::srgb(1.0, 0.98, 0.92)
+                } else if ephemeris.star_a_elevation > 0.0 {
+                    let t = ephemeris.star_a_elevation / 0.15;
+                    Color::srgb(1.0, 0.45 + 0.53 * t, 0.10 + 0.82 * t)
+                } else {
+                    let t = ((ephemeris.star_a_elevation + 0.10) / 0.10).clamp(0.0, 1.0);
+                    Color::srgb(1.0, 0.15 + 0.30 * t, 0.04 + 0.06 * t)
+                };
+                mat.base_color = chrom;
             }
         }
     }
 
-    // 2. Sync Companion Star B Disk
+    // 2. Sync Companion Star B Disk (Amber dwarf with crimson horizon shift)
     if let Ok((mut tf_b, mut vis_b, mat_handle_b)) = celestial_set.p2().get_single_mut() {
         if ephemeris.star_b_elevation < -0.10 {
             *vis_b = Visibility::Hidden;
         } else {
             *vis_b = Visibility::Visible;
-            tf_b.translation = cam_pos + ephemeris.star_b_direction * 420.0;
+            tf_b.translation = cam_pos + ephemeris.star_b_direction * 410.0;
             tf_b.look_at(cam_pos, Vec3::Y);
             if let Some(mat) = materials.get_mut(mat_handle_b) {
-                mat.base_color = cache.star_b_color;
-                mat.emissive = LinearRgba::from(cache.star_b_color) * 3.5;
+                let chrom = if ephemeris.star_b_elevation > 0.15 {
+                    Color::srgb(1.0, 0.65, 0.28)
+                } else if ephemeris.star_b_elevation > 0.0 {
+                    let t = ephemeris.star_b_elevation / 0.15;
+                    Color::srgb(1.0, 0.30 + 0.35 * t, 0.08 + 0.20 * t)
+                } else {
+                    let t = ((ephemeris.star_b_elevation + 0.10) / 0.10).clamp(0.0, 1.0);
+                    Color::srgb(0.95, 0.12 + 0.18 * t, 0.03 + 0.05 * t)
+                };
+                mat.base_color = chrom;
             }
         }
     }
 
-    // 3. Sync Cosmic Starfield (fades in as daylight gives way to twilight and deep night)
+    // 3. Sync Cosmic Starfield (Camera-facing diamond stars glittering at night)
     if let Ok((mut tf_stars, mut vis_stars, mat_handle_stars)) = celestial_set.p3().get_single_mut() {
         tf_stars.translation = cam_pos;
-        let night_factor = (1.0 - (cache.star_a_illuminance_lux / 25000.0).min(1.0)).max(0.0);
+        let total_sun_lux = cache.star_a_illuminance_lux + cache.star_b_illuminance_lux;
+        let night_factor = (1.0 - (total_sun_lux / 16000.0).clamp(0.0, 1.0)).powi(2);
         if night_factor <= 0.02 {
             *vis_stars = Visibility::Hidden;
         } else {
             *vis_stars = Visibility::Visible;
             if let Some(mat) = materials.get_mut(mat_handle_stars) {
-                mat.base_color = Color::srgba(1.0, 1.0, 1.0, night_factor.clamp(0.0, 1.0));
+                mat.base_color = Color::srgba(1.0, 1.0, 1.0, night_factor);
             }
         }
     }
 
-    // 4. Sync Aurora Curtains
-    let mut p4 = celestial_set.p4();
-    for (mut tf_aurora, mut vis_aurora) in p4.iter_mut() {
-        tf_aurora.translation = cam_pos + Vec3::new(0.0, 120.0, 0.0);
-        let night_factor = (1.0 - (cache.star_a_illuminance_lux / 20000.0).min(1.0)).max(0.0);
-        if weather.weather_type == WeatherType::StellarWindAurora && night_factor > 0.15 {
+    // 4. Sync Atmospheric Sky Dome (Rayleigh gradient, Western sunset arch, and night airglow)
+    if let Ok((mut tf_dome, mut vis_dome, mesh_handle_dome)) = celestial_set.p4().get_single_mut() {
+        tf_dome.translation = cam_pos;
+        *vis_dome = Visibility::Visible;
+
+        if let Some(mesh) = meshes.get_mut(mesh_handle_dome) {
+            let rings = 12;
+            let sectors = 24;
+            let mut updated_colors = Vec::with_capacity((rings + 1) * (sectors + 1));
+
+            let total_sun_lux = cache.star_a_illuminance_lux + cache.star_b_illuminance_lux;
+            let daylight = (total_sun_lux / 25000.0).clamp(0.0, 1.0);
+
+            let day_zenith = Vec3::new(0.12, 0.38, 0.85);
+            let day_horizon = Vec3::new(0.55, 0.70, 0.85);
+
+            let night_zenith = Vec3::new(0.005, 0.008, 0.022);
+            let night_horizon = Vec3::new(0.012, 0.018, 0.038);
+
+            let zenith_base = night_zenith.lerp(day_zenith, daylight);
+            let horizon_base = night_horizon.lerp(day_horizon, daylight);
+
+            let dir_a = ephemeris.star_a_direction;
+            let dir_b = ephemeris.star_b_direction;
+
+            let sunset_tint_a = if ephemeris.star_a_elevation < 0.20 && ephemeris.star_a_elevation > -0.15 {
+                let t = ((ephemeris.star_a_elevation + 0.15) / 0.35).clamp(0.0, 1.0);
+                Vec3::new(1.0, 0.35 + 0.35 * t, 0.08 + 0.20 * t) * (1.0 - t * 0.5)
+            } else {
+                Vec3::new(1.0, 0.95, 0.80) * 0.4
+            };
+
+            let sunset_tint_b = if ephemeris.star_b_elevation < 0.20 && ephemeris.star_b_elevation > -0.15 {
+                Vec3::new(1.0, 0.30, 0.08) * 0.7
+            } else {
+                Vec3::new(1.0, 0.65, 0.30) * 0.3
+            };
+
+            for r in 0..=rings {
+                let phi = -0.15 + (r as f32 / rings as f32) * (PI * 0.5 + 0.15);
+                let cos_phi = phi.cos();
+                let sin_phi = phi.sin();
+                let y_ratio = sin_phi.max(0.0);
+
+                for s in 0..=sectors {
+                    let theta = (s as f32 / sectors as f32) * 2.0 * PI;
+                    let v_dir = Vec3::new(cos_phi * theta.sin(), sin_phi, -cos_phi * theta.cos()).normalize();
+
+                    let mut col = horizon_base.lerp(zenith_base, y_ratio.powf(0.65));
+
+                    // Star A forward-scattering solar corona & sunset horizon arch
+                    if ephemeris.star_a_elevation > -0.12 {
+                        let cos_a = v_dir.dot(dir_a).max(0.0);
+                        let glare_a = cos_a.powi(6) * (cache.star_a_illuminance_lux * 0.000015).clamp(0.0, 1.2);
+                        col += sunset_tint_a * glare_a;
+                    }
+
+                    // Star B forward-scattering amber corona
+                    if ephemeris.star_b_elevation > -0.12 {
+                        let cos_b = v_dir.dot(dir_b).max(0.0);
+                        let glare_b = cos_b.powi(6) * (cache.star_b_illuminance_lux * 0.000020).clamp(0.0, 0.9);
+                        col += sunset_tint_b * glare_b;
+                    }
+
+                    match weather.weather_type {
+                        WeatherType::OvercastPrecipitation => {
+                            let storm_gray = Vec3::new(0.18, 0.20, 0.23);
+                            col = col.lerp(storm_gray, 0.75);
+                        }
+                        WeatherType::AerosolHaze => {
+                            let haze_amber = Vec3::new(0.65, 0.55, 0.35);
+                            col = col.lerp(haze_amber * daylight, 0.30 * (1.0 - y_ratio));
+                        }
+                        _ => {}
+                    }
+
+                    updated_colors.push([col.x.clamp(0.0, 1.0), col.y.clamp(0.0, 1.0), col.z.clamp(0.0, 1.0), 1.0]);
+                }
+            }
+
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, updated_colors);
+        }
+    }
+
+    // 5. Sync Aurora Curtains (Real-time waving solar wind magnetic ribbons)
+    let mut p5 = celestial_set.p5();
+    for (mut tf_aurora, mut vis_aurora) in p5.iter_mut() {
+        tf_aurora.translation = cam_pos + Vec3::new(0.0, 40.0, 0.0);
+        let wobble = (time.elapsed_seconds() * 0.4).sin() * 0.02;
+        tf_aurora.rotation = Quat::from_rotation_y(wobble);
+
+        if weather.weather_type == WeatherType::StellarWindAurora {
             *vis_aurora = Visibility::Visible;
         } else {
             *vis_aurora = Visibility::Hidden;
+        }
+    }
+
+    // 6. Sync Volumetric Precipitation Streaks (Stormy rain weather system)
+    let mut p6 = celestial_set.p6();
+    for (mut tf_rain, mut vis_rain) in p6.iter_mut() {
+        if weather.weather_type == WeatherType::OvercastPrecipitation {
+            *vis_rain = Visibility::Visible;
+            let fall_offset = (time.elapsed_seconds() * 28.0).rem_euclid(4.0);
+            tf_rain.translation = cam_pos + Vec3::new(0.0, -fall_offset, 0.0);
+        } else {
+            *vis_rain = Visibility::Hidden;
         }
     }
 }
@@ -1086,6 +1432,7 @@ pub fn handle_sky_time_and_weather_inputs(
     mut config: ResMut<BinarySkyConfig>,
     mut ephemeris: ResMut<BinaryEphemerisState>,
     mut weather: ResMut<AtmosphericWeather>,
+    mut console: Option<ResMut<crate::core::ConsoleState>>,
 ) {
     let Some(keys) = keys else { return; };
     let day_duration = config.day_duration_seconds as f64;
@@ -1093,13 +1440,19 @@ pub fn handle_sky_time_and_weather_inputs(
     // [F8] Quick Day/Night Toggle
     if keys.just_pressed(KeyCode::F8) {
         if ephemeris.star_a_elevation > 0.0 {
-            // It is currently daytime -> switch directly to midnight (00:00)!
             ephemeris.simulation_time_seconds = day_duration * 0.5;
+            ephemeris.diurnal_angle = std::f32::consts::PI;
             info!("[Celestial Cycle] Toggled to DEEP NIGHT (00:00). Starfield & Aurora active.");
+            if let Some(ref mut c) = console {
+                c.logs.push("[Celestial Cycle] Toggled to DEEP NIGHT (00:00). Starfield & Aurora active.".into());
+            }
         } else {
-            // It is currently night -> switch directly to High Noon (12:00)!
             ephemeris.simulation_time_seconds = 0.0;
+            ephemeris.diurnal_angle = 0.0;
             info!("[Celestial Cycle] Toggled to HIGH NOON (12:00). Brilliant daytime illumination.");
+            if let Some(ref mut c) = console {
+                c.logs.push("[Celestial Cycle] Toggled to HIGH NOON (12:00). Brilliant daytime illumination.".into());
+            }
         }
     }
 
@@ -1107,14 +1460,22 @@ pub fn handle_sky_time_and_weather_inputs(
     if keys.just_pressed(KeyCode::BracketLeft) {
         let hour_sec = (config.day_duration_seconds / 24.0) as f64;
         ephemeris.simulation_time_seconds = (ephemeris.simulation_time_seconds - hour_sec).rem_euclid(day_duration);
-        info!("[Celestial Cycle] Rewound 1 hour. Current time: {:.1}h", ephemeris.clock_time_hours());
+        let msg = format!("[Celestial Cycle] Rewound 1 hour. Current time: {:.1}h", ephemeris.clock_time_hours());
+        info!("{}", msg);
+        if let Some(ref mut c) = console {
+            c.logs.push(msg);
+        }
     }
 
     // [ ] ] Step 1 hour forward
     if keys.just_pressed(KeyCode::BracketRight) {
         let hour_sec = (config.day_duration_seconds / 24.0) as f64;
         ephemeris.simulation_time_seconds = (ephemeris.simulation_time_seconds + hour_sec).rem_euclid(day_duration);
-        info!("[Celestial Cycle] Advanced 1 hour. Current time: {:.1}h", ephemeris.clock_time_hours());
+        let msg = format!("[Celestial Cycle] Advanced 1 hour. Current time: {:.1}h", ephemeris.clock_time_hours());
+        info!("{}", msg);
+        if let Some(ref mut c) = console {
+            c.logs.push(msg);
+        }
     }
 
     // [ - ] Slow down time progression
@@ -1126,7 +1487,11 @@ pub fn handle_sky_time_and_weather_inputs(
             s if s >= 1.0 => 0.0,
             _ => 0.0,
         };
-        info!("[Celestial Cycle] Time scale set to: {:.0}x", config.time_scale);
+        let msg = format!("[Celestial Cycle] Time scale set to: {:.0}x", config.time_scale);
+        info!("{}", msg);
+        if let Some(ref mut c) = console {
+            c.logs.push(msg);
+        }
     }
 
     // [ = ] Accelerate time progression
@@ -1137,7 +1502,11 @@ pub fn handle_sky_time_and_weather_inputs(
             s if s < 60.0 => 60.0,
             _ => 300.0,
         };
-        info!("[Celestial Cycle] Time scale set to: {:.0}x", config.time_scale);
+        let msg = format!("[Celestial Cycle] Time scale set to: {:.0}x", config.time_scale);
+        info!("{}", msg);
+        if let Some(ref mut c) = console {
+            c.logs.push(msg);
+        }
     }
 
     // [F9] Cycle Atmospheric Weather Presets
@@ -1148,7 +1517,11 @@ pub fn handle_sky_time_and_weather_inputs(
             WeatherType::StellarWindAurora => WeatherType::OvercastPrecipitation,
             WeatherType::OvercastPrecipitation => WeatherType::ClearSky,
         };
-        info!("[Atmospheric Weather] Preset changed to: {:?}", weather.weather_type);
+        let msg = format!("[Atmospheric Weather] Preset changed to: {:?}", weather.weather_type);
+        info!("{}", msg);
+        if let Some(ref mut c) = console {
+            c.logs.push(msg);
+        }
     }
 }
 
@@ -1156,24 +1529,35 @@ pub fn handle_sky_time_and_weather_inputs(
 /// matching the unified participating medium's extinction profiles.
 pub fn update_atmospheric_cameras_and_fog(
     cache: Res<AtmosphericRadianceCache>,
+    weather: Res<AtmosphericWeather>,
     mut commands: Commands,
     camera_query: Query<Entity, With<AtmosphericCamera>>,
     mut clear_color: ResMut<ClearColor>,
 ) {
+    let daylight = ((cache.star_a_illuminance_lux + cache.star_b_illuminance_lux) * 0.000008).clamp(0.0, 1.0);
     let horizon = cache.horizon_radiance;
-    let max_h = horizon.x.max(horizon.y).max(horizon.z).max(1e-4);
+    let night_airglow = Vec3::new(0.008, 0.012, 0.025);
+    let effective_horizon = horizon * daylight + night_airglow;
+
     let horizon_color = Color::srgb(
-        (horizon.x / max_h).clamp(0.0, 1.0),
-        (horizon.y / max_h).clamp(0.0, 1.0),
-        (horizon.z / max_h).clamp(0.0, 1.0),
+        effective_horizon.x.clamp(0.0, 1.0),
+        effective_horizon.y.clamp(0.0, 1.0),
+        effective_horizon.z.clamp(0.0, 1.0),
     );
     clear_color.0 = horizon_color;
+
+    let fog_density = match weather.weather_type {
+        WeatherType::ClearSky => 0.0006,
+        WeatherType::AerosolHaze => 0.0025,
+        WeatherType::StellarWindAurora => 0.0008,
+        WeatherType::OvercastPrecipitation => 0.0035,
+    };
 
     for entity in camera_query.iter() {
         commands.entity(entity).insert(FogSettings {
             color: horizon_color,
             falloff: FogFalloff::ExponentialSquared {
-                density: 0.0006,
+                density: fog_density,
             },
             ..default()
         });
@@ -1332,6 +1716,63 @@ mod tests {
         assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
         assert!(mesh.indices().is_some());
+    }
+
+    #[test]
+    fn test_sky_dome_mesh_generation() {
+        let mesh = create_sky_dome_mesh();
+        assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+        assert!(mesh.indices().is_some());
+    }
+
+    #[test]
+    fn test_aurora_mesh_generation() {
+        let mesh = create_aurora_mesh();
+        assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+        assert!(mesh.indices().is_some());
+    }
+
+    #[test]
+    fn test_precipitation_mesh_generation() {
+        let mesh = create_precipitation_mesh(100);
+        assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+        assert!(mesh.indices().is_some());
+    }
+
+    #[test]
+    fn test_sunset_ephemeris_synchronization() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<BinarySkyConfig>();
+        app.init_resource::<BinaryEphemerisState>();
+        app.init_resource::<AtmosphericRadianceCache>();
+        app.init_resource::<AtmosphericWeather>();
+        app.init_resource::<AmbientLight>();
+        app.init_resource::<ClearColor>();
+
+        // Set simulation time to 18:00 (Sunset, 6 hours after noon = 25% of day duration)
+        let day_sec = 1440.0;
+        {
+            let mut eph = app.world_mut().resource_mut::<BinaryEphemerisState>();
+            eph.simulation_time_seconds = (day_sec * 0.25) as f64;
+        }
+
+        app.add_systems(Update, (update_binary_ephemeris, update_atmospheric_scattering_and_cache).chain());
+        app.update();
+
+        let eph = app.world().resource::<BinaryEphemerisState>();
+        // Hour should be approx 18.0 (sunset)
+        assert!((eph.clock_time_hours() - 18.0).abs() < 0.2);
+        // Sun elevation should be near horizon (within 5 degrees)
+        assert!(eph.star_a_elevation.abs() < 0.15);
+        // Sun direction x should be negative (Western sky, -X)
+        assert!(eph.star_a_direction.x < -0.80);
     }
 
     #[test]
