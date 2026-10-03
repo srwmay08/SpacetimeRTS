@@ -46,6 +46,7 @@ pub enum Faction {
 
 #[derive(Component)] pub struct NetworkEntity(pub u64);
 #[derive(Component)] pub struct NetworkStructure { pub structure_id: u64 }
+#[derive(Component)] pub struct NetworkProjectile(pub u64);
 
 #[derive(Component)] pub struct PlayerBody;
 #[derive(Component)] pub struct PlayerHead;

@@ -12,6 +12,7 @@ mod ui;
 mod prediction;
 mod building; 
 mod weapons;
+mod tuner;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -25,6 +26,7 @@ use crate::terrain::*;
 use crate::ui::*;
 use crate::building::*;
 use crate::weapons::*;
+use crate::tuner::*;
 
 // P2 Fix: SystemSets for explicit ordering and predictable behavior
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -86,11 +88,14 @@ fn main() {
         .insert_resource(AmbientLight { color: Color::srgb(0.95, 0.98, 1.0), brightness: 550.0 })
         .insert_resource(TelemetryTracker { last_frame_time: 0.0, frame_drop_threshold: 0.1 })
         .init_resource::<WeaponState>()
+        .init_resource::<WeaponTunerState>()
+        .init_resource::<EquippedHandSide>()
+        .init_resource::<ClientEquippedBags>()
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))
 
-        .add_systems(OnEnter(GameState::InGame), (spawn_initial_world, setup_ui))
+        .add_systems(OnEnter(GameState::InGame), (spawn_initial_world, setup_ui, setup_tuner_ui))
         .add_systems(OnEnter(CameraMode::FPS), enable_fps_perspective)
         .add_systems(OnEnter(CameraMode::RTS), enable_rts_perspective)
 
@@ -105,10 +110,16 @@ fn main() {
             input_router_system, 
             rts_navmesh_movement_system, 
             player_movement_system,
+            toggle_tuner_ui,
+            handle_tuner_interactions,
+            update_tuner_ui_display,
+            update_comic_damage_floaters,
+            toggle_weapon_hand_system,
         ).run_if(in_state(GameState::InGame)))
 
         .add_systems(Update, (
             handle_inventory_drag_and_drop,
+            handle_paperdoll_interactions,
             update_drag_ghost_ui,
             context_aware_action_dispatcher,
             handle_build_menu_selection,
@@ -125,6 +136,7 @@ fn main() {
             update_falling_trees,
             update_berry_visuals, 
             sync_structures, 
+            sync_active_projectiles,
             tick_voxel_gibs,
         ).run_if(in_state(GameState::InGame)))
 

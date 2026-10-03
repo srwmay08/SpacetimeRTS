@@ -574,6 +574,151 @@ mod maneuvers_and_feedback {
         assert_eq!(result.primary_verb, CombatFeedbackVerb::Shatter);
         assert_eq!(result.secondary_verb, Some(CombatFeedbackVerb::Snap));
     }
+
+    #[test]
+    fn frying_pan_clang_and_exaggerated_knockback() {
+        let skills = CharacterCombatSkills::new();
+        let mut pan = create_weapon("Frying Pan").unwrap();
+        assert_eq!(pan.category, WeaponCategory::Comedic);
+        assert_eq!(pan.damage_type, DamageType::CartoonBonk);
+
+        let result = resolve_weapon_attack(
+            &skills,
+            &mut pan,
+            CombatManeuver::Bash,
+            HandSlot::MainHand,
+            false,
+            0.0,
+            false,
+        );
+
+        assert!(result.hit_landed);
+        assert_eq!(result.primary_verb, CombatFeedbackVerb::Clang);
+        assert_eq!(result.comic_label, Some("CLANG!".to_string()));
+        // Knockback: 65.0 * 1.0 * 2.5 (Bash stagger potency) = 162.5 m/s
+        assert!(result.knockback_impulse > 150.0, "Frying pan bash launches enemies with huge comedic force");
+        assert_eq!(result.secondary_verb, Some(CombatFeedbackVerb::Yeet));
+    }
+
+    #[test]
+    fn cartoon_bonk_crit_and_yeet_launch() {
+        let mut skills = CharacterCombatSkills::new();
+        skills.add_experience(WeaponCategory::Comedic, 9000); // Level 90+ -> crit chance > 0.25
+        let mut pan = create_weapon("Frying Pan").unwrap();
+
+        let result = resolve_weapon_attack(
+            &skills,
+            &mut pan,
+            CombatManeuver::Chop,
+            HandSlot::MainHand,
+            false,
+            0.0,
+            false,
+        );
+
+        assert!(result.was_critical);
+        assert_eq!(result.primary_verb, CombatFeedbackVerb::Kaboom);
+        assert!(result.comic_label.as_ref().unwrap().starts_with("CRIT! CLANG!"));
+        assert!(result.knockback_impulse > 200.0, "Critical hit multiplies launch knockback by 2.2x");
+        assert_eq!(result.secondary_verb, Some(CombatFeedbackVerb::Yeet));
+
+        // Test Holy Mackerel produces "CRIT! BONK!"
+        let mut fish = create_weapon("Holy Mackerel").unwrap();
+        let fish_res = resolve_weapon_attack(
+            &skills,
+            &mut fish,
+            CombatManeuver::Chop,
+            HandSlot::MainHand,
+            false,
+            0.0,
+            false,
+        );
+        assert!(fish_res.was_critical);
+        assert!(fish_res.comic_label.unwrap().starts_with("CRIT! BONK!"));
+    }
+
+    #[test]
+    fn mini_crit_multiplier_and_label() {
+        let mut skills = CharacterCombatSkills::new();
+        // Base crit is 0.05. Add 2500 XP = level 25. Crit = 0.05 + 25 * 0.003 = 0.125 > 0.12 (mini-crit!)
+        skills.add_experience(WeaponCategory::Edged, 2500);
+        let mut sword = create_weapon("Longsword").unwrap();
+
+        let result = resolve_weapon_attack(
+            &skills,
+            &mut sword,
+            CombatManeuver::Slash,
+            HandSlot::MainHand,
+            false,
+            0.0,
+            false,
+        );
+
+        assert!(result.was_mini_crit);
+        assert!(!result.was_critical);
+        assert!(result.comic_label.unwrap().starts_with("MINI-CRIT!"));
+    }
+
+    #[test]
+    fn dual_wield_brawling_cestus_and_knuckle_duster() {
+        let mut loadout = EquippedLoadout::new();
+        let cestus = create_weapon("Cestus").unwrap();
+        let knuckle = create_weapon("Knuckle-Duster").unwrap();
+
+        assert!(loadout.equip(HandSlot::MainHand, cestus).is_ok());
+        assert!(loadout.equip(HandSlot::OffHand, knuckle).is_ok());
+        assert!(loadout.is_dual_wielding());
+        assert!(!loadout.is_hybrid_melee_ranged());
+    }
+
+    #[test]
+    fn recipe_canonical_weapon_parity() {
+        for recipe in get_canonical_recipes() {
+            if recipe.output_item.contains("Bow")
+                || recipe.output_item.contains("Spear")
+                || recipe.output_item.contains("Club")
+                || recipe.output_item.contains("Crossbow")
+                || recipe.output_item.contains("Revolver")
+                || recipe.output_item.contains("Shotgun")
+                || recipe.output_item.contains("Sniper")
+                || recipe.output_item.contains("Runestaff")
+            {
+                let weapon = create_weapon(&recipe.output_item);
+                assert!(weapon.is_some(), "Recipe output '{}' must have an entry in create_weapon catalog", recipe.output_item);
+            }
+        }
+    }
+
+    #[test]
+    fn firearm_magazine_capacity_and_ammo_depletion() {
+        let mut revolver = create_weapon("Revolver").unwrap();
+        assert_eq!(revolver.magazine_capacity, Some(6));
+        assert_eq!(revolver.current_ammo, 6);
+
+        // Fire rounds
+        for i in (1..=6).rev() {
+            assert!(revolver.current_ammo > 0);
+            revolver.current_ammo -= 1;
+            assert_eq!(revolver.current_ammo, i - 1);
+        }
+        assert_eq!(revolver.current_ammo, 0);
+
+        // Reload to capacity
+        revolver.current_ammo = revolver.magazine_capacity.unwrap();
+        assert_eq!(revolver.current_ammo, 6);
+    }
+
+    #[test]
+    fn bouncy_bomb_launcher_profile_and_aoe() {
+        let bomb_launcher = create_weapon("Bouncy Bomb Launcher").unwrap();
+        let profile = bomb_launcher.projectile_profile.as_ref().unwrap();
+
+        assert_eq!(profile.kind, ProjectileKind::BouncyBomb);
+        assert_eq!(profile.blast_radius, 5.0);
+        assert_eq!(profile.kind.blast_radius(), 5.0);
+        assert_eq!(bomb_launcher.knockback_force, 80.0);
+        assert_eq!(bomb_launcher.current_ammo, 4);
+    }
 }
 
 // ============================================================================

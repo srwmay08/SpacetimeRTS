@@ -167,6 +167,164 @@ pub fn create_campfire_mesh() -> Mesh {
     ])
 }
 
+pub fn create_catapult_mesh() -> Mesh {
+    let wood_dark = [0.35, 0.22, 0.12, 1.0];
+    let wood_light = [0.52, 0.35, 0.20, 1.0];
+    let iron = [0.25, 0.26, 0.28, 1.0];
+    let rope = [0.65, 0.52, 0.28, 1.0];
+    let stone = [0.50, 0.48, 0.46, 1.0];
+
+    build_voxel_mesh(&[
+        // Left & right oak chassis rails
+        VoxelBox { min: Vec3::new(-0.85, 0.20, -1.50), max: Vec3::new(-0.65, 0.45, 1.50), color: wood_dark },
+        VoxelBox { min: Vec3::new(0.65, 0.20, -1.50), max: Vec3::new(0.85, 0.45, 1.50), color: wood_dark },
+        // Chassis cross-beams
+        VoxelBox { min: Vec3::new(-0.65, 0.22, -1.35), max: Vec3::new(0.65, 0.42, -1.15), color: wood_light },
+        VoxelBox { min: Vec3::new(-0.65, 0.22, -0.30), max: Vec3::new(0.65, 0.42, -0.10), color: wood_light },
+        VoxelBox { min: Vec3::new(-0.65, 0.22, 1.15), max: Vec3::new(0.65, 0.42, 1.35), color: wood_light },
+        // 4 Spoke Timber Wheels with Iron Rims
+        VoxelBox { min: Vec3::new(-1.05, 0.0, -1.25), max: Vec3::new(-0.88, 0.65, -0.85), color: iron },
+        VoxelBox { min: Vec3::new(0.88, 0.0, -1.25), max: Vec3::new(1.05, 0.65, -0.85), color: iron },
+        VoxelBox { min: Vec3::new(-1.05, 0.0, 0.85), max: Vec3::new(-0.88, 0.65, 1.25), color: iron },
+        VoxelBox { min: Vec3::new(0.88, 0.0, 0.85), max: Vec3::new(1.05, 0.65, 1.25), color: iron },
+        // Wheel Hub Axles
+        VoxelBox { min: Vec3::new(-1.12, 0.25, -1.10), max: Vec3::new(1.12, 0.40, -1.00), color: wood_dark },
+        VoxelBox { min: Vec3::new(-1.12, 0.25, 1.00), max: Vec3::new(1.12, 0.40, 1.10), color: wood_dark },
+        // Vertical Upright Stanchions
+        VoxelBox { min: Vec3::new(-0.82, 0.45, -0.35), max: Vec3::new(-0.65, 1.85, -0.15), color: wood_dark },
+        VoxelBox { min: Vec3::new(0.65, 0.45, -0.35), max: Vec3::new(0.82, 1.85, -0.15), color: wood_dark },
+        // Diagonal Braces
+        VoxelBox { min: Vec3::new(-0.80, 0.45, -0.95), max: Vec3::new(-0.68, 1.35, -0.35), color: wood_light },
+        VoxelBox { min: Vec3::new(0.68, 0.45, -0.95), max: Vec3::new(0.80, 1.35, -0.35), color: wood_light },
+        // Torsion Rope Skein Cross-Bundle
+        VoxelBox { min: Vec3::new(-0.65, 0.50, -0.32), max: Vec3::new(0.65, 0.80, -0.18), color: rope },
+        // Iron Ratchet Winch
+        VoxelBox { min: Vec3::new(-0.95, 0.52, -0.30), max: Vec3::new(-0.82, 0.78, -0.20), color: iron },
+        VoxelBox { min: Vec3::new(0.82, 0.52, -0.30), max: Vec3::new(0.95, 0.78, -0.20), color: iron },
+        // Throwing Arm (Lever)
+        VoxelBox { min: Vec3::new(-0.12, 0.55, -0.30), max: Vec3::new(0.12, 1.10, 1.35), color: wood_light },
+        // Payload Cup & Catapult Boulder
+        VoxelBox { min: Vec3::new(-0.25, 0.95, 1.20), max: Vec3::new(0.25, 1.25, 1.55), color: wood_dark },
+        VoxelBox { min: Vec3::new(-0.18, 1.18, 1.25), max: Vec3::new(0.18, 1.50, 1.50), color: stone },
+        // Padded Crossbar Stop Bumper
+        VoxelBox { min: Vec3::new(-0.65, 1.60, -0.32), max: Vec3::new(0.65, 1.82, -0.18), color: iron },
+    ])
+}
+
+pub fn create_trebuchet_mesh() -> Mesh {
+    let timber = [0.38, 0.24, 0.14, 1.0];
+    let timber_light = [0.55, 0.38, 0.22, 1.0];
+    let iron = [0.26, 0.27, 0.28, 1.0];
+    let stone = [0.48, 0.46, 0.45, 1.0];
+    let rope = [0.70, 0.58, 0.32, 1.0];
+
+    build_voxel_mesh(&[
+        // Ground Skid Base Rails
+        VoxelBox { min: Vec3::new(-1.30, 0.0, -1.80), max: Vec3::new(-1.05, 0.28, 1.80), color: timber },
+        VoxelBox { min: Vec3::new(1.05, 0.0, -1.80), max: Vec3::new(1.30, 0.28, 1.80), color: timber },
+        VoxelBox { min: Vec3::new(-1.05, 0.0, -1.60), max: Vec3::new(1.05, 0.25, -1.35), color: timber },
+        VoxelBox { min: Vec3::new(-1.05, 0.0, 1.35), max: Vec3::new(1.05, 0.25, 1.60), color: timber },
+        // Left A-Frame Scaffold (angled timbers)
+        VoxelBox { min: Vec3::new(-1.25, 0.25, -0.15), max: Vec3::new(-1.05, 3.20, 0.15), color: timber },
+        VoxelBox { min: Vec3::new(-1.22, 0.25, -1.40), max: Vec3::new(-1.08, 3.10, -0.10), color: timber_light },
+        VoxelBox { min: Vec3::new(-1.22, 0.25, 0.10), max: Vec3::new(-1.08, 3.10, 1.40), color: timber_light },
+        // Right A-Frame Scaffold
+        VoxelBox { min: Vec3::new(1.05, 0.25, -0.15), max: Vec3::new(1.25, 3.20, 0.15), color: timber },
+        VoxelBox { min: Vec3::new(1.08, 0.25, -1.40), max: Vec3::new(1.22, 3.10, -0.10), color: timber_light },
+        VoxelBox { min: Vec3::new(1.08, 0.25, 0.10), max: Vec3::new(1.22, 3.10, 1.40), color: timber_light },
+        // Heavy Pivot Axle on Bronze/Iron Bearings
+        VoxelBox { min: Vec3::new(-1.35, 3.00, -0.12), max: Vec3::new(1.35, 3.22, 0.12), color: iron },
+        // Asymmetric Swing Beam
+        VoxelBox { min: Vec3::new(-0.16, 2.70, -1.20), max: Vec3::new(0.16, 3.35, 2.80), color: timber_light },
+        // Counterweight Box (Short arm, filled with stones)
+        VoxelBox { min: Vec3::new(-0.55, 1.60, -1.45), max: Vec3::new(0.55, 2.80, -0.95), color: timber },
+        VoxelBox { min: Vec3::new(-0.48, 1.70, -1.38), max: Vec3::new(0.48, 2.75, -1.02), color: stone },
+        // Sling Line & Pouch (Long arm)
+        VoxelBox { min: Vec3::new(-0.04, 0.60, 2.60), max: Vec3::new(0.04, 2.80, 2.68), color: rope },
+        // Heavy Fortified Shell in Sling
+        VoxelBox { min: Vec3::new(-0.25, 0.40, 2.50), max: Vec3::new(0.25, 0.85, 2.95), color: stone },
+    ])
+}
+
+pub fn create_ballista_mesh() -> Mesh {
+    let dark_wood = [0.36, 0.22, 0.12, 1.0];
+    let light_wood = [0.54, 0.36, 0.20, 1.0];
+    let iron = [0.28, 0.29, 0.30, 1.0];
+    let bronze = [0.72, 0.58, 0.24, 1.0];
+    let red_mat = [0.85, 0.15, 0.15, 1.0];
+
+    build_voxel_mesh(&[
+        // Tripod Support Legs
+        VoxelBox { min: Vec3::new(-0.65, 0.0, -0.65), max: Vec3::new(-0.45, 0.85, -0.45), color: dark_wood },
+        VoxelBox { min: Vec3::new(0.45, 0.0, -0.65), max: Vec3::new(0.65, 0.85, -0.45), color: dark_wood },
+        VoxelBox { min: Vec3::new(-0.12, 0.0, 0.55), max: Vec3::new(0.12, 0.85, 0.75), color: dark_wood },
+        // Central Swivel Pedestal & Elevating Arc
+        VoxelBox { min: Vec3::new(-0.25, 0.80, -0.25), max: Vec3::new(0.25, 1.15, 0.25), color: iron },
+        VoxelBox { min: Vec3::new(-0.15, 1.15, -0.15), max: Vec3::new(0.15, 1.35, 0.15), color: bronze },
+        // Longitudinal Flight Rail Track
+        VoxelBox { min: Vec3::new(-0.16, 1.25, -1.40), max: Vec3::new(0.16, 1.45, 1.20), color: dark_wood },
+        // Flight Trough Guide Groove
+        VoxelBox { min: Vec3::new(-0.06, 1.45, -1.35), max: Vec3::new(0.06, 1.48, 1.15), color: iron },
+        // Front Bow Table & Dual Torsion Skein Cylinders
+        VoxelBox { min: Vec3::new(-0.95, 1.15, -1.45), max: Vec3::new(0.95, 1.55, -1.25), color: dark_wood },
+        VoxelBox { min: Vec3::new(-0.90, 1.00, -1.40), max: Vec3::new(-0.70, 1.70, -1.20), color: bronze },
+        VoxelBox { min: Vec3::new(0.70, 1.00, -1.40), max: Vec3::new(0.90, 1.70, -1.20), color: bronze },
+        // Composite Spring Bow Arms (Left & Right)
+        VoxelBox { min: Vec3::new(-1.45, 1.28, -1.15), max: Vec3::new(-0.85, 1.42, -1.35), color: light_wood },
+        VoxelBox { min: Vec3::new(0.85, 1.28, -1.15), max: Vec3::new(1.45, 1.42, -1.35), color: light_wood },
+        // Twisted Steel/Sinew Cable String
+        VoxelBox { min: Vec3::new(-1.40, 1.32, -1.15), max: Vec3::new(1.40, 1.38, -0.20), color: iron },
+        // Rear Windlass & Hand Winch Spoke Cranks
+        VoxelBox { min: Vec3::new(-0.35, 1.20, 0.95), max: Vec3::new(0.35, 1.45, 1.15), color: iron },
+        VoxelBox { min: Vec3::new(-0.45, 1.15, 1.00), max: Vec3::new(-0.35, 1.65, 1.10), color: bronze },
+        // Loaded Siege Spear
+        VoxelBox { min: Vec3::new(-0.03, 1.48, -1.25), max: Vec3::new(0.03, 1.54, 0.35), color: light_wood },
+        VoxelBox { min: Vec3::new(-0.06, 1.47, -1.45), max: Vec3::new(0.06, 1.55, -1.25), color: iron },
+        VoxelBox { min: Vec3::new(-0.08, 1.46, 0.15), max: Vec3::new(0.08, 1.56, 0.30), color: red_mat },
+    ])
+}
+
+pub fn create_battering_ram_mesh() -> Mesh {
+    let timber = [0.35, 0.22, 0.12, 1.0];
+    let roof_shingle = [0.45, 0.28, 0.15, 1.0];
+    let iron = [0.26, 0.27, 0.28, 1.0];
+    let bronze = [0.75, 0.55, 0.22, 1.0];
+    let log_wood = [0.48, 0.32, 0.18, 1.0];
+
+    build_voxel_mesh(&[
+        // 4 Heavy Spoke Wheels with Iron Hoops
+        VoxelBox { min: Vec3::new(-1.15, 0.0, -1.45), max: Vec3::new(-0.95, 0.70, -0.95), color: iron },
+        VoxelBox { min: Vec3::new(0.95, 0.0, -1.45), max: Vec3::new(1.15, 0.70, -0.95), color: iron },
+        VoxelBox { min: Vec3::new(-1.15, 0.0, 0.95), max: Vec3::new(-0.95, 0.70, 1.45), color: iron },
+        VoxelBox { min: Vec3::new(0.95, 0.0, 0.95), max: Vec3::new(1.15, 0.70, 1.45), color: iron },
+        // Chassis Platform Rails
+        VoxelBox { min: Vec3::new(-0.95, 0.25, -1.70), max: Vec3::new(-0.75, 0.50, 1.70), color: timber },
+        VoxelBox { min: Vec3::new(0.75, 0.25, -1.70), max: Vec3::new(0.95, 0.50, 1.70), color: timber },
+        // 4 Corner Scaffold Posts
+        VoxelBox { min: Vec3::new(-0.92, 0.50, -1.55), max: Vec3::new(-0.75, 2.20, -1.35), color: timber },
+        VoxelBox { min: Vec3::new(0.75, 0.50, -1.55), max: Vec3::new(0.92, 2.20, -1.35), color: timber },
+        VoxelBox { min: Vec3::new(-0.92, 0.50, 1.35), max: Vec3::new(-0.75, 2.20, 1.55), color: timber },
+        VoxelBox { min: Vec3::new(0.75, 0.50, 1.35), max: Vec3::new(0.92, 2.20, 1.55), color: timber },
+        // Top Roof Ridge & Sloped Protective Canopy
+        VoxelBox { min: Vec3::new(-0.85, 2.10, -1.75), max: Vec3::new(0.85, 2.25, 1.75), color: timber },
+        VoxelBox { min: Vec3::new(-0.95, 2.10, -1.75), max: Vec3::new(0.0, 2.65, 1.75), color: roof_shingle },
+        VoxelBox { min: Vec3::new(0.0, 2.10, -1.75), max: Vec3::new(0.95, 2.65, 1.75), color: roof_shingle },
+        // Suspended Iron Chains (Hangers)
+        VoxelBox { min: Vec3::new(-0.06, 1.25, -0.90), max: Vec3::new(0.06, 2.15, -0.82), color: iron },
+        VoxelBox { min: Vec3::new(-0.06, 1.25, 0.82), max: Vec3::new(0.06, 2.15, 0.90), color: iron },
+        // Giant Suspended Ramming Tree Trunk Log
+        VoxelBox { min: Vec3::new(-0.22, 0.85, -1.95), max: Vec3::new(0.22, 1.30, 1.85), color: log_wood },
+        // Ornate Bronze/Iron Horned Ram Head
+        VoxelBox { min: Vec3::new(-0.28, 0.80, -2.40), max: Vec3::new(0.28, 1.35, -1.95), color: bronze },
+        // Ram Horns (Curved Left & Right)
+        VoxelBox { min: Vec3::new(-0.45, 1.00, -2.25), max: Vec3::new(-0.28, 1.45, -2.05), color: iron },
+        VoxelBox { min: Vec3::new(0.28, 1.00, -2.25), max: Vec3::new(0.45, 1.45, -2.05), color: iron },
+        // Crew Hand Grips along Log
+        VoxelBox { min: Vec3::new(-0.32, 1.00, -0.45), max: Vec3::new(0.32, 1.10, -0.35), color: iron },
+        VoxelBox { min: Vec3::new(-0.32, 1.00, 0.35), max: Vec3::new(0.32, 1.10, 0.45), color: iron },
+    ])
+}
+
 // ----------------------------------------------------------------------------
 // BUILD MODE & SNAPPING SYSTEMS
 // ----------------------------------------------------------------------------
@@ -415,6 +573,22 @@ pub fn sync_structures(
                 "Campfire" => {
                     let cf_mesh = create_campfire_mesh();
                     (meshes.add(cf_mesh), Color::WHITE, Collider::cylinder(0.7, 0.35))
+                },
+                "Catapult" => {
+                    let mesh = create_catapult_mesh();
+                    (meshes.add(mesh), Color::WHITE, Collider::cuboid(2.4, 2.0, 3.2))
+                },
+                "Trebuchet" => {
+                    let mesh = create_trebuchet_mesh();
+                    (meshes.add(mesh), Color::WHITE, Collider::cuboid(2.8, 3.5, 4.2))
+                },
+                "Ballista" => {
+                    let mesh = create_ballista_mesh();
+                    (meshes.add(mesh), Color::WHITE, Collider::cuboid(2.6, 1.8, 2.8))
+                },
+                "Battering Ram" | "BatteringRam" => {
+                    let mesh = create_battering_ram_mesh();
+                    (meshes.add(mesh), Color::WHITE, Collider::cuboid(2.4, 2.8, 4.5))
                 },
                 _ => (meshes.add(Cuboid::new(1.0, 1.0, 1.0)), Color::srgb(0.5, 0.5, 0.5), Collider::cuboid(1.0, 1.0, 1.0)),
             };

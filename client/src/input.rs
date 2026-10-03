@@ -23,6 +23,10 @@ use crate::module_bindings::player_table::PlayerTableAccess;
 use crate::module_bindings::inventory_table::InventoryTableAccess;
 use crate::module_bindings::resource_node_table::ResourceNodeTableAccess;
 use crate::module_bindings::structure_table::StructureTableAccess;
+use crate::module_bindings::equipment_loadout_table::EquipmentLoadoutTableAccess;
+use crate::module_bindings::equip_weapon_reducer::equip_weapon;
+use crate::weapons::EquippedHandSide;
+use spacetime_rts_logic::HandSide;
 
 // ----------------------------------------------------------------------------
 // EVENTS & ENUMS
@@ -103,6 +107,7 @@ pub fn hotbar_input_system(
     console: Res<ConsoleState>,
     mut active_slot: ResMut<ActiveItemSlot>,
     mut active_item: ResMut<ActiveEquippedItem>,
+    hand_side: Res<EquippedHandSide>,
     conn: Res<SpacetimeConnection>,
 ) {
     if console.is_open {
@@ -120,20 +125,54 @@ pub fn hotbar_input_system(
         (KeyCode::Digit8, 7),
     ];
 
+    let Some(identity) = &conn.identity else { return; };
+    let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
+    let inv = conn.db.db.inventory().entity_id().find(&player.entity_id);
+
     for (key, slot_idx) in digit_keys {
         if keys.just_pressed(key) {
             active_slot.0 = slot_idx;
             info!("Hotbar Slot {} Selected", slot_idx + 1);
+            if let Some(ref inventory) = inv {
+                if let Some(slot) = inventory.slots.get(slot_idx) {
+                    if slot.count > 0 && !slot.item_type.is_empty() {
+                        let hand_str = match hand_side.0 {
+                            HandSide::Right => "MainHand".to_string(),
+                            HandSide::Left => "OffHand".to_string(),
+                        };
+                        info!("Equipping '{}' to {}", slot.item_type, hand_str);
+                        let _ = conn.db.reducers.equip_weapon(hand_str, slot.item_type.clone());
+                    }
+                }
+            }
         }
     }
 
-    let Some(identity) = &conn.identity else { return; };
-    let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
-    let Some(inventory) = conn.db.db.inventory().entity_id().find(&player.entity_id) else { return; };
-
-    active_item.0 = inventory.slots.get(active_slot.0)
-        .filter(|s| s.count > 0 && !s.item_type.is_empty())
-        .map(|s| s.item_type.clone());
+    // Read authoritative equipped weapon from SpacetimeDB EquipmentLoadout
+    let loadout = conn.db.db.equipment_loadout().entity_id().find(&player.entity_id);
+    if let Some(l) = loadout {
+        let equipped = match hand_side.0 {
+            HandSide::Right => {
+                if l.main_hand != "None" && !l.main_hand.is_empty() {
+                    Some(l.main_hand)
+                } else {
+                    None
+                }
+            }
+            HandSide::Left => {
+                if l.off_hand != "None" && !l.off_hand.is_empty() {
+                    Some(l.off_hand)
+                } else if l.main_hand != "None" && !l.main_hand.is_empty() {
+                    Some(l.main_hand)
+                } else {
+                    None
+                }
+            }
+        };
+        active_item.0 = equipped;
+    } else {
+        active_item.0 = None;
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -254,6 +293,13 @@ pub fn context_aware_action_dispatcher(
                         let Ok((player_entity, _)) = queries.player.get_single() else { continue; };
                         let origin = cam_transform.translation();
                         let dir = cam_transform.forward().as_vec3();
+
+                        if weapons.weapon_state.current_weapon == WeaponType::None {
+                            if event.state == ActionState::JustPressed {
+                                warn!("No weapon equipped! Players must equip a weapon in their active hand or paperdoll to attack. Press [I] to open equipment.");
+                            }
+                            continue;
+                        }
 
                         match weapons.weapon_state.current_weapon {
                             WeaponType::Bow => {

@@ -17,6 +17,16 @@ pub enum ProjectileKind {
     BallistaSpear,
 
     MagicMissile,
+
+    HandCrossbowBolt,
+
+    RevolverBullet,
+
+    ShotgunPellet,
+
+    SniperBullet,
+
+    FireballBall,
 }
 
 impl __sdk::InModule for ProjectileKind {

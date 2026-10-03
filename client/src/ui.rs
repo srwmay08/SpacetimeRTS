@@ -26,37 +26,77 @@ use crate::module_bindings::admin_clear_inventory_reducer::admin_clear_inventory
 use crate::module_bindings::admin_spawn_npc_reducer::admin_spawn_npc;
 use crate::module_bindings::admin_detonate_reducer::admin_detonate;
 use crate::module_bindings::admin_kill_all_npcs_reducer::admin_kill_all_npcs;
+use crate::module_bindings::equipment_loadout_table::EquipmentLoadoutTableAccess;
+use crate::module_bindings::equip_weapon_reducer::equip_weapon;
+use crate::module_bindings::unequip_weapon_reducer::unequip_weapon;
+use crate::weapons::EquippedHandSide;
+use spacetime_rts_logic::{HandSide, BagContainerDef, create_bag_container};
 
 use spacetimedb_sdk::Table;
 
 // Architectural Note: Canonical item catalogue used for autocomplete and format verification.
 // Guarantees only properly capitalized and valid items can be auto-filled or submitted.
 pub const CANONICAL_ITEMS: &[&str] = &[
+    "Bag of Sewn Evil-Eye",
+    "Ballista",
+    "Battering Ram",
     "Berry",
+    "Bouncy Bomb Ammo",
+    "Bouncy Bomb Launcher",
     "Bow",
     "Branch",
+    "Catapult",
+    "Cestus",
     "Club",
     "Cooked Meat",
     "Crossbow",
     "Crossbow Bolt",
     "Crude Bow",
+    "Dagger",
+    "Dragonflight Haversack",
+    "Elder Wood",
     "Flint",
     "Flint Arrow",
     "Flint Spear",
+    "Frying Pan",
+    "Greatsword",
+    "Halberd",
     "Hammer",
     "Hand Crossbow",
+    "Handaxe",
+    "Holy Mackerel",
     "Honey",
+    "Iron Boots",
+    "Iron Chestplate",
+    "Iron Greaves",
+    "Iron Helmet",
+    "Iron Ingot",
+    "Knuckle-Duster",
+    "Leather Bag",
     "Leather Scraps",
+    "Longbow",
+    "Longsword",
     "LooseStone",
+    "Maul",
     "Pickaxe",
+    "Rapier",
     "Resin",
     "Revolver",
     "Revolver Ammo",
+    "Runestaff",
     "Shotgun",
     "Shotgun Shell",
+    "Shralok Pack",
+    "Small Pouch",
+    "Sniper Ammo",
+    "Sniper Rifle",
+    "Spear",
     "Stone",
     "Stone Axe",
     "Torch",
+    "Traveler's Backpack",
+    "Trebuchet",
+    "Warhammer",
     "Wood",
     "Wood Arrow",
     "Wooden Shield",
@@ -76,11 +116,29 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "blast",
     "clearinv",
     "killall",
+    "tuner",
+    "weapontool",
     "help",
 ];
 
 #[derive(Component)]
 pub struct WorkbenchHeaderStatus;
+
+#[derive(Resource, Clone, Debug, Default)]
+pub struct ClientEquippedBags {
+    pub bags: [Option<BagContainerDef>; 4],
+}
+
+#[derive(Component)] pub struct PaperdollMainHandText;
+#[derive(Component)] pub struct PaperdollOffHandText;
+#[derive(Component)] pub struct PaperdollPrimaryHandText;
+#[derive(Component)] pub struct PaperdollPrimaryHandButton;
+#[derive(Component)] pub struct PaperdollUnequipMainButton;
+#[derive(Component)] pub struct PaperdollUnequipOffButton;
+#[derive(Component, Clone, Copy, Debug)] pub struct PaperdollBagSlotIndex(pub usize);
+#[derive(Component, Clone, Copy, Debug)] pub struct PaperdollBagText(pub usize);
+#[derive(Component, Clone, Copy, Debug)] pub struct PaperdollBagTooltip(pub usize);
+#[derive(Component)] pub struct InventoryCapacityHeader;
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn(Camera2dBundle {
@@ -220,58 +278,254 @@ pub fn setup_ui(mut commands: Commands) {
         }, 
         InventoryUiRoot
     )).with_children(|root| {
+        // --------------------------------------------------------------------
+        // COLUMN 1: WOW / EVERQUEST EQUIPMENT LOADOUT & PAPERDOLL
+        // --------------------------------------------------------------------
+        root.spawn(NodeBundle {
+            style: Style {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                width: Val::Px(270.0),
+                ..default()
+            },
+            background_color: Color::srgba(0.08, 0.08, 0.08, 0.95).into(),
+            border_color: Color::srgb(0.65, 0.50, 0.20).into(),
+            ..default()
+        }).with_children(|paperdoll| {
+            paperdoll.spawn(TextBundle::from_section(
+                "EQUIPMENT & PAPERDOLL",
+                TextStyle { font_size: 13.0, color: Color::srgb(0.95, 0.82, 0.3), ..default() }
+            ));
+
+            // Primary Hand Swap Toggle Button
+            paperdoll.spawn((
+                ButtonBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(28.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        margin: UiRect::bottom(Val::Px(4.0)),
+                        ..default()
+                    },
+                    background_color: Color::srgba(0.18, 0.18, 0.22, 0.9).into(),
+                    border_color: Color::srgb(0.5, 0.5, 0.7).into(),
+                    ..default()
+                },
+                PaperdollPrimaryHandButton,
+            )).with_children(|btn| {
+                btn.spawn((
+                    TextBundle::from_section(
+                        "[⇄] PRIMARY HAND: RIGHT [H]",
+                        TextStyle { font_size: 11.0, color: Color::srgb(0.8, 0.9, 1.0), ..default() }
+                    ),
+                    PaperdollPrimaryHandText,
+                ));
+            });
+
+            // MainHand Slot
+            paperdoll.spawn(NodeBundle {
+                style: Style {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    width: Val::Percent(100.0),
+                    height: Val::Px(32.0),
+                    padding: UiRect::horizontal(Val::Px(6.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                background_color: Color::srgba(0.12, 0.12, 0.14, 0.9).into(),
+                border_color: Color::srgb(0.4, 0.4, 0.45).into(),
+                ..default()
+            }).with_children(|row| {
+                row.spawn((
+                    TextBundle::from_section(
+                        "MainHand: [Unarmed]",
+                        TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }
+                    ),
+                    PaperdollMainHandText,
+                ));
+                row.spawn((
+                    ButtonBundle {
+                        style: Style {
+                            padding: UiRect::all(Val::Px(2.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        background_color: Color::srgba(0.25, 0.1, 0.1, 0.8).into(),
+                        border_color: Color::srgb(0.6, 0.2, 0.2).into(),
+                        ..default()
+                    },
+                    PaperdollUnequipMainButton,
+                )).with_children(|btn| {
+                    btn.spawn(TextBundle::from_section(
+                        "Unequip",
+                        TextStyle { font_size: 10.0, color: Color::srgb(1.0, 0.6, 0.6), ..default() }
+                    ));
+                });
+            });
+
+            // OffHand Slot
+            paperdoll.spawn(NodeBundle {
+                style: Style {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    width: Val::Percent(100.0),
+                    height: Val::Px(32.0),
+                    padding: UiRect::horizontal(Val::Px(6.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                background_color: Color::srgba(0.12, 0.12, 0.14, 0.9).into(),
+                border_color: Color::srgb(0.4, 0.4, 0.45).into(),
+                ..default()
+            }).with_children(|row| {
+                row.spawn((
+                    TextBundle::from_section(
+                        "OffHand: [Empty]",
+                        TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }
+                    ),
+                    PaperdollOffHandText,
+                ));
+                row.spawn((
+                    ButtonBundle {
+                        style: Style {
+                            padding: UiRect::all(Val::Px(2.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        background_color: Color::srgba(0.25, 0.1, 0.1, 0.8).into(),
+                        border_color: Color::srgb(0.6, 0.2, 0.2).into(),
+                        ..default()
+                    },
+                    PaperdollUnequipOffButton,
+                )).with_children(|btn| {
+                    btn.spawn(TextBundle::from_section(
+                        "Unequip",
+                        TextStyle { font_size: 10.0, color: Color::srgb(1.0, 0.6, 0.6), ..default() }
+                    ));
+                });
+            });
+
+            // 4 Container Bag Slots (EQ / WoW Container Paradigm)
+            paperdoll.spawn(TextBundle::from_section(
+                "CONTAINER BAGS (EQ / WoW)",
+                TextStyle { font_size: 12.0, color: Color::srgb(0.85, 0.75, 0.35), ..default() }
+            ).with_style(Style { margin: UiRect::top(Val::Px(6.0)), ..default() }));
+
+            for bag_idx in 0..4 {
+                paperdoll.spawn((
+                    ButtonBundle {
+                        style: Style {
+                            flex_direction: FlexDirection::Column,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::FlexStart,
+                            width: Val::Percent(100.0),
+                            height: Val::Px(34.0),
+                            padding: UiRect::all(Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        background_color: Color::srgba(0.10, 0.11, 0.12, 0.9).into(),
+                        border_color: Color::srgb(0.35, 0.40, 0.35).into(),
+                        ..default()
+                    },
+                    PaperdollBagSlotIndex(bag_idx),
+                )).with_children(|b_slot| {
+                    b_slot.spawn((
+                        TextBundle::from_section(
+                            format!("Bag {}: [Empty Bag Slot]", bag_idx + 1),
+                            TextStyle { font_size: 10.5, color: Color::WHITE, ..default() }
+                        ),
+                        PaperdollBagText(bag_idx),
+                    ));
+                    b_slot.spawn((
+                        TextBundle::from_section(
+                            "Right-click bag in inventory to equip",
+                            TextStyle { font_size: 9.0, color: Color::srgb(0.65, 0.70, 0.65), ..default() }
+                        ),
+                        PaperdollBagTooltip(bag_idx),
+                    ));
+                });
+            }
+        });
+
+        // --------------------------------------------------------------------
+        // COLUMN 2: STATIC INVENTORY GRID (WOW / EQ BAG STORAGE)
+        // --------------------------------------------------------------------
         root.spawn(NodeBundle {
             style: Style {
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(4.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                border: UiRect::all(Val::Px(2.0)),
                 ..default()
             },
+            background_color: Color::srgba(0.06, 0.06, 0.07, 0.95).into(),
+            border_color: Color::srgb(0.35, 0.35, 0.40).into(),
             ..default()
         }).with_children(|pack_col| {
-            pack_col.spawn(NodeBundle {
-                style: Style {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(6.0),
+            pack_col.spawn((
+                TextBundle::from_section(
+                    "BAG INVENTORY (Free: 16 / 16 Slots)",
+                    TextStyle { font_size: 13.0, color: Color::srgb(0.9, 0.85, 0.5), ..default() }
+                ).with_style(Style { margin: UiRect::bottom(Val::Px(6.0)), ..default() }),
+                InventoryCapacityHeader,
+            ));
+
+            // Grid of 4 rows of 8 slots = 32 slots total
+            for row in 0..4 {
+                pack_col.spawn(NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(5.0),
+                        ..default()
+                    },
                     ..default()
-                },
-                ..default()
-            }).with_children(|row_ui| {
-                for slot_idx in 8..16 {
-                    row_ui.spawn((
-                        NodeBundle {
-                            style: Style {
-                                width: Val::Px(55.0),
-                                height: Val::Px(55.0),
-                                flex_direction: FlexDirection::Column,
-                                justify_content: JustifyContent::SpaceBetween,
-                                align_items: AlignItems::Center,
-                                padding: UiRect::all(Val::Px(3.0)),
-                                border: UiRect::all(Val::Px(2.0)),
+                }).with_children(|row_ui| {
+                    for col in 0..8 {
+                        let slot_idx = row * 8 + col;
+                        row_ui.spawn((
+                            NodeBundle {
+                                style: Style {
+                                    width: Val::Px(50.0),
+                                    height: Val::Px(50.0),
+                                    flex_direction: FlexDirection::Column,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                    align_items: AlignItems::Center,
+                                    padding: UiRect::all(Val::Px(2.0)),
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                border_color: Color::srgba(0.32, 0.32, 0.32, 0.8).into(),
+                                background_color: Color::srgba(0.09, 0.09, 0.09, 0.92).into(),
                                 ..default()
                             },
-                            border_color: Color::srgba(0.3, 0.3, 0.3, 0.8).into(),
-                            background_color: Color::srgba(0.08, 0.08, 0.08, 0.9).into(),
-                            ..default()
-                        },
-                        InventorySlotIndex(slot_idx),
-                    )).with_children(|slot| {
-                        slot.spawn((
-                            TextBundle::from_section(
-                                "",
-                                TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }
-                            ).with_style(Style { margin: UiRect::top(Val::Px(8.0)), ..default() }),
-                            InventorySlotName(slot_idx),
-                        ));
-                        slot.spawn((
-                            TextBundle::from_section(
-                                "",
-                                TextStyle { font_size: 12.0, color: Color::srgb(0.9, 0.9, 0.9), ..default() }
-                            ).with_style(Style { align_self: AlignSelf::FlexEnd, ..default() }),
-                            InventorySlotCount(slot_idx),
-                        ));
-                    });
-                }
-            });
+                            InventorySlotIndex(slot_idx),
+                        )).with_children(|slot| {
+                            slot.spawn((
+                                TextBundle::from_section(
+                                    "",
+                                    TextStyle { font_size: 10.0, color: Color::WHITE, ..default() }
+                                ).with_style(Style { margin: UiRect::top(Val::Px(4.0)), ..default() }),
+                                InventorySlotName(slot_idx),
+                            ));
+                            slot.spawn((
+                                TextBundle::from_section(
+                                    "",
+                                    TextStyle { font_size: 11.0, color: Color::srgb(0.9, 0.9, 0.9), ..default() }
+                                ).with_style(Style { align_self: AlignSelf::FlexEnd, ..default() }),
+                                InventorySlotCount(slot_idx),
+                            ));
+                        });
+                    }
+                });
+            }
         });
 
         root.spawn(NodeBundle {
@@ -934,6 +1188,9 @@ pub fn handle_console_input(
                     console.logs.push("[Admin] All non-player entities destroyed.".into());
                 }
             }
+            "tuner" | "weapontool" => {
+                console.logs.push("[Admin] Weapon & Spell Tuner Workbench available via [F6] hotkey.".into());
+            }
             "help" => {
                 console.logs.push("--- PLAYTESTING COMMAND DIRECTORY ---".into());
                 console.logs.push("giveitem <Item> [amt]  : Grants item (Press [Tab] to auto-fill)".into());
@@ -945,6 +1202,7 @@ pub fn handle_console_input(
                 console.logs.push("nuke [radius]          : Demolishes terrain with spherical blast".into());
                 console.logs.push("clearinv               : Empties inventory slots completely".into());
                 console.logs.push("killall                : Destroys all active NPC brains".into());
+                console.logs.push("tuner / weapontool     : Opens Weapon & Spell Tuner [F6]".into());
             }
             _ => {
                 console.logs.push(format!("[Error] Unknown command '{}'. Enter 'help' for directory.", tokens[0]));
@@ -1026,12 +1284,45 @@ pub fn handle_inventory_drag_and_drop(
     mut drag_drop: ResMut<DragDropState>,
     conn: Res<SpacetimeConnection>,
     cached_player: Res<CachedPlayerEntity>,
+    hand_side: Res<EquippedHandSide>,
+    mut equipped_bags: ResMut<ClientEquippedBags>,
 ) {
     let Ok(window) = window_query.get_single() else { return; };
     let Some(cursor_pos) = window.cursor_position() else { return; };
 
     let Some(player_id) = cached_player.0 else { return; };
     let Some(inv) = conn.db.db.inventory().entity_id().find(&player_id) else { return; };
+
+    // Right-Click to Quick-Equip Weapon or Bag
+    if mouse.just_pressed(MouseButton::Right) {
+        for (slot_idx, transform, node) in slot_query.iter() {
+            let rect = Rect::from_center_size(transform.translation().truncate(), node.size());
+            if rect.contains(cursor_pos) {
+                if let Some(slot) = inv.slots.get(slot_idx.0) {
+                    if slot.count > 0 && !slot.item_type.is_empty() {
+                        let item_name = slot.item_type.clone();
+                        if let Some(bag_def) = create_bag_container(&item_name) {
+                            for i in 0..4 {
+                                if equipped_bags.bags[i].is_none() {
+                                    info!("Equipped Bag '{}' into Paperdoll Bag Slot {}", item_name, i + 1);
+                                    equipped_bags.bags[i] = Some(bag_def);
+                                    break;
+                                }
+                            }
+                        } else {
+                            let hand_str = match hand_side.0 {
+                                HandSide::Right => "MainHand".to_string(),
+                                HandSide::Left => "OffHand".to_string(),
+                            };
+                            info!("Equipping '{}' to {}", item_name, hand_str);
+                            let _ = conn.db.reducers.equip_weapon(hand_str, item_name);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
 
     if mouse.just_pressed(MouseButton::Left) {
         for (slot_idx, transform, node) in slot_query.iter() {
@@ -1085,6 +1376,48 @@ pub fn handle_inventory_drag_and_drop(
         drag_drop.source_slot = None;
         drag_drop.item_type.clear();
         drag_drop.count = 0;
+    }
+}
+
+pub fn handle_paperdoll_interactions(
+    conn: Res<SpacetimeConnection>,
+    mut hand_side: ResMut<EquippedHandSide>,
+    mut equipped_bags: ResMut<ClientEquippedBags>,
+    primary_hand_btn_q: Query<&Interaction, (With<PaperdollPrimaryHandButton>, Changed<Interaction>)>,
+    unequip_main_q: Query<&Interaction, (With<PaperdollUnequipMainButton>, Changed<Interaction>)>,
+    unequip_off_q: Query<&Interaction, (With<PaperdollUnequipOffButton>, Changed<Interaction>)>,
+    bag_slots_q: Query<(&PaperdollBagSlotIndex, &Interaction), Changed<Interaction>>,
+) {
+    for interaction in primary_hand_btn_q.iter() {
+        if *interaction == Interaction::Pressed {
+            hand_side.0 = match hand_side.0 {
+                HandSide::Right => HandSide::Left,
+                HandSide::Left => HandSide::Right,
+            };
+            info!("Paperdoll: Swapped Primary Hand to {:?}", hand_side.0);
+        }
+    }
+
+    for interaction in unequip_main_q.iter() {
+        if *interaction == Interaction::Pressed {
+            info!("Paperdoll: Unequipping MainHand");
+            let _ = conn.db.reducers.unequip_weapon("MainHand".to_string());
+        }
+    }
+
+    for interaction in unequip_off_q.iter() {
+        if *interaction == Interaction::Pressed {
+            info!("Paperdoll: Unequipping OffHand");
+            let _ = conn.db.reducers.unequip_weapon("OffHand".to_string());
+        }
+    }
+
+    for (bag_slot, interaction) in bag_slots_q.iter() {
+        if *interaction == Interaction::Pressed {
+            if let Some(removed) = equipped_bags.bags[bag_slot.0].take() {
+                info!("Paperdoll: Unequipped Bag '{}' from Slot {}", removed.name, bag_slot.0 + 1);
+            }
+        }
     }
 }
 
@@ -1406,9 +1739,17 @@ pub fn toggle_inventory_ui(
 pub fn update_inventory_ui(
     conn: Res<SpacetimeConnection>,
     player_query: Query<&Transform, With<PlayerBody>>,
-    mut header_q: Query<&mut Text, (With<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>)>,
+    hand_side: Res<EquippedHandSide>,
+    equipped_bags: Res<ClientEquippedBags>,
+    mut header_q: Query<&mut Text, (With<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
     mut name_q: Query<(&mut Text, &InventorySlotName), Without<InventorySlotCount>>,
     mut count_q: Query<(&mut Text, &InventorySlotCount), Without<InventorySlotName>>,
+    mut primary_hand_text_q: Query<&mut Text, (With<PaperdollPrimaryHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut main_hand_text_q: Query<&mut Text, (With<PaperdollMainHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut off_hand_text_q: Query<&mut Text, (With<PaperdollOffHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut bag_text_q: Query<(&mut Text, &PaperdollBagText), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagTooltip>)>,
+    mut bag_tooltip_q: Query<(&mut Text, &PaperdollBagTooltip), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>)>,
+    mut capacity_header_q: Query<&mut Text, (With<InventoryCapacityHeader>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
 ) {
     let Some(identity) = &conn.identity else { return; };
     if let Some(player) = conn.db.db.player().identity().find(identity) {
@@ -1428,6 +1769,62 @@ pub fn update_inventory_ui(
                 } else {
                     text.sections[0].value = "".to_string();
                 }
+            }
+
+            // Sync Paperdoll Equipment Loadout
+            let loadout = conn.db.db.equipment_loadout().entity_id().find(&player.entity_id);
+            let main_weapon = loadout.as_ref().map(|l| l.main_hand.as_str()).unwrap_or("None");
+            let off_weapon = loadout.as_ref().map(|l| l.off_hand.as_str()).unwrap_or("None");
+
+            for mut text in main_hand_text_q.iter_mut() {
+                text.sections[0].value = if main_weapon == "None" || main_weapon.is_empty() {
+                    "MainHand: [Unarmed]".to_string()
+                } else {
+                    format!("MainHand: {}", main_weapon)
+                };
+            }
+
+            for mut text in off_hand_text_q.iter_mut() {
+                text.sections[0].value = if off_weapon == "None" || off_weapon.is_empty() {
+                    "OffHand: [Empty]".to_string()
+                } else {
+                    format!("OffHand: {}", off_weapon)
+                };
+            }
+
+            for mut text in primary_hand_text_q.iter_mut() {
+                text.sections[0].value = match hand_side.0 {
+                    HandSide::Right => "[⇄] PRIMARY HAND: RIGHT [H]".to_string(),
+                    HandSide::Left => "[⇄] PRIMARY HAND: LEFT [H]".to_string(),
+                };
+            }
+
+            // Sync Bags & Capacity
+            for (mut text, b_idx) in bag_text_q.iter_mut() {
+                if let Some(ref bag) = equipped_bags.bags[b_idx.0] {
+                    text.sections[0].value = format!("Bag {}: {}", b_idx.0 + 1, bag.name);
+                } else {
+                    text.sections[0].value = format!("Bag {}: [Empty Bag Slot]", b_idx.0 + 1);
+                }
+            }
+
+            for (mut text, b_idx) in bag_tooltip_q.iter_mut() {
+                if let Some(ref bag) = equipped_bags.bags[b_idx.0] {
+                    text.sections[0].value = format!("+{} Slots | Cap: {:?} | {}% WR", bag.capacity, bag.size_cap, bag.weight_reduction_pct);
+                    text.sections[0].style.color = Color::srgb(0.4, 0.9, 0.5);
+                } else {
+                    text.sections[0].value = "Right-click bag in inventory to equip".to_string();
+                    text.sections[0].style.color = Color::srgb(0.65, 0.70, 0.65);
+                }
+            }
+
+            let extra_slots: usize = equipped_bags.bags.iter().filter_map(|b| b.as_ref()).map(|b| b.capacity).sum();
+            let total_cap = 16 + extra_slots;
+            let used_slots = inventory.slots.iter().filter(|s| s.count > 0 && !s.item_type.is_empty()).count();
+            let free_slots = total_cap.saturating_sub(used_slots);
+
+            for mut text in capacity_header_q.iter_mut() {
+                text.sections[0].value = format!("BAG INVENTORY (Free: {} / {} Slots)", free_slots, total_cap);
             }
         }
     }

@@ -17,9 +17,20 @@ use bevy::render::view::RenderLayers;
 use crate::components::*;
 use crate::core::*;
 
+use spacetime_rts_logic::HandSide;
+
 // ----------------------------------------------------------------------------
 // WEAPON ENUM & STATE
 // ----------------------------------------------------------------------------
+
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EquippedHandSide(pub HandSide);
+
+impl Default for EquippedHandSide {
+    fn default() -> Self {
+        Self(HandSide::Right)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WeaponType {
@@ -30,16 +41,58 @@ pub enum WeaponType {
     HandCrossbow,
     Revolver,
     Shotgun,
+    SniperRifle,
+    BouncyBombLauncher,
+    Runestaff,
+    Halberd,
+    Longsword,
+    Greatsword,
+    Maul,
+    Spear,
+    Rapier,
+    Warhammer,
+    Club,
+    Dagger,
+    Handaxe,
+    Cestus,
+    KnuckleDuster,
+    FryingPan,
+    HolyMackerel,
+    Hammer,
+    Pickaxe,
+    Torch,
+    WoodenShield,
 }
 
 impl WeaponType {
     pub fn from_item_name(item: Option<&str>) -> Self {
         match item {
-            Some("Crude Bow") | Some("Bow") => Self::Bow,
+            Some("Crude Bow") | Some("Bow") | Some("Longbow") => Self::Bow,
             Some("Crossbow") => Self::Crossbow,
             Some("Hand Crossbow") => Self::HandCrossbow,
             Some("Revolver") => Self::Revolver,
             Some("Shotgun") => Self::Shotgun,
+            Some("Sniper Rifle") => Self::SniperRifle,
+            Some("Bouncy Bomb Launcher") => Self::BouncyBombLauncher,
+            Some("Runestaff") => Self::Runestaff,
+            Some("Halberd") => Self::Halberd,
+            Some("Longsword") => Self::Longsword,
+            Some("Greatsword") => Self::Greatsword,
+            Some("Maul") => Self::Maul,
+            Some("Spear") | Some("Flint Spear") => Self::Spear,
+            Some("Rapier") => Self::Rapier,
+            Some("Warhammer") => Self::Warhammer,
+            Some("Club") => Self::Club,
+            Some("Dagger") => Self::Dagger,
+            Some("Handaxe") | Some("Stone Axe") => Self::Handaxe,
+            Some("Cestus") => Self::Cestus,
+            Some("Knuckle-Duster") => Self::KnuckleDuster,
+            Some("Frying Pan") => Self::FryingPan,
+            Some("Holy Mackerel") => Self::HolyMackerel,
+            Some("Hammer") => Self::Hammer,
+            Some("Pickaxe") => Self::Pickaxe,
+            Some("Torch") => Self::Torch,
+            Some("Wooden Shield") => Self::WoodenShield,
             _ => Self::None,
         }
     }
@@ -53,6 +106,27 @@ impl WeaponType {
             Self::HandCrossbow => "Hand Crossbow",
             Self::Revolver => "Six-Shooter Revolver",
             Self::Shotgun => "Pump Shotgun",
+            Self::SniperRifle => "High-Velocity Sniper Rifle",
+            Self::BouncyBombLauncher => "Bouncy Bomb Launcher",
+            Self::Runestaff => "Arcane Runestaff",
+            Self::Halberd => "Halberd Polearm",
+            Self::Longsword => "Knight's Longsword",
+            Self::Greatsword => "Zweihander Greatsword",
+            Self::Maul => "Heavy Iron Maul",
+            Self::Spear => "Hunting Spear",
+            Self::Rapier => "Fencing Rapier",
+            Self::Warhammer => "Flanged Warhammer",
+            Self::Club => "Knotted War Club",
+            Self::Dagger => "Stiletto Dagger",
+            Self::Handaxe => "Bearded Handaxe",
+            Self::Cestus => "Spiked Cestus",
+            Self::KnuckleDuster => "Cast-Iron Knuckle-Duster",
+            Self::FryingPan => "Cast-Iron Frying Pan",
+            Self::HolyMackerel => "Holy Mackerel",
+            Self::Hammer => "Construction Hammer",
+            Self::Pickaxe => "Mining Pickaxe",
+            Self::Torch => "Pitch Torch",
+            Self::WoodenShield => "Reinforced Wooden Shield",
         }
     }
 }
@@ -60,6 +134,7 @@ impl WeaponType {
 #[derive(Resource)]
 pub struct WeaponState {
     pub current_weapon: WeaponType,
+    pub last_hand: HandSide,
     
     // Bow Mechanics
     pub bow_charge: f32, // 0.0 to 1.0
@@ -98,6 +173,7 @@ impl Default for WeaponState {
     fn default() -> Self {
         Self {
             current_weapon: WeaponType::None,
+            last_hand: HandSide::Right,
             bow_charge: 0.0,
             bow_drawing: false,
             crossbow_loaded: true,
@@ -142,13 +218,36 @@ pub struct ViewModelBowArrow;
 pub struct WeaponHudText;
 
 // ----------------------------------------------------------------------------
-// VOXEL MODEL GENERATION FOR FIRST-PERSON VIEW
+// HAND SWITCHING & VOXEL MODEL GENERATION FOR FIRST-PERSON VIEW
 // ----------------------------------------------------------------------------
+
+pub fn toggle_weapon_hand_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    console: Res<ConsoleState>,
+    mut hand_side: ResMut<EquippedHandSide>,
+    mut weapon_root_q: Query<&mut BevyTransform, With<ViewModelWeaponRoot>>,
+) {
+    if console.is_open {
+        return;
+    }
+
+    if keys.just_pressed(KeyCode::KeyH) {
+        hand_side.0 = match hand_side.0 {
+            HandSide::Right => HandSide::Left,
+            HandSide::Left => HandSide::Right,
+        };
+        info!("Toggled Primary Hand: {:?}", hand_side.0);
+        for mut t in weapon_root_q.iter_mut() {
+            t.translation.x = -t.translation.x;
+        }
+    }
+}
 
 pub fn spawn_or_update_view_model_weapon(
     mut commands: Commands,
     active_item: Res<ActiveEquippedItem>,
     mut weapon_state: ResMut<WeaponState>,
+    hand_side: Res<EquippedHandSide>,
     camera_query: Query<Entity, With<FpsCamera>>,
     existing_weapon_q: Query<Entity, With<ViewModelWeaponRoot>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -156,7 +255,7 @@ pub fn spawn_or_update_view_model_weapon(
 ) {
     let desired_weapon = WeaponType::from_item_name(active_item.0.as_deref());
 
-    if desired_weapon == weapon_state.current_weapon && !existing_weapon_q.is_empty() {
+    if desired_weapon == weapon_state.current_weapon && !existing_weapon_q.is_empty() && weapon_state.last_hand == hand_side.0 {
         return;
     }
 
@@ -166,6 +265,7 @@ pub fn spawn_or_update_view_model_weapon(
     }
 
     weapon_state.current_weapon = desired_weapon;
+    weapon_state.last_hand = hand_side.0;
 
     let Ok(camera_entity) = camera_query.get_single() else {
         return;
@@ -213,21 +313,63 @@ pub fn spawn_or_update_view_model_weapon(
         base_color: Color::srgb(0.85, 0.15, 0.15),
         ..default()
     });
+    let rune_cyan = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.2, 0.85, 1.0),
+        unlit: true,
+        ..default()
+    });
+    let fire_orange = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.45, 0.05),
+        unlit: true,
+        ..default()
+    });
 
-    // Helper macro to spawn voxel box in render layer 1
-    let default_pos = match desired_weapon {
+    let mut default_pos = match desired_weapon {
         WeaponType::Bow => Vec3::new(0.22, -0.18, -0.42),
         WeaponType::Crossbow => Vec3::new(0.20, -0.22, -0.45),
         WeaponType::HandCrossbow => Vec3::new(0.22, -0.20, -0.40),
         WeaponType::Revolver => Vec3::new(0.22, -0.20, -0.38),
         WeaponType::Shotgun => Vec3::new(0.22, -0.24, -0.46),
+        WeaponType::SniperRifle => Vec3::new(0.22, -0.22, -0.48),
+        WeaponType::BouncyBombLauncher => Vec3::new(0.24, -0.24, -0.44),
+        WeaponType::Runestaff => Vec3::new(0.24, -0.26, -0.45),
+        WeaponType::Halberd => Vec3::new(0.25, -0.24, -0.52),
+        WeaponType::Longsword => Vec3::new(0.22, -0.20, -0.42),
+        WeaponType::Greatsword => Vec3::new(0.24, -0.22, -0.48),
+        WeaponType::Maul => Vec3::new(0.24, -0.22, -0.45),
+        WeaponType::Spear => Vec3::new(0.24, -0.20, -0.50),
+        WeaponType::Rapier => Vec3::new(0.22, -0.18, -0.42),
+        WeaponType::Warhammer => Vec3::new(0.22, -0.20, -0.40),
+        WeaponType::Club => Vec3::new(0.22, -0.22, -0.38),
+        WeaponType::Dagger => Vec3::new(0.20, -0.18, -0.34),
+        WeaponType::Handaxe => Vec3::new(0.22, -0.20, -0.38),
+        WeaponType::Cestus => Vec3::new(0.18, -0.18, -0.30),
+        WeaponType::KnuckleDuster => Vec3::new(0.18, -0.18, -0.28),
+        WeaponType::FryingPan => Vec3::new(0.24, -0.22, -0.40),
+        WeaponType::HolyMackerel => Vec3::new(0.22, -0.20, -0.38),
+        WeaponType::Hammer => Vec3::new(0.20, -0.20, -0.36),
+        WeaponType::Pickaxe => Vec3::new(0.22, -0.20, -0.40),
+        WeaponType::Torch => Vec3::new(0.22, -0.20, -0.38),
+        WeaponType::WoodenShield => Vec3::new(-0.24, -0.18, -0.38),
         WeaponType::None => Vec3::ZERO,
+    };
+
+    if hand_side.0 == HandSide::Left && desired_weapon != WeaponType::WoodenShield {
+        default_pos.x = -default_pos.x;
+    } else if hand_side.0 == HandSide::Left && desired_weapon == WeaponType::WoodenShield {
+        default_pos.x = 0.24;
+    }
+
+    let root_rot = if hand_side.0 == HandSide::Left {
+        Quat::from_rotation_y(0.08) * Quat::from_rotation_z(0.06)
+    } else {
+        Quat::IDENTITY
     };
 
     commands.entity(camera_entity).with_children(|parent| {
         let mut root = parent.spawn((
             SpatialBundle {
-                transform: BevyTransform::from_translation(default_pos),
+                transform: BevyTransform::from_translation(default_pos).with_rotation(root_rot),
                 ..default()
             },
             ViewModelWeaponRoot,
@@ -239,18 +381,18 @@ pub fn spawn_or_update_view_model_weapon(
                 WeaponType::Bow => {
                     // Central Handle Grip
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.04, 0.12, 0.04), Vec3::new(0.0, 0.0, 0.0));
-                    // Upper Limb (stepped voxels)
+                    // Upper Limb
                     spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.035, 0.14, 0.035), Vec3::new(0.0, 0.12, -0.04));
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.03, 0.14, 0.03), Vec3::new(0.0, 0.24, -0.10));
                     spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.025, 0.08, 0.025), Vec3::new(0.0, 0.33, -0.14));
-                    // Lower Limb (stepped voxels)
+                    // Lower Limb
                     spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.035, 0.14, 0.035), Vec3::new(0.0, -0.12, -0.04));
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.03, 0.14, 0.03), Vec3::new(0.0, -0.24, -0.10));
                     spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.025, 0.08, 0.025), Vec3::new(0.0, -0.33, -0.14));
-                    // Bowstring (Thin upper & lower cord)
+                    // Bowstring
                     spawn_voxel_box(builder, &mut meshes, string_white.clone(), Vec3::new(0.005, 0.36, 0.005), Vec3::new(0.0, 0.17, -0.02));
                     spawn_voxel_box(builder, &mut meshes, string_white.clone(), Vec3::new(0.005, 0.36, 0.005), Vec3::new(0.0, -0.17, -0.02));
-                    // Nocked Arrow resting across handle
+                    // Nocked Arrow
                     builder.spawn((
                         PbrBundle {
                             mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.015, 0.015, 0.52)),
@@ -261,26 +403,17 @@ pub fn spawn_or_update_view_model_weapon(
                         ViewModelBowArrow,
                         RenderLayers::layer(1),
                     )).with_children(|arrow| {
-                        // Flint Arrowhead
                         spawn_voxel_box(arrow, &mut meshes, iron_bright.clone(), Vec3::new(0.03, 0.01, 0.05), Vec3::new(0.0, 0.0, -0.27));
-                        // Red Fletching
                         spawn_voxel_box(arrow, &mut meshes, red_fletch.clone(), Vec3::new(0.008, 0.04, 0.07), Vec3::new(0.0, 0.0, 0.22));
                     });
                 }
                 WeaponType::Crossbow => {
-                    // Heavy Longitudinal Stock
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.065, 0.075, 0.52), Vec3::new(0.0, 0.0, -0.12));
-                    // Buttstock curve
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.055, 0.11, 0.16), Vec3::new(0.0, -0.04, 0.18));
-                    // Pistol Grip
                     spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.045, 0.12, 0.06), Vec3::new(0.0, -0.09, 0.04));
-                    // Steel Prod (Horizontal Bow Limbs)
                     spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.52, 0.035, 0.035), Vec3::new(0.0, 0.03, -0.32));
-                    // Front Foot Stirrup (for cocking)
                     spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.12, 0.025, 0.08), Vec3::new(0.0, -0.01, -0.42));
-                    // Steel Flight Rail / Sight Groove
                     spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.03, 0.015, 0.38), Vec3::new(0.0, 0.042, -0.14));
-                    // Loaded Crossbow Bolt
                     builder.spawn((
                         PbrBundle {
                             mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.018, 0.018, 0.30)),
@@ -291,22 +424,15 @@ pub fn spawn_or_update_view_model_weapon(
                         ViewModelCrossbowBolt,
                         RenderLayers::layer(1),
                     )).with_children(|bolt| {
-                        // Steel Piercing Point
                         spawn_voxel_box(bolt, &mut meshes, iron_bright.clone(), Vec3::new(0.025, 0.025, 0.05), Vec3::new(0.0, 0.0, -0.16));
-                        // Fletching
                         spawn_voxel_box(bolt, &mut meshes, red_fletch.clone(), Vec3::new(0.005, 0.035, 0.05), Vec3::new(0.0, 0.0, 0.12));
                     });
                 }
                 WeaponType::HandCrossbow => {
-                    // Pistol-Grip Stock
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.04, 0.11, 0.05), Vec3::new(0.0, -0.08, 0.05));
-                    // Compact Longitudinal Body
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.045, 0.055, 0.32), Vec3::new(0.0, 0.0, -0.10));
-                    // Compact Steel Bow Prod
                     spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.32, 0.025, 0.025), Vec3::new(0.0, 0.025, -0.22));
-                    // Brass Latch & Trigger
                     spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.02, 0.04, 0.03), Vec3::new(0.0, -0.04, -0.02));
-                    // Compact Dart / Bolt
                     builder.spawn((
                         PbrBundle {
                             mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.015, 0.015, 0.18)),
@@ -319,38 +445,23 @@ pub fn spawn_or_update_view_model_weapon(
                     ));
                 }
                 WeaponType::Revolver => {
-                    // Walnut Ergonomic Handle Grip
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.042, 0.12, 0.06), Vec3::new(0.0, -0.08, 0.06));
-                    // Steel Frame & Action Body
                     spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.044, 0.075, 0.13), Vec3::new(0.0, 0.0, -0.02));
-                    // Trigger Guard
                     spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.02, 0.04, 0.05), Vec3::new(0.0, -0.055, -0.01));
-                    // 6-Chamber Gunmetal Cylinder
                     spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.062, 0.062, 0.09), Vec3::new(0.0, 0.005, -0.06));
-                    // Brass Cartridge Rim Accents (Visible in chambers)
                     spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.04, 0.04, 0.01), Vec3::new(0.0, 0.005, -0.012));
-                    // Heavy Octagonal Steel Barrel
                     spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.04, 0.045, 0.28), Vec3::new(0.0, 0.018, -0.24));
-                    // Top Sight Rib & Front Blade Post
                     spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.015, 0.015, 0.28), Vec3::new(0.0, 0.044, -0.24));
                     spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.012, 0.02, 0.02), Vec3::new(0.0, 0.052, -0.36));
-                    // Cocked Hammer Spur
                     spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.018, 0.035, 0.03), Vec3::new(0.0, 0.045, 0.04));
                 }
                 WeaponType::Shotgun => {
-                    // Solid Wooden Buttstock
                     spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.055, 0.09, 0.24), Vec3::new(0.0, -0.04, 0.16));
-                    // Steel Heavy Receiver
                     spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.06, 0.08, 0.18), Vec3::new(0.0, 0.01, -0.04));
-                    // Brass Ejection Port Detail
                     spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.01, 0.03, 0.05), Vec3::new(0.031, 0.02, -0.04));
-                    // Heavy 12-Gauge Barrel
                     spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.042, 0.042, 0.44), Vec3::new(0.0, 0.032, -0.34));
-                    // Magazine Tube Underneath Barrel
                     spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.038, 0.038, 0.38), Vec3::new(0.0, -0.008, -0.31));
-                    // Brass Front Bead Sight
                     spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.014, 0.016, 0.014), Vec3::new(0.0, 0.058, -0.54));
-                    // Wooden Pump Slide (Moving Forend)
                     builder.spawn((
                         PbrBundle {
                             mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.054, 0.054, 0.14)),
@@ -361,6 +472,132 @@ pub fn spawn_or_update_view_model_weapon(
                         ViewModelPumpSlide,
                         RenderLayers::layer(1),
                     ));
+                }
+                WeaponType::SniperRifle => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.05, 0.10, 0.28), Vec3::new(0.0, -0.05, 0.18));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.055, 0.08, 0.20), Vec3::new(0.0, 0.01, -0.05));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.038, 0.038, 0.65), Vec3::new(0.0, 0.025, -0.45));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.032, 0.032, 0.28), Vec3::new(0.0, 0.085, -0.10));
+                    spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.038, 0.038, 0.02), Vec3::new(0.0, 0.085, -0.22));
+                    spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.038, 0.038, 0.02), Vec3::new(0.0, 0.085, 0.02));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.06, 0.02, 0.12), Vec3::new(0.0, -0.02, -0.55));
+                }
+                WeaponType::BouncyBombLauncher => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.06, 0.11, 0.24), Vec3::new(0.0, -0.05, 0.16));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.055, 0.12, 0.12), Vec3::new(0.0, -0.06, 0.02));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.12, 0.12, 0.16), Vec3::new(0.0, 0.01, -0.12));
+                    spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.125, 0.125, 0.02), Vec3::new(0.0, 0.01, -0.12));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.075, 0.075, 0.32), Vec3::new(0.0, 0.02, -0.34));
+                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.05, 0.07, 0.12), Vec3::new(0.0, -0.04, -0.32));
+                }
+                WeaponType::Runestaff => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.045, 0.045, 0.90), Vec3::new(0.0, 0.0, -0.15));
+                    spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.055, 0.055, 0.04), Vec3::new(0.0, 0.0, -0.45));
+                    spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.055, 0.055, 0.04), Vec3::new(0.0, 0.0, -0.20));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.08, 0.08, 0.08), Vec3::new(0.0, 0.0, -0.62));
+                    spawn_voxel_box(builder, &mut meshes, rune_cyan.clone(), Vec3::new(0.065, 0.065, 0.12), Vec3::new(0.0, 0.0, -0.72));
+                }
+                WeaponType::Halberd => {
+                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.04, 0.04, 1.10), Vec3::new(0.0, 0.0, -0.20));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.055, 0.055, 0.24), Vec3::new(0.0, 0.0, -0.65));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.18, 0.02, 0.22), Vec3::new(0.11, 0.0, -0.72));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.12, 0.025, 0.06), Vec3::new(-0.08, 0.0, -0.72));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.03, 0.02, 0.26), Vec3::new(0.0, 0.0, -0.88));
+                }
+                WeaponType::Longsword => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.035, 0.035, 0.16), Vec3::new(0.0, 0.0, 0.08));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.05, 0.05, 0.04), Vec3::new(0.0, 0.0, 0.18));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.24, 0.025, 0.035), Vec3::new(0.0, 0.0, -0.02));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.06, 0.015, 0.68), Vec3::new(0.0, 0.0, -0.38));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.015, 0.018, 0.52), Vec3::new(0.0, 0.0, -0.32));
+                }
+                WeaponType::Greatsword => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.038, 0.038, 0.26), Vec3::new(0.0, 0.0, 0.15));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.06, 0.06, 0.05), Vec3::new(0.0, 0.0, 0.30));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.36, 0.03, 0.04), Vec3::new(0.0, 0.0, 0.0));
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.07, 0.02, 0.14), Vec3::new(0.0, 0.0, -0.09));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.16, 0.02, 0.03), Vec3::new(0.0, 0.0, -0.17));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.08, 0.016, 0.85), Vec3::new(0.0, 0.0, -0.60));
+                }
+                WeaponType::Maul => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.045, 0.045, 0.75), Vec3::new(0.0, 0.0, -0.15));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.14, 0.14, 0.22), Vec3::new(0.0, 0.0, -0.55));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.13, 0.13, 0.02), Vec3::new(0.0, 0.0, -0.67));
+                }
+                WeaponType::Spear => {
+                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.032, 0.032, 1.05), Vec3::new(0.0, 0.0, -0.15));
+                    spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.045, 0.045, 0.08), Vec3::new(0.0, 0.0, -0.68));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.065, 0.015, 0.26), Vec3::new(0.0, 0.0, -0.84));
+                }
+                WeaponType::Rapier => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.028, 0.028, 0.14), Vec3::new(0.0, 0.0, 0.08));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.14, 0.14, 0.10), Vec3::new(0.0, 0.0, 0.01));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.025, 0.025, 0.78), Vec3::new(0.0, 0.0, -0.42));
+                }
+                WeaponType::Warhammer => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.04, 0.04, 0.65), Vec3::new(0.0, 0.0, -0.12));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.09, 0.09, 0.12), Vec3::new(0.05, 0.0, -0.46));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.10, 0.03, 0.04), Vec3::new(-0.06, 0.0, -0.46));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.025, 0.025, 0.12), Vec3::new(0.0, 0.0, -0.56));
+                }
+                WeaponType::Club => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.05, 0.05, 0.35), Vec3::new(0.0, 0.0, 0.0));
+                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.095, 0.095, 0.28), Vec3::new(0.0, 0.0, -0.28));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.11, 0.11, 0.04), Vec3::new(0.0, 0.0, -0.28));
+                }
+                WeaponType::Dagger => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.032, 0.032, 0.12), Vec3::new(0.0, 0.0, 0.06));
+                    spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.10, 0.025, 0.025), Vec3::new(0.0, 0.0, -0.01));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.042, 0.012, 0.30), Vec3::new(0.0, 0.0, -0.16));
+                }
+                WeaponType::Handaxe => {
+                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.036, 0.036, 0.48), Vec3::new(0.0, 0.0, -0.10));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.05, 0.05, 0.08), Vec3::new(0.0, 0.0, -0.32));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.14, 0.018, 0.16), Vec3::new(0.08, 0.0, -0.36));
+                }
+                WeaponType::Cestus => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.09, 0.09, 0.22), Vec3::new(0.0, 0.0, -0.02));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.10, 0.04, 0.06), Vec3::new(0.0, 0.04, -0.14));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.09, 0.02, 0.03), Vec3::new(0.0, 0.065, -0.14));
+                }
+                WeaponType::KnuckleDuster => {
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.08, 0.03, 0.025), Vec3::new(0.0, -0.02, -0.02));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.11, 0.05, 0.04), Vec3::new(0.0, 0.02, -0.06));
+                }
+                WeaponType::FryingPan => {
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.24, 0.02, 0.24), Vec3::new(0.0, 0.0, -0.22));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.26, 0.05, 0.02), Vec3::new(0.0, 0.02, -0.34));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.26, 0.05, 0.02), Vec3::new(0.0, 0.02, -0.10));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.02, 0.05, 0.24), Vec3::new(-0.12, 0.02, -0.22));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.02, 0.05, 0.24), Vec3::new(0.12, 0.02, -0.22));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.035, 0.025, 0.18), Vec3::new(0.0, 0.02, 0.0));
+                }
+                WeaponType::HolyMackerel => {
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.06, 0.12, 0.38), Vec3::new(0.0, 0.0, -0.16));
+                    spawn_voxel_box(builder, &mut meshes, string_white.clone(), Vec3::new(0.055, 0.03, 0.36), Vec3::new(0.0, -0.05, -0.16));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.02, 0.14, 0.10), Vec3::new(0.0, 0.0, 0.08));
+                    spawn_voxel_box(builder, &mut meshes, string_white.clone(), Vec3::new(0.05, 0.08, 0.12), Vec3::new(0.0, 0.0, 0.0));
+                    spawn_voxel_box(builder, &mut meshes, brass_gold.clone(), Vec3::new(0.065, 0.025, 0.025), Vec3::new(0.0, 0.02, -0.30));
+                }
+                WeaponType::Hammer => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.035, 0.035, 0.40), Vec3::new(0.0, 0.0, -0.06));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.07, 0.07, 0.13), Vec3::new(0.0, 0.0, -0.24));
+                }
+                WeaponType::Pickaxe => {
+                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.038, 0.038, 0.52), Vec3::new(0.0, 0.0, -0.10));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.28, 0.04, 0.06), Vec3::new(0.0, 0.0, -0.34));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.32, 0.025, 0.03), Vec3::new(0.0, 0.0, -0.34));
+                }
+                WeaponType::Torch => {
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.038, 0.038, 0.46), Vec3::new(0.0, 0.0, -0.08));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.065, 0.065, 0.12), Vec3::new(0.0, 0.0, -0.28));
+                    spawn_voxel_box(builder, &mut meshes, fire_orange.clone(), Vec3::new(0.09, 0.12, 0.09), Vec3::new(0.0, 0.04, -0.38));
+                }
+                WeaponType::WoodenShield => {
+                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.44, 0.44, 0.04), Vec3::new(0.0, 0.0, 0.0));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.46, 0.46, 0.02), Vec3::new(0.0, 0.0, -0.01));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.14, 0.14, 0.08), Vec3::new(0.0, 0.0, -0.04));
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.18, 0.05, 0.03), Vec3::new(0.0, 0.0, 0.03));
                 }
                 WeaponType::None => {}
             }
@@ -393,6 +630,7 @@ fn spawn_voxel_box(
 pub fn animate_weapon_viewmodel(
     time: Res<Time>,
     mut weapon_state: ResMut<WeaponState>,
+    hand_side: Res<EquippedHandSide>,
     mut root_q: Query<&mut BevyTransform, With<ViewModelWeaponRoot>>,
     mut pump_q: Query<&mut BevyTransform, (With<ViewModelPumpSlide>, Without<ViewModelWeaponRoot>)>,
     mut arrow_q: Query<&mut Visibility, (With<ViewModelBowArrow>, Without<ViewModelCrossbowBolt>)>,
@@ -441,9 +679,9 @@ pub fn animate_weapon_viewmodel(
         weapon_state.shotgun_pump_timer.tick(time.delta());
         let t = weapon_state.shotgun_pump_timer.fraction();
         let pump_slide_z = if t < 0.5 {
-            -0.26 + (t * 2.0) * 0.08 // Slide back
+            -0.26 + (t * 2.0) * 0.08
         } else {
-            -0.18 - ((t - 0.5) * 2.0) * 0.08 // Slide forward
+            -0.18 - ((t - 0.5) * 2.0) * 0.08
         };
 
         for mut pump_t in pump_q.iter_mut() {
@@ -477,14 +715,41 @@ pub fn animate_weapon_viewmodel(
     // 4. Transform Animation on ViewModelWeaponRoot
     let Ok(mut root_t) = root_q.get_single_mut() else { return; };
 
-    let default_pos = match weapon_state.current_weapon {
+    let mut default_pos = match weapon_state.current_weapon {
         WeaponType::Bow => Vec3::new(0.22, -0.18, -0.42),
         WeaponType::Crossbow => Vec3::new(0.20, -0.22, -0.45),
         WeaponType::HandCrossbow => Vec3::new(0.22, -0.20, -0.40),
         WeaponType::Revolver => Vec3::new(0.22, -0.20, -0.38),
         WeaponType::Shotgun => Vec3::new(0.22, -0.24, -0.46),
+        WeaponType::SniperRifle => Vec3::new(0.22, -0.22, -0.48),
+        WeaponType::BouncyBombLauncher => Vec3::new(0.24, -0.24, -0.44),
+        WeaponType::Runestaff => Vec3::new(0.24, -0.26, -0.45),
+        WeaponType::Halberd => Vec3::new(0.25, -0.24, -0.52),
+        WeaponType::Longsword => Vec3::new(0.22, -0.20, -0.42),
+        WeaponType::Greatsword => Vec3::new(0.24, -0.22, -0.48),
+        WeaponType::Maul => Vec3::new(0.24, -0.22, -0.45),
+        WeaponType::Spear => Vec3::new(0.24, -0.20, -0.50),
+        WeaponType::Rapier => Vec3::new(0.22, -0.18, -0.42),
+        WeaponType::Warhammer => Vec3::new(0.22, -0.20, -0.40),
+        WeaponType::Club => Vec3::new(0.22, -0.22, -0.38),
+        WeaponType::Dagger => Vec3::new(0.20, -0.18, -0.34),
+        WeaponType::Handaxe => Vec3::new(0.22, -0.20, -0.38),
+        WeaponType::Cestus => Vec3::new(0.18, -0.18, -0.30),
+        WeaponType::KnuckleDuster => Vec3::new(0.18, -0.18, -0.28),
+        WeaponType::FryingPan => Vec3::new(0.24, -0.22, -0.40),
+        WeaponType::HolyMackerel => Vec3::new(0.22, -0.20, -0.38),
+        WeaponType::Hammer => Vec3::new(0.20, -0.20, -0.36),
+        WeaponType::Pickaxe => Vec3::new(0.22, -0.20, -0.40),
+        WeaponType::Torch => Vec3::new(0.22, -0.20, -0.38),
+        WeaponType::WoodenShield => Vec3::new(-0.24, -0.18, -0.38),
         WeaponType::None => Vec3::ZERO,
     };
+
+    if hand_side.0 == HandSide::Left && weapon_state.current_weapon != WeaponType::WoodenShield {
+        default_pos.x = -default_pos.x;
+    } else if hand_side.0 == HandSide::Left && weapon_state.current_weapon == WeaponType::WoodenShield {
+        default_pos.x = 0.24;
+    }
 
     // Idle Breathing Sway
     let sway_x = (weapon_state.sway_time * 1.5).sin() * 0.003;
@@ -495,9 +760,7 @@ pub fn animate_weapon_viewmodel(
     // Bow ADS & Draw Stance
     if weapon_state.current_weapon == WeaponType::Bow && weapon_state.bow_drawing {
         let charge = weapon_state.bow_charge;
-        // Shift toward center view and pull back into shoulder
         current_offset += Vec3::new(-0.10 * charge, 0.05 * charge, 0.12 * charge);
-        // Hunter / archery dynamic cant
         current_rot *= Quat::from_rotation_z(0.35 * charge) * Quat::from_rotation_x(0.12 * charge);
     }
 
@@ -532,7 +795,6 @@ pub fn weapon_reload_input_system(
                 if weapon_state.revolver_ammo < weapon_state.revolver_max_ammo && !weapon_state.revolver_is_reloading {
                     weapon_state.revolver_is_reloading = true;
                     weapon_state.revolver_reload_timer.reset();
-                    // Subtle reload animation impulse
                     weapon_state.recoil_rot *= Quat::from_rotation_z(0.3);
                 }
             }
@@ -564,6 +826,7 @@ pub fn weapon_reload_input_system(
 
 pub fn update_weapon_hud(
     weapon_state: Res<WeaponState>,
+    hand_side: Res<EquippedHandSide>,
     camera_mode: Res<State<CameraMode>>,
     mut text_q: Query<(&mut Visibility, &mut Text), With<WeaponHudText>>,
 ) {
@@ -574,7 +837,12 @@ pub fn update_weapon_hud(
     }
 
     *vis = Visibility::Inherited;
-    text.sections[0].value = match weapon_state.current_weapon {
+    let hand_str = match hand_side.0 {
+        HandSide::Right => "PRIMARY: RIGHT [H to Swap]",
+        HandSide::Left => "PRIMARY: LEFT [H to Swap]",
+    };
+
+    let details = match weapon_state.current_weapon {
         WeaponType::Bow => {
             if weapon_state.bow_drawing {
                 let pct = (weapon_state.bow_charge * 100.0) as u32;
@@ -614,6 +882,10 @@ pub fn update_weapon_hud(
                 format!("SHOTGUN [{} / {}]\n[R] Reload", weapon_state.shotgun_ammo, weapon_state.shotgun_max_ammo)
             }
         }
-        WeaponType::None => String::new(),
+        _ => {
+            format!("{} [READY]\n[Left-Click] Attack", weapon_state.current_weapon.display_name())
+        }
     };
+
+    text.sections[0].value = format!("{}\n{}", hand_str, details);
 }

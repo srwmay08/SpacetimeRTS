@@ -32,10 +32,14 @@ pub mod craft_item_reducer;
 pub mod destroy_structure_reducer;
 pub mod detonate_explosive_charge_reducer;
 pub mod drop_inventory_item_reducer;
+pub mod equip_weapon_reducer;
+pub mod equipment_loadout_table;
+pub mod equipment_loadout_type;
 pub mod faction_component_table;
 pub mod faction_component_type;
 pub mod faction_type;
 pub mod fire_bow_reducer;
+pub mod fire_ranged_weapon_reducer;
 pub mod fire_siege_weapon_reducer;
 pub mod fire_weapon_reducer;
 pub mod global_state_table;
@@ -91,10 +95,13 @@ pub mod swap_inventory_slots_reducer;
 pub mod swing_tool_reducer;
 pub mod transform_table;
 pub mod transform_type;
+pub mod unequip_weapon_reducer;
 pub mod voxel_chunk_table;
 pub mod voxel_chunk_type;
 pub mod waypoint_table;
 pub mod waypoint_type;
+pub mod weapon_skill_table;
+pub mod weapon_skill_type;
 
 pub use active_projectile_table::*;
 pub use active_projectile_type::ActiveProjectile;
@@ -122,10 +129,14 @@ pub use craft_item_reducer::craft_item;
 pub use destroy_structure_reducer::destroy_structure;
 pub use detonate_explosive_charge_reducer::detonate_explosive_charge;
 pub use drop_inventory_item_reducer::drop_inventory_item;
+pub use equip_weapon_reducer::equip_weapon;
+pub use equipment_loadout_table::*;
+pub use equipment_loadout_type::EquipmentLoadout;
 pub use faction_component_table::*;
 pub use faction_component_type::FactionComponent;
 pub use faction_type::Faction;
 pub use fire_bow_reducer::fire_bow;
+pub use fire_ranged_weapon_reducer::fire_ranged_weapon;
 pub use fire_siege_weapon_reducer::fire_siege_weapon;
 pub use fire_weapon_reducer::fire_weapon;
 pub use global_state_table::*;
@@ -181,10 +192,13 @@ pub use swap_inventory_slots_reducer::swap_inventory_slots;
 pub use swing_tool_reducer::swing_tool;
 pub use transform_table::*;
 pub use transform_type::Transform;
+pub use unequip_weapon_reducer::unequip_weapon;
 pub use voxel_chunk_table::*;
 pub use voxel_chunk_type::VoxelChunk;
 pub use waypoint_table::*;
 pub use waypoint_type::Waypoint;
+pub use weapon_skill_table::*;
+pub use weapon_skill_type::WeaponSkill;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -260,7 +274,21 @@ pub enum Reducer {
         slot_index: u32,
         amount: u32,
     },
+    EquipWeapon {
+        slot: String,
+        weapon_name: String,
+    },
     FireBow {
+        client_tick: u64,
+        origin_x: f32,
+        origin_y: f32,
+        origin_z: f32,
+        dir_x: f32,
+        dir_y: f32,
+        dir_z: f32,
+    },
+    FireRangedWeapon {
+        slot: String,
         client_tick: u64,
         origin_x: f32,
         origin_y: f32,
@@ -335,6 +363,9 @@ pub enum Reducer {
         dy: f32,
         dz: f32,
     },
+    UnequipWeapon {
+        slot: String,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -362,7 +393,9 @@ impl __sdk::Reducer for Reducer {
             Reducer::DestroyStructure { .. } => "destroy_structure",
             Reducer::DetonateExplosiveCharge { .. } => "detonate_explosive_charge",
             Reducer::DropInventoryItem { .. } => "drop_inventory_item",
+            Reducer::EquipWeapon { .. } => "equip_weapon",
             Reducer::FireBow { .. } => "fire_bow",
+            Reducer::FireRangedWeapon { .. } => "fire_ranged_weapon",
             Reducer::FireSiegeWeapon { .. } => "fire_siege_weapon",
             Reducer::FireWeapon { .. } => "fire_weapon",
             Reducer::InteractNode { .. } => "interact_node",
@@ -375,6 +408,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SpawnPeasant => "spawn_peasant",
             Reducer::SwapInventorySlots { .. } => "swap_inventory_slots",
             Reducer::SwingTool { .. } => "swing_tool",
+            Reducer::UnequipWeapon { .. } => "unequip_weapon",
             _ => unreachable!(),
         }
     }
@@ -498,6 +532,12 @@ impl __sdk::Reducer for Reducer {
                     amount: amount.clone(),
                 })
             }
+            Reducer::EquipWeapon { slot, weapon_name } => {
+                __sats::bsatn::to_vec(&equip_weapon_reducer::EquipWeaponArgs {
+                    slot: slot.clone(),
+                    weapon_name: weapon_name.clone(),
+                })
+            }
             Reducer::FireBow {
                 client_tick,
                 origin_x,
@@ -507,6 +547,25 @@ impl __sdk::Reducer for Reducer {
                 dir_y,
                 dir_z,
             } => __sats::bsatn::to_vec(&fire_bow_reducer::FireBowArgs {
+                client_tick: client_tick.clone(),
+                origin_x: origin_x.clone(),
+                origin_y: origin_y.clone(),
+                origin_z: origin_z.clone(),
+                dir_x: dir_x.clone(),
+                dir_y: dir_y.clone(),
+                dir_z: dir_z.clone(),
+            }),
+            Reducer::FireRangedWeapon {
+                slot,
+                client_tick,
+                origin_x,
+                origin_y,
+                origin_z,
+                dir_x,
+                dir_y,
+                dir_z,
+            } => __sats::bsatn::to_vec(&fire_ranged_weapon_reducer::FireRangedWeaponArgs {
+                slot: slot.clone(),
                 client_tick: client_tick.clone(),
                 origin_x: origin_x.clone(),
                 origin_y: origin_y.clone(),
@@ -636,6 +695,11 @@ impl __sdk::Reducer for Reducer {
                 dy: dy.clone(),
                 dz: dz.clone(),
             }),
+            Reducer::UnequipWeapon { slot } => {
+                __sats::bsatn::to_vec(&unequip_weapon_reducer::UnequipWeaponArgs {
+                    slot: slot.clone(),
+                })
+            }
             _ => unreachable!(),
         }
     }
@@ -647,6 +711,7 @@ impl __sdk::Reducer for Reducer {
 pub struct DbUpdate {
     active_projectile: __sdk::TableUpdate<ActiveProjectile>,
     combat_event: __sdk::TableUpdate<CombatEvent>,
+    equipment_loadout: __sdk::TableUpdate<EquipmentLoadout>,
     faction_component: __sdk::TableUpdate<FactionComponent>,
     global_state: __sdk::TableUpdate<GlobalState>,
     harvestable_corpse: __sdk::TableUpdate<HarvestableCorpse>,
@@ -666,6 +731,7 @@ pub struct DbUpdate {
     transform: __sdk::TableUpdate<Transform>,
     voxel_chunk: __sdk::TableUpdate<VoxelChunk>,
     waypoint: __sdk::TableUpdate<Waypoint>,
+    weapon_skill: __sdk::TableUpdate<WeaponSkill>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -680,6 +746,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "combat_event" => db_update
                     .combat_event
                     .append(combat_event_table::parse_table_update(table_update)?),
+                "equipment_loadout" => db_update
+                    .equipment_loadout
+                    .append(equipment_loadout_table::parse_table_update(table_update)?),
                 "faction_component" => db_update
                     .faction_component
                     .append(faction_component_table::parse_table_update(table_update)?),
@@ -737,6 +806,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "waypoint" => db_update
                     .waypoint
                     .append(waypoint_table::parse_table_update(table_update)?),
+                "weapon_skill" => db_update
+                    .weapon_skill
+                    .append(weapon_skill_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -769,6 +841,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.combat_event = cache
             .apply_diff_to_table::<CombatEvent>("combat_event", &self.combat_event)
             .with_updates_by_pk(|row| &row.id);
+        diff.equipment_loadout = cache
+            .apply_diff_to_table::<EquipmentLoadout>("equipment_loadout", &self.equipment_loadout)
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.faction_component = cache
             .apply_diff_to_table::<FactionComponent>("faction_component", &self.faction_component)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -832,6 +907,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.waypoint = cache
             .apply_diff_to_table::<Waypoint>("waypoint", &self.waypoint)
             .with_updates_by_pk(|row| &row.waypoint_id);
+        diff.weapon_skill = cache
+            .apply_diff_to_table::<WeaponSkill>("weapon_skill", &self.weapon_skill)
+            .with_updates_by_pk(|row| &row.entity_id);
 
         diff
     }
@@ -844,6 +922,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "combat_event" => db_update
                     .combat_event
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "equipment_loadout" => db_update
+                    .equipment_loadout
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "faction_component" => db_update
                     .faction_component
@@ -901,6 +982,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "waypoint" => db_update
                     .waypoint
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "weapon_skill" => db_update
+                    .weapon_skill
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -921,6 +1005,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "combat_event" => db_update
                     .combat_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "equipment_loadout" => db_update
+                    .equipment_loadout
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "faction_component" => db_update
                     .faction_component
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -978,6 +1065,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "waypoint" => db_update
                     .waypoint
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "weapon_skill" => db_update
+                    .weapon_skill
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
                         __sdk::InternalError::unknown_name("table", unknown, "QueryRows").into(),
@@ -995,6 +1085,7 @@ impl __sdk::DbUpdate for DbUpdate {
 pub struct AppliedDiff<'r> {
     active_projectile: __sdk::TableAppliedDiff<'r, ActiveProjectile>,
     combat_event: __sdk::TableAppliedDiff<'r, CombatEvent>,
+    equipment_loadout: __sdk::TableAppliedDiff<'r, EquipmentLoadout>,
     faction_component: __sdk::TableAppliedDiff<'r, FactionComponent>,
     global_state: __sdk::TableAppliedDiff<'r, GlobalState>,
     harvestable_corpse: __sdk::TableAppliedDiff<'r, HarvestableCorpse>,
@@ -1014,6 +1105,7 @@ pub struct AppliedDiff<'r> {
     transform: __sdk::TableAppliedDiff<'r, Transform>,
     voxel_chunk: __sdk::TableAppliedDiff<'r, VoxelChunk>,
     waypoint: __sdk::TableAppliedDiff<'r, Waypoint>,
+    weapon_skill: __sdk::TableAppliedDiff<'r, WeaponSkill>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -1035,6 +1127,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<CombatEvent>(
             "combat_event",
             &self.combat_event,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<EquipmentLoadout>(
+            "equipment_loadout",
+            &self.equipment_loadout,
             event,
         );
         callbacks.invoke_table_row_callbacks::<FactionComponent>(
@@ -1092,6 +1189,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<Transform>("transform", &self.transform, event);
         callbacks.invoke_table_row_callbacks::<VoxelChunk>("voxel_chunk", &self.voxel_chunk, event);
         callbacks.invoke_table_row_callbacks::<Waypoint>("waypoint", &self.waypoint, event);
+        callbacks.invoke_table_row_callbacks::<WeaponSkill>(
+            "weapon_skill",
+            &self.weapon_skill,
+            event,
+        );
     }
 }
 
@@ -1754,6 +1856,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         active_projectile_table::register_table(client_cache);
         combat_event_table::register_table(client_cache);
+        equipment_loadout_table::register_table(client_cache);
         faction_component_table::register_table(client_cache);
         global_state_table::register_table(client_cache);
         harvestable_corpse_table::register_table(client_cache);
@@ -1773,10 +1876,12 @@ impl __sdk::SpacetimeModule for RemoteModule {
         transform_table::register_table(client_cache);
         voxel_chunk_table::register_table(client_cache);
         waypoint_table::register_table(client_cache);
+        weapon_skill_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "active_projectile",
         "combat_event",
+        "equipment_loadout",
         "faction_component",
         "global_state",
         "harvestable_corpse",
@@ -1796,5 +1901,6 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "transform",
         "voxel_chunk",
         "waypoint",
+        "weapon_skill",
     ];
 }

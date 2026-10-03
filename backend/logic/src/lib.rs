@@ -20,6 +20,7 @@ pub struct Inventory {
     pub entity_id: u64,
     pub slots: Vec<InventorySlot>,
     pub discovered_items: Vec<String>,
+    pub max_capacity: usize,
 }
 
 impl Inventory {
@@ -28,7 +29,16 @@ impl Inventory {
             entity_id,
             slots: Vec::new(),
             discovered_items: Vec::new(),
+            max_capacity: 16,
         }
+    }
+
+    pub fn max_slots(&self) -> usize {
+        self.max_capacity.max(16)
+    }
+
+    pub fn set_capacity(&mut self, cap: usize) {
+        self.max_capacity = cap.max(16);
     }
 
     pub fn add_item(&mut self, item_type: &str, mut amount: u32) {
@@ -41,7 +51,7 @@ impl Inventory {
         }
 
         const MAX_STACK: u32 = 50;
-        const MAX_SLOTS: usize = 16;
+        let max_allowed_slots = self.max_slots();
 
         // Try to stack with existing slots first
         for slot in self.slots.iter_mut() {
@@ -59,7 +69,7 @@ impl Inventory {
         }
 
         // Create new slots for remaining amount
-        while amount > 0 && self.slots.len() < MAX_SLOTS {
+        while amount > 0 && self.slots.len() < max_allowed_slots {
             let add_amt = amount.min(MAX_STACK);
             self.slots.push(InventorySlot {
                 item_type: item_type.to_string(),
@@ -245,6 +255,7 @@ pub enum WeaponCategory {
     Missile,
     Firearm,
     Runestaff,
+    Comedic,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -256,6 +267,7 @@ pub enum DamageType {
     PelletSpread,
     ArcaneForce,
     FireSplash,
+    CartoonBonk,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -292,6 +304,7 @@ pub struct WeaponDef {
     pub magazine_capacity: Option<u32>,
     pub current_ammo: u32,
     pub projectile_profile: Option<ProjectileProfile>,
+    pub knockback_force: f32, // TF2 comedic launch impulse (m/s)
 }
 
 impl WeaponDef {
@@ -309,6 +322,83 @@ impl WeaponDef {
 }
 
 // ----------------------------------------------------------------------------
+// WOW & EQ CONTAINER BAGS & STATIC INVENTORY SCALING
+// ----------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum HandSide {
+    #[default]
+    Right,
+    Left,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ContainerItemSize {
+    Tiny,
+    Small,
+    Medium,
+    Large,
+    Giant,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BagContainerDef {
+    pub id: String,
+    pub name: String,
+    pub capacity: usize,
+    pub size_cap: ContainerItemSize,
+    pub weight_reduction_pct: u32,
+}
+
+pub fn create_bag_container(name: &str) -> Option<BagContainerDef> {
+    match name {
+        "Small Pouch" => Some(BagContainerDef {
+            id: "small_pouch".into(),
+            name: "Small Pouch".into(),
+            capacity: 4,
+            size_cap: ContainerItemSize::Small,
+            weight_reduction_pct: 0,
+        }),
+        "Leather Bag" => Some(BagContainerDef {
+            id: "leather_bag".into(),
+            name: "Leather Bag".into(),
+            capacity: 6,
+            size_cap: ContainerItemSize::Medium,
+            weight_reduction_pct: 10,
+        }),
+        "Shralok Pack" => Some(BagContainerDef {
+            id: "shralok_pack".into(),
+            name: "Shralok Pack".into(),
+            capacity: 8,
+            size_cap: ContainerItemSize::Giant,
+            weight_reduction_pct: 25,
+        }),
+        "Bag of Sewn Evil-Eye" => Some(BagContainerDef {
+            id: "bag_of_sewn_evil_eye".into(),
+            name: "Bag of Sewn Evil-Eye".into(),
+            capacity: 8,
+            size_cap: ContainerItemSize::Large,
+            weight_reduction_pct: 70,
+        }),
+        "Traveler's Backpack" => Some(BagContainerDef {
+            id: "travelers_backpack".into(),
+            name: "Traveler's Backpack".into(),
+            capacity: 12,
+            size_cap: ContainerItemSize::Giant,
+            weight_reduction_pct: 50,
+        }),
+        "Dragonflight Haversack" => Some(BagContainerDef {
+            id: "dragonflight_haversack".into(),
+            name: "Dragonflight Haversack".into(),
+            capacity: 16,
+            size_cap: ContainerItemSize::Giant,
+            weight_reduction_pct: 100,
+        }),
+        _ => None,
+    }
+}
+
+// ----------------------------------------------------------------------------
 // EQUIPPED LOADOUT & DUAL-WIELD VALIDATION
 // ----------------------------------------------------------------------------
 
@@ -316,6 +406,12 @@ impl WeaponDef {
 pub struct EquippedLoadout {
     pub main_hand: Option<WeaponDef>,
     pub off_hand: Option<WeaponDef>,
+    pub primary_hand: HandSide,
+    pub head: Option<String>,
+    pub chest: Option<String>,
+    pub legs: Option<String>,
+    pub feet: Option<String>,
+    pub bag_slots: [Option<BagContainerDef>; 4],
 }
 
 impl EquippedLoadout {
@@ -354,6 +450,42 @@ impl EquippedLoadout {
         }
     }
 
+    pub fn switch_primary_hand(&mut self) {
+        self.primary_hand = match self.primary_hand {
+            HandSide::Right => HandSide::Left,
+            HandSide::Left => HandSide::Right,
+        };
+    }
+
+    pub fn swap_hands(&mut self) -> Result<(), &'static str> {
+        if let Some(ref m) = self.main_hand {
+            if m.is_two_handed() && self.off_hand.is_some() {
+                return Err("Cannot swap two-handed weapon into occupied off-hand.");
+            }
+        }
+        std::mem::swap(&mut self.main_hand, &mut self.off_hand);
+        Ok(())
+    }
+
+    pub fn equip_bag(&mut self, slot: usize, bag: BagContainerDef) -> Result<(), &'static str> {
+        if slot >= 4 {
+            return Err("Invalid bag slot. Maximum 4 bag slots.");
+        }
+        self.bag_slots[slot] = Some(bag);
+        Ok(())
+    }
+
+    pub fn unequip_bag(&mut self, slot: usize) -> Option<BagContainerDef> {
+        if slot >= 4 {
+            return None;
+        }
+        self.bag_slots[slot].take()
+    }
+
+    pub fn total_inventory_slots(&self) -> usize {
+        16 + self.bag_slots.iter().flatten().map(|b| b.capacity).sum::<usize>()
+    }
+
     pub fn is_dual_wielding(&self) -> bool {
         self.main_hand.is_some() && self.off_hand.is_some()
     }
@@ -363,6 +495,10 @@ impl EquippedLoadout {
             (Some(m), Some(o)) => (m.is_ranged() && !o.is_ranged()) || (!m.is_ranged() && o.is_ranged()),
             _ => false,
         }
+    }
+
+    pub fn has_weapon_equipped(&self) -> bool {
+        self.main_hand.is_some() || self.off_hand.is_some()
     }
 }
 
@@ -388,6 +524,7 @@ impl Default for CharacterCombatSkills {
         xp.insert(WeaponCategory::Missile, 100);
         xp.insert(WeaponCategory::Firearm, 100);
         xp.insert(WeaponCategory::Runestaff, 100);
+        xp.insert(WeaponCategory::Comedic, 100);
 
         Self {
             generic_physical: 10,
@@ -527,6 +664,13 @@ pub enum CombatFeedbackVerb {
     Echo,
     Clatter,
     Jar,
+    // Comedic & Cartoon Acoustic Feedback
+    Bonk,
+    Clang,
+    Whack,
+    Kaboom,
+    Boing,
+    Yeet,
     // Sparks & Fluid dynamics
     Spit,
     Shower,
@@ -562,8 +706,11 @@ pub struct CombatResolutionResult {
     pub final_damage: f32,
     pub armor_absorbed: f32,
     pub was_critical: bool,
+    pub was_mini_crit: bool,
     pub was_parried: bool,
     pub was_deflected: bool,
+    pub knockback_impulse: f32,
+    pub comic_label: Option<String>,
     pub primary_verb: CombatFeedbackVerb,
     pub secondary_verb: Option<CombatFeedbackVerb>,
     pub durability_loss: u32,
@@ -590,10 +737,18 @@ pub fn resolve_weapon_attack(
 
     let base = weapon.base_damage * skill_mult * maneuver_mult * (1.0 - dw_penalty);
 
-    // 2. Critical strike check
+    // 2. Critical & Mini-Critical strike check (TF2 trope)
     let crit_chance = attacker_skills.critical_strike_chance(weapon.category);
     let was_crit = crit_chance > 0.25; // deterministic threshold check
-    let damage_after_crit = if was_crit { base * 1.5 } else { base };
+    let was_mini_crit = !was_crit && crit_chance > 0.12;
+
+    let damage_after_crit = if was_crit {
+        base * 1.5
+    } else if was_mini_crit {
+        base * 1.35
+    } else {
+        base
+    };
 
     // 3. Magical Runestaff Deflection check
     if target_has_runestaff && (weapon.is_ranged() || weapon.damage_type == DamageType::ArcaneForce) {
@@ -603,8 +758,11 @@ pub fn resolve_weapon_attack(
             final_damage: 0.0,
             armor_absorbed: 0.0,
             was_critical: false,
+            was_mini_crit: false,
             was_parried: false,
             was_deflected: true,
+            knockback_impulse: 5.0,
+            comic_label: Some("DEFLECTED!".to_string()),
             primary_verb: CombatFeedbackVerb::Resonate,
             secondary_verb: Some(CombatFeedbackVerb::Whine),
             durability_loss: 1,
@@ -628,6 +786,15 @@ pub fn resolve_weapon_attack(
         DamageType::PelletSpread => CombatFeedbackVerb::Shower,
         DamageType::FireSplash => CombatFeedbackVerb::Melt,
         DamageType::ArcaneForce => CombatFeedbackVerb::Hum,
+        DamageType::CartoonBonk => {
+            if was_crit {
+                CombatFeedbackVerb::Kaboom
+            } else if weapon.name.contains("Pan") {
+                CombatFeedbackVerb::Clang
+            } else {
+                CombatFeedbackVerb::Bonk
+            }
+        }
     };
 
     let mut secondary_verb = None;
@@ -646,14 +813,48 @@ pub fn resolve_weapon_attack(
         secondary_verb = Some(CombatFeedbackVerb::Snap);
     }
 
+    // 6. Exaggerated Comedic Knockback Impulse & Comic Label
+    let kb_mult = if was_crit {
+        2.2
+    } else if was_mini_crit {
+        1.5
+    } else {
+        1.0
+    };
+    let knockback_impulse = weapon.knockback_force * kb_mult * maneuver.stagger_potency();
+    if knockback_impulse > 75.0 && secondary_verb.is_none() {
+        secondary_verb = Some(CombatFeedbackVerb::Yeet);
+    }
+
+    let comic_label = if was_crit {
+        if weapon.name == "Frying Pan" {
+            Some(format!("CRIT! CLANG! {:.0}", final_dmg))
+        } else if weapon.damage_type == DamageType::CartoonBonk {
+            Some(format!("CRIT! BONK! {:.0}", final_dmg))
+        } else {
+            Some(format!("CRIT! {:.0}", final_dmg))
+        }
+    } else if was_mini_crit {
+        Some(format!("MINI-CRIT! {:.0}", final_dmg))
+    } else if weapon.name == "Frying Pan" {
+        Some("CLANG!".to_string())
+    } else if weapon.damage_type == DamageType::CartoonBonk {
+        Some("BONK!".to_string())
+    } else {
+        None
+    };
+
     CombatResolutionResult {
         hit_landed: true,
         raw_damage: damage_after_crit,
         final_damage: final_dmg,
         armor_absorbed: absorbed,
         was_critical: was_crit,
+        was_mini_crit,
         was_parried: false,
         was_deflected: false,
+        knockback_impulse,
+        comic_label,
         primary_verb,
         secondary_verb,
         durability_loss: wear,
@@ -683,6 +884,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 25.0,
         }),
         "Handaxe" => Some(WeaponDef {
             id: "handaxe".into(),
@@ -699,6 +901,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 22.0,
         }),
         "Dagger" => Some(WeaponDef {
             id: "dagger".into(),
@@ -715,6 +918,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 10.0,
         }),
 
         // One-Handed Pointed Weapons
@@ -733,6 +937,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 15.0,
         }),
 
         // One-Handed Blunt Weapons
@@ -751,6 +956,24 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 42.0,
+        }),
+        "Club" => Some(WeaponDef {
+            id: "club".into(),
+            name: "Club".into(),
+            grip: WeaponGrip::OneHanded,
+            category: WeaponCategory::Blunt,
+            damage_type: DamageType::Bludgeoning,
+            base_damage: 24.0,
+            attack_speed: 1.2,
+            reach_meters: 1.1,
+            armor_penetration: 0.10,
+            durability: 100,
+            max_durability: 100,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: None,
+            knockback_force: 28.0,
         }),
 
         // Two-Handed Weapons
@@ -769,6 +992,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 48.0,
         }),
         "Maul" => Some(WeaponDef {
             id: "maul".into(),
@@ -785,6 +1009,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 60.0,
         }),
 
         // Polearms
@@ -803,8 +1028,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 38.0,
         }),
-        "Spear" => Some(WeaponDef {
+        "Spear" | "Flint Spear" => Some(WeaponDef {
             id: "spear".into(),
             name: "Spear".into(),
             grip: WeaponGrip::Polearm,
@@ -819,6 +1045,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 22.0,
         }),
 
         // Brawling Weapons
@@ -837,6 +1064,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 15.0,
         }),
         "Knuckle-Duster" => Some(WeaponDef {
             id: "knuckle_duster".into(),
@@ -853,10 +1081,73 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             magazine_capacity: None,
             current_ammo: 0,
             projectile_profile: None,
+            knockback_force: 12.0,
+        }),
+
+        // Comedic / TF2 Style Weapons
+        "Frying Pan" => Some(WeaponDef {
+            id: "frying_pan".into(),
+            name: "Frying Pan".into(),
+            grip: WeaponGrip::OneHanded,
+            category: WeaponCategory::Comedic,
+            damage_type: DamageType::CartoonBonk,
+            base_damage: 45.0,
+            attack_speed: 1.8,
+            reach_meters: 1.2,
+            armor_penetration: 0.15,
+            durability: 200,
+            max_durability: 200,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: None,
+            knockback_force: 65.0, // High comical launch impulse!
+        }),
+        "Holy Mackerel" => Some(WeaponDef {
+            id: "holy_mackerel".into(),
+            name: "Holy Mackerel".into(),
+            grip: WeaponGrip::OneHanded,
+            category: WeaponCategory::Comedic,
+            damage_type: DamageType::CartoonBonk,
+            base_damage: 20.0,
+            attack_speed: 3.2,
+            reach_meters: 0.8,
+            armor_penetration: 0.05,
+            durability: 150,
+            max_durability: 150,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: None,
+            knockback_force: 35.0,
+        }),
+        "Bouncy Bomb Launcher" => Some(WeaponDef {
+            id: "bouncy_bomb_launcher".into(),
+            name: "Bouncy Bomb Launcher".into(),
+            grip: WeaponGrip::TwoHanded,
+            category: WeaponCategory::Comedic,
+            damage_type: DamageType::FireSplash,
+            base_damage: 85.0,
+            attack_speed: 0.9,
+            reach_meters: 50.0,
+            armor_penetration: 0.40,
+            durability: 180,
+            max_durability: 180,
+            magazine_capacity: Some(4),
+            current_ammo: 4,
+            projectile_profile: Some(ProjectileProfile {
+                kind: ProjectileKind::BouncyBomb,
+                muzzle_velocity: 40.0,
+                gravity: 8.0,
+                drag: 0.001,
+                spread_radians: 0.02,
+                pellet_count: 1,
+                blast_radius: 5.0,
+                is_slow_projectile: false,
+            }),
+            knockback_force: 80.0, // Massive explosive yeet!
         }),
 
         // 1H Ranged (Dual-wieldable)
-        "Hand Crossbow" => Some(WeaponDef {
+        "Hand Crossbow" | "Crossbow" => Some(WeaponDef {
             id: "hand_crossbow".into(),
             name: "Hand Crossbow".into(),
             grip: WeaponGrip::OneHanded,
@@ -880,6 +1171,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
                 blast_radius: 0.0,
                 is_slow_projectile: false,
             }),
+            knockback_force: 15.0,
         }),
         "Revolver" => Some(WeaponDef {
             id: "revolver".into(),
@@ -905,10 +1197,11 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
                 blast_radius: 0.0,
                 is_slow_projectile: false,
             }),
+            knockback_force: 28.0,
         }),
 
         // 2H Ranged Weapons (Heavy & Specialized)
-        "Longbow" => Some(WeaponDef {
+        "Longbow" | "Crude Bow" | "Bow" => Some(WeaponDef {
             id: "longbow".into(),
             name: "Longbow".into(),
             grip: WeaponGrip::TwoHanded,
@@ -932,6 +1225,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
                 blast_radius: 0.0,
                 is_slow_projectile: false,
             }),
+            knockback_force: 20.0,
         }),
         "Shotgun" => Some(WeaponDef {
             id: "shotgun".into(),
@@ -957,6 +1251,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
                 blast_radius: 0.0,
                 is_slow_projectile: false,
             }),
+            knockback_force: 55.0,
         }),
         "Sniper Rifle" => Some(WeaponDef {
             id: "sniper_rifle".into(),
@@ -982,6 +1277,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
                 blast_radius: 0.0,
                 is_slow_projectile: false,
             }),
+            knockback_force: 45.0,
         }),
 
         // Runestaves & Magical Staves
@@ -1009,6 +1305,7 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
                 blast_radius: 0.0,
                 is_slow_projectile: false,
             }),
+            knockback_force: 25.0,
         }),
 
         _ => None,
@@ -1234,6 +1531,8 @@ pub enum ProjectileKind {
     BallistaSpear,
     MagicMissile,
     FireballBall,
+    BouncyBomb,
+    Rocket,
 }
 
 impl ProjectileKind {
@@ -1249,6 +1548,8 @@ impl ProjectileKind {
             Self::BallistaSpear => 4.5,
             Self::MagicMissile => 0.0,
             Self::FireballBall => 1.2, // Slight floating arc
+            Self::BouncyBomb => 8.0,
+            Self::Rocket => 0.4, // Straight rocket trajectory
         }
     }
 
@@ -1264,6 +1565,8 @@ impl ProjectileKind {
             Self::BallistaSpear => 60.0,
             Self::MagicMissile => 55.0,
             Self::FireballBall => 18.0, // Slow moving projectile
+            Self::BouncyBomb => 40.0,
+            Self::Rocket => 75.0,
         }
     }
 
@@ -1279,6 +1582,8 @@ impl ProjectileKind {
             Self::BallistaSpear => 85.0,
             Self::MagicMissile => 35.0,
             Self::FireballBall => 110.0,
+            Self::BouncyBomb => 95.0,
+            Self::Rocket => 135.0,
         }
     }
 
@@ -1287,6 +1592,8 @@ impl ProjectileKind {
             Self::FireballBall => 4.5,
             Self::CatapultRock => 3.5,
             Self::TrebuchetShell => 6.0,
+            Self::BouncyBomb => 5.0,
+            Self::Rocket => 4.0,
             _ => 0.0,
         }
     }
