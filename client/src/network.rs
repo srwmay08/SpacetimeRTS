@@ -877,6 +877,7 @@ pub fn init_network_connection(
             },
             RenderLayers::from_layers(&[0, 2]),
             RtsCameraChild,
+            crate::binary_sky::AtmosphericCamera,
         ));
     });
 
@@ -947,6 +948,7 @@ pub fn init_network_connection(
             },
             RenderLayers::from_layers(&[0, 1]),
             DepthPrepass, NormalPrepass,
+            crate::binary_sky::AtmosphericCamera,
         )).with_children(|cam| {
             cam.spawn((
                 PbrBundle {
@@ -963,11 +965,9 @@ pub fn init_network_connection(
         });
     });
 
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight { illuminance: 9_000.0, shadows_enabled: true, ..default() },
-        transform: BevyTransform::from_xyz(10.0, 20.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
+    // Architectural Note: Directional lighting is dynamically governed by `BinarySkyPlugin`
+    // with dual-source radiative transfer (Host Star A and Companion Star B) and adaptive
+    // shadow cascade priority management.
 }
 
 pub fn wait_for_connection(

@@ -15,6 +15,7 @@ mod weapons;
 mod tuner;
 mod audio_feedback;
 mod tactical_abilities;
+pub mod binary_sky;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -57,6 +58,7 @@ fn main() {
             bevy::diagnostic::SystemInformationDiagnosticsPlugin,
         ))
         .add_plugins(prediction::PredictionPlugin) 
+        .add_plugins(binary_sky::BinarySkyPlugin)
         .insert_resource(Msaa::Off)
         
         // Architectural Note: Luminous Sky Clear Color.
