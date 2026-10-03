@@ -132,6 +132,17 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "haze",
     "timescale",
     "speed",
+    "star",
+    "stara",
+    "starb",
+    "dualshadows",
+    "dualshadow",
+    "ambient",
+    "starsize",
+    "sunset",
+    "dusk",
+    "dawn",
+    "palette",
     "help",
 ];
 
@@ -707,7 +718,7 @@ pub fn setup_ui(mut commands: Commands) {
         ConsoleRoot,
     )).with_children(|console_root| {
         console_root.spawn(TextBundle::from_section(
-            "DEVELOPER CONSOLE [Press ` to toggle | Tab to Auto-Fill] | giveitem <Item> [amt] | tp <x> <z> | heal | god | time <0-24> | spawn <mob> [amt] | nuke [rad] | help",
+            "DEVELOPER CONSOLE [Press ` to toggle | Tab to Auto-Fill] | giveitem <Item> | star <a|b> <lux> | dualshadows | sunset | help",
             TextStyle { font_size: 11.0, color: Color::srgb(0.3, 0.8, 0.95), ..default() }
         ));
 
@@ -1624,6 +1635,191 @@ pub fn handle_console_input(
                 console.logs.push("[E] Intel Dart  : Sonar pulse reconnaissance (16.0s CD)".into());
                 console.logs.push("[F] Grav-Lift   : Kinetic vertical air lift (10.0s CD)".into());
             }
+            "star" | "stara" | "starb" => {
+                if let Some(ref mut cfg) = sky_config {
+                    let target_star = if cmd == "stara" {
+                        Some("a")
+                    } else if cmd == "starb" {
+                        Some("b")
+                    } else {
+                        tokens.get(1).map(|s| s.to_lowercase()).and_then(|s| {
+                            if s == "a" || s == "primary" {
+                                Some("a")
+                            } else if s == "b" || s == "secondary" {
+                                Some("b")
+                            } else {
+                                None
+                            }
+                        })
+                    };
+
+                    let sub_tokens: Vec<&str> = if cmd == "stara" || cmd == "starb" {
+                        tokens[1..].to_vec()
+                    } else if target_star.is_some() {
+                        tokens[2..].to_vec()
+                    } else {
+                        tokens[1..].to_vec()
+                    };
+
+                    if let Some(star) = target_star {
+                        if sub_tokens.is_empty() {
+                            if star == "a" {
+                                console.logs.push(format!("[BinarySky] Star A (Primary): {:.0} lx | Shadows: {} | Color: {:?}",
+                                    cfg.star_a_base_illuminance_lux, cfg.star_a_shadows_enabled, cfg.star_a_color_override));
+                            } else {
+                                console.logs.push(format!("[BinarySky] Star B (Secondary): {:.0} lx | Shadows: {} | Color: {:?}",
+                                    cfg.star_b_base_illuminance_lux, cfg.star_b_shadows_enabled, cfg.star_b_color_override));
+                            }
+                            console.logs.push("Usage: star <a|b> <lux> | star <a|b> color <hex|name> | star <a|b> shadows <on|off>".into());
+                        } else if let Ok(lux) = sub_tokens[0].parse::<f32>() {
+                            if star == "a" {
+                                cfg.star_a_base_illuminance_lux = lux.max(0.0);
+                                console.logs.push(format!("[BinarySky] Star A base illuminance set to {:.0} lx.", cfg.star_a_base_illuminance_lux));
+                            } else {
+                                cfg.star_b_base_illuminance_lux = lux.max(0.0);
+                                console.logs.push(format!("[BinarySky] Star B base illuminance set to {:.0} lx.", cfg.star_b_base_illuminance_lux));
+                            }
+                        } else if sub_tokens[0] == "color" || sub_tokens[0] == "col" {
+                            let color_arg = sub_tokens.get(1).copied().unwrap_or("");
+                            if color_arg.eq_ignore_ascii_case("reset") || color_arg.is_empty() {
+                                if star == "a" {
+                                    cfg.star_a_color_override = None;
+                                    console.logs.push("[BinarySky] Star A color reset to physically based Rayleigh/Planck blackbody.".into());
+                                } else {
+                                    cfg.star_b_color_override = None;
+                                    console.logs.push("[BinarySky] Star B color reset to physically based Mie/Planck blackbody.".into());
+                                }
+                            } else if let Some(parsed_color) = crate::binary_sky::parse_color_spec(color_arg) {
+                                if star == "a" {
+                                    cfg.star_a_color_override = Some(parsed_color);
+                                    console.logs.push(format!("[BinarySky] Star A direct color override set to {:?}", parsed_color));
+                                } else {
+                                    cfg.star_b_color_override = Some(parsed_color);
+                                    console.logs.push(format!("[BinarySky] Star B direct color override set to {:?}", parsed_color));
+                                }
+                            } else {
+                                console.logs.push(format!("[Syntax Error] Unknown color '{}'. Try hex (e.g. ff5400, 390099) or names (blaze, amber, fuchsia, navy, raspberry, white, reset).", color_arg));
+                            }
+                        } else if sub_tokens[0] == "shadow" || sub_tokens[0] == "shadows" {
+                            let on = sub_tokens.get(1).map(|s| *s != "off" && *s != "0" && *s != "false").unwrap_or(true);
+                            if star == "a" {
+                                cfg.star_a_shadows_enabled = on;
+                                console.logs.push(format!("[BinarySky] Star A shadows: {}", if on { "ENABLED" } else { "DISABLED" }));
+                            } else {
+                                cfg.star_b_shadows_enabled = on;
+                                console.logs.push(format!("[BinarySky] Star B shadows: {}", if on { "ENABLED" } else { "DISABLED" }));
+                            }
+                        } else {
+                            console.logs.push("[Syntax Error] Usage: star <a|b> <lux> | star <a|b> color <hex|name> | star <a|b> shadows <on|off>".into());
+                        }
+                    } else if !sub_tokens.is_empty() && (sub_tokens[0] == "shadow" || sub_tokens[0] == "shadows") {
+                        let on = sub_tokens.get(1).map(|s| *s != "off" && *s != "0" && *s != "false").unwrap_or(true);
+                        cfg.star_a_shadows_enabled = on;
+                        cfg.star_b_shadows_enabled = on;
+                        console.logs.push(format!("[BinarySky] Dual star directional shadows: {}", if on { "ENABLED" } else { "DISABLED" }));
+                    } else if !sub_tokens.is_empty() && (sub_tokens[0] == "balance" || sub_tokens[0] == "equal") {
+                        let ratio = sub_tokens.get(1).and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.5).clamp(0.1, 0.9);
+                        let total = cfg.star_a_base_illuminance_lux + cfg.star_b_base_illuminance_lux;
+                        cfg.star_a_base_illuminance_lux = total * (1.0 - ratio);
+                        cfg.star_b_base_illuminance_lux = total * ratio;
+                        console.logs.push(format!("[BinarySky] Balanced stars with ratio {:.2}: Star A = {:.0} lx, Star B = {:.0} lx",
+                            ratio, cfg.star_a_base_illuminance_lux, cfg.star_b_base_illuminance_lux));
+                    } else {
+                        console.logs.push(format!("[BinarySky Status] Star A: {:.0} lx (shadows: {}) | Star B: {:.0} lx (shadows: {}) | Ambient: {:.0} lx",
+                            cfg.star_a_base_illuminance_lux, cfg.star_a_shadows_enabled,
+                            cfg.star_b_base_illuminance_lux, cfg.star_b_shadows_enabled,
+                            cfg.ambient_illuminance_lux.unwrap_or(360.0)));
+                        console.logs.push("Commands: star <a|b> <lux> | star <a|b> color <hex> | star <a|b> shadows <on|off> | dualshadows".into());
+                    }
+                } else {
+                    console.logs.push("[Notice] Binary sky system is active in client world.".into());
+                }
+            }
+            "dualshadows" | "dualshadow" => {
+                if let Some(ref mut cfg) = sky_config {
+                    cfg.star_a_base_illuminance_lux = 70_000.0;
+                    cfg.star_b_base_illuminance_lux = 55_000.0;
+                    cfg.star_a_color_override = Some(Color::srgb(1.0, 0.98, 0.92));
+                    cfg.star_b_color_override = Some(crate::binary_sky::parse_color_spec("ff5400").unwrap());
+                    cfg.star_a_shadows_enabled = true;
+                    cfg.star_b_shadows_enabled = true;
+                    cfg.ambient_illuminance_lux = Some(220.0);
+                    console.logs.push("[BinarySky] Dual shadow maps activated with high-contrast penumbras!".into());
+                    console.logs.push("  - Host Star A: 70k lx (Crisp solar white, sharp shadow)".into());
+                    console.logs.push("  - Companion Star B: 55k lx (Blaze orange #ff5400, warm shadow)".into());
+                    console.logs.push("  - Ambient Fill: 220 lx (Preserves deep colored penumbra cross-shadows)".into());
+                }
+            }
+            "ambient" => {
+                if let Some(ref mut cfg) = sky_config {
+                    if let Some(arg) = tokens.get(1) {
+                        if arg.eq_ignore_ascii_case("reset") || arg.eq_ignore_ascii_case("auto") {
+                            cfg.ambient_illuminance_lux = None;
+                            console.logs.push("[BinarySky] Ambient light reset to automatic atmospheric scattering scaling (2.5 - 360 lx).".into());
+                        } else if let Ok(lux) = arg.parse::<f32>() {
+                            cfg.ambient_illuminance_lux = Some(lux.max(0.0));
+                            console.logs.push(format!("[BinarySky] Ambient light override set to {:.0} lx. (Lower values make dual shadows deeper)", lux));
+                        } else {
+                            console.logs.push("[Syntax Error] Usage: ambient <lux> (e.g. ambient 200, ambient 450, ambient reset)".into());
+                        }
+                    } else {
+                        let cur = cfg.ambient_illuminance_lux.map(|v| format!("{:.0} lx (override)", v)).unwrap_or_else(|| "Auto (~2.5 - 360 lx)".into());
+                        console.logs.push(format!("[BinarySky] Current ambient light: {}. Usage: ambient <lux> (e.g. 200) | ambient reset", cur));
+                    }
+                }
+            }
+            "starsize" => {
+                if let Some(ref mut cfg) = sky_config {
+                    if let Some(scale) = tokens.get(1).and_then(|s| s.parse::<f32>().ok()) {
+                        cfg.starfield_scale = scale.clamp(0.05, 5.0);
+                        console.logs.push(format!("[BinarySky] Cosmic starfield point size scale set to {:.2}x (pinpoint stars).", cfg.starfield_scale));
+                    } else {
+                        console.logs.push(format!("[BinarySky] Current starfield scale: {:.2}x. Usage: starsize <0.1 - 3.0> (e.g. starsize 0.5, starsize 1.0)", cfg.starfield_scale));
+                    }
+                }
+            }
+            "sunset" => {
+                let duration = sky_config.as_ref().map(|c| c.day_duration_seconds as f64).unwrap_or(1440.0);
+                if let Some(ref mut eph) = ephemeris {
+                    // 18.2 hours: Low setting solar contact (Blaze Orange #ff5400 & Hot Fuchsia #ff0054)
+                    let frac = ((18.2_f64 / 24.0) - 0.5).rem_euclid(1.0);
+                    eph.simulation_time_seconds = duration * frac;
+                    eph.diurnal_angle = (frac * 2.0 * std::f64::consts::PI) as f32;
+                }
+                let _ = conn.db.reducers.admin_set_time(18.2);
+                console.logs.push("[Admin] Time set to SUNSET (18.2h). Horizon glowing in Blaze Orange (#ff5400) & Hot Fuchsia (#ff0054).".into());
+            }
+            "dusk" | "twilight" => {
+                let duration = sky_config.as_ref().map(|c| c.day_duration_seconds as f64).unwrap_or(1440.0);
+                if let Some(ref mut eph) = ephemeris {
+                    // 19.3 hours: Nautical twilight (Dark Raspberry #9e0059 & Navy Electric #390099)
+                    let frac = ((19.3_f64 / 24.0) - 0.5).rem_euclid(1.0);
+                    eph.simulation_time_seconds = duration * frac;
+                    eph.diurnal_angle = (frac * 2.0 * std::f64::consts::PI) as f32;
+                }
+                let _ = conn.db.reducers.admin_set_time(19.3);
+                console.logs.push("[Admin] Time set to DUSK (19.3h). Horizon glowing in Dark Raspberry (#9e0059) & Navy Electric (#390099).".into());
+            }
+            "dawn" => {
+                let duration = sky_config.as_ref().map(|c| c.day_duration_seconds as f64).unwrap_or(1440.0);
+                if let Some(ref mut eph) = ephemeris {
+                    // 05.8 hours: Sunrise (Navy Electric into Blaze Orange & Amber Gold)
+                    let frac = ((5.8_f64 / 24.0) - 0.5).rem_euclid(1.0);
+                    eph.simulation_time_seconds = duration * frac;
+                    eph.diurnal_angle = (frac * 2.0 * std::f64::consts::PI) as f32;
+                }
+                let _ = conn.db.reducers.admin_set_time(5.8);
+                console.logs.push("[Admin] Time set to DAWN (05.8h). Sunrise palette: Navy Electric -> Hot Fuchsia -> Blaze Orange -> Amber Gold.".into());
+            }
+            "palette" => {
+                console.logs.push("--- S-TYPE ATMOSPHERIC COLOR FAMILY ---".into());
+                console.logs.push("  --navy-electric:   #390099 (Astronomical night / cosmic starlight)".into());
+                console.logs.push("  --dark-raspberry:  #9e0059 (Nautical twilight / Belt of Venus)".into());
+                console.logs.push("  --hot-fuchsia:     #ff0054 (Civil dusk horizon glow)".into());
+                console.logs.push("  --blaze-orange:    #ff5400 (Low setting solar contact)".into());
+                console.logs.push("  --amber-gold:      #ffbd00 (Golden hour atmospheric scattering)".into());
+                console.logs.push("Commands: 'sunset' (18.2h), 'dusk' (19.3h), 'night' (00:00), 'noon' (12:00), 'dawn' (05.8h)".into());
+            }
             "help" => {
                 console.logs.push("--- PLAYTESTING COMMAND DIRECTORY ---".into());
                 console.logs.push("giveitem <Item> [amt]  : Grants item (Press [Tab] to auto-fill)".into());
@@ -1631,7 +1827,15 @@ pub fn handle_console_input(
                 console.logs.push("heal [amt]             : Restores player health points".into());
                 console.logs.push("god                    : Sets health to 99999 HP".into());
                 console.logs.push("time <0-24>            : Sets in-game world clock ([ [ ] and [ ] ])".into());
-                console.logs.push("day / night            : Quick toggle High Noon / Midnight [F8]".into());
+                console.logs.push("day / noon / night     : Quick toggle High Noon / Midnight [F8]".into());
+                console.logs.push("sunset / dusk / dawn   : Jumps to sunset & twilight palette transitions".into());
+                console.logs.push("palette                : Prints active S-type atmospheric color family".into());
+                console.logs.push("star <a|b> <lux>       : Sets Star A or Star B illuminance in lux".into());
+                console.logs.push("star <a|b> color <hex> : Sets Star A/B direct light color override".into());
+                console.logs.push("star <a|b> shadows <on>: Toggles shadow casting for Star A or B".into());
+                console.logs.push("dualshadows            : Activates high-contrast dual shadow maps preset".into());
+                console.logs.push("ambient <lux>          : Adjusts ambient light fill (deeper shadows)".into());
+                console.logs.push("starsize <scale>       : Scales celestial starfield points of light".into());
                 console.logs.push("weather <clear|aurora> : Sets atmospheric weather preset [F9]".into());
                 console.logs.push("aurora / rain / haze   : Direct weather command shortcuts".into());
                 console.logs.push("timescale <speed>      : Sets cycle rate (e.g. 1.0, 60.0) [ - / = ]".into());

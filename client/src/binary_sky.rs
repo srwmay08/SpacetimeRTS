@@ -54,6 +54,74 @@ use parry3d::shape::Ball as ParryBall;
 // 1. ASTRONOMICAL ENUMS & DATA STRUCTURES
 // ============================================================================
 
+/// Canonical sunset & twilight color palette for S-type planetary atmosphere:
+/// --navy-electric: #390099ff;
+/// --dark-raspberry: #9e0059ff;
+/// --hot-fuchsia: #ff0054ff;
+/// --blaze-orange: #ff5400ff;
+/// --amber-gold: #ffbd00ff;
+pub const COLOR_NAVY_ELECTRIC: Vec3 = Vec3::new(0.2235, 0.0, 0.6000);   // #390099
+pub const COLOR_DARK_RASPBERRY: Vec3 = Vec3::new(0.6196, 0.0, 0.3490);  // #9e0059
+pub const COLOR_HOT_FUCHSIA: Vec3 = Vec3::new(1.0, 0.0, 0.3294);       // #ff0054
+pub const COLOR_BLAZE_ORANGE: Vec3 = Vec3::new(1.0, 0.3294, 0.0);      // #ff5400
+pub const COLOR_AMBER_GOLD: Vec3 = Vec3::new(1.0, 0.7412, 0.0);        // #ffbd00
+
+/// Parses a hex string (e.g. "ff5400", "#390099") or preset name into a Bevy `Color`.
+pub fn parse_color_spec(input: &str) -> Option<Color> {
+    let clean = input.trim().to_lowercase();
+    let stripped = clean.trim_start_matches('#');
+    if stripped.len() == 6 {
+        let r = u8::from_str_radix(&stripped[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&stripped[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&stripped[4..6], 16).ok()?;
+        return Some(Color::srgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0));
+    }
+    match clean.as_str() {
+        "navy" | "electric" | "navyelectric" => Some(Color::srgb(0.2235, 0.0, 0.6000)),
+        "raspberry" | "darkraspberry" => Some(Color::srgb(0.6196, 0.0, 0.3490)),
+        "fuchsia" | "hotfuchsia" => Some(Color::srgb(1.0, 0.0, 0.3294)),
+        "blaze" | "orange" | "blazeorange" => Some(Color::srgb(1.0, 0.3294, 0.0)),
+        "amber" | "gold" | "ambergold" => Some(Color::srgb(1.0, 0.7412, 0.0)),
+        "white" | "solar" => Some(Color::srgb(1.0, 0.98, 0.92)),
+        "cyan" | "sky" => Some(Color::srgb(0.55, 0.85, 1.0)),
+        _ => None,
+    }
+}
+
+/// Evaluates the palette-based twilight transition color given dominant stellar elevation:
+pub fn evaluate_sunset_palette_color(elevation_radians: f32) -> Vec3 {
+    let deg = elevation_radians.to_degrees();
+    if deg >= 10.0 {
+        // Full daytime sky horizon (clear atmospheric Rayleigh blue)
+        Vec3::new(0.52, 0.68, 0.88)
+    } else if deg >= 4.5 {
+        // Late golden hour: Daytime blue blending into Amber Gold (#ffbd00)
+        let t = (10.0 - deg) / 5.5;
+        Vec3::new(0.52, 0.68, 0.88).lerp(COLOR_AMBER_GOLD, t)
+    } else if deg >= 1.0 {
+        // Low sunset: Amber Gold (#ffbd00) blending into Blaze Orange (#ff5400)
+        let t = (4.5 - deg) / 3.5;
+        COLOR_AMBER_GOLD.lerp(COLOR_BLAZE_ORANGE, t)
+    } else if deg >= -2.5 {
+        // Solar contact & civil dusk: Blaze Orange (#ff5400) into Hot Fuchsia (#ff0054)
+        let t = (1.0 - deg) / 3.5;
+        COLOR_BLAZE_ORANGE.lerp(COLOR_HOT_FUCHSIA, t)
+    } else if deg >= -6.5 {
+        // Nautical twilight / Belt of Venus: Hot Fuchsia (#ff0054) into Dark Raspberry (#9e0059)
+        let t = (-2.5 - deg) / 4.0;
+        COLOR_HOT_FUCHSIA.lerp(COLOR_DARK_RASPBERRY, t)
+    } else if deg >= -12.0 {
+        // Astronomical twilight: Dark Raspberry (#9e0059) into Navy Electric (#390099)
+        let t = (-6.5 - deg) / 5.5;
+        COLOR_DARK_RASPBERRY.lerp(COLOR_NAVY_ELECTRIC, t)
+    } else {
+        // True deep night: Deep Navy Electric (#390099) atmospheric starlight
+        let t = ((-12.0 - deg) / 6.0).clamp(0.0, 1.0);
+        let deep_navy = COLOR_NAVY_ELECTRIC * 0.40 + Vec3::new(0.02, 0.015, 0.06);
+        COLOR_NAVY_ELECTRIC.lerp(deep_navy, t)
+    }
+}
+
 /// Dynamic sky illumination condition based on stellar elevation thresholds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DynamicSkyState {
@@ -160,12 +228,28 @@ pub struct BinarySkyConfig {
     // ------------------------------------------------------------------------
     /// Effective blackbody temperature of Host Star A (Kelvin, G-type: 5800K).
     pub star_a_temperature_kelvin: f32,
-    /// Base extraterrestrial solar illuminance for Star A at 1 AU in lux (110,000 lx).
+    /// Base extraterrestrial solar illuminance for Star A in lux (default: 75,000 lx).
     pub star_a_base_illuminance_lux: f32,
     /// Effective blackbody temperature of Companion Star B (Kelvin, K/M dwarf: 3600K).
     pub star_b_temperature_kelvin: f32,
-    /// Base extraterrestrial solar illuminance for Star B at mean distance in lux (26,000 lx).
+    /// Base extraterrestrial solar illuminance for Star B in lux (default: 55,000 lx).
     pub star_b_base_illuminance_lux: f32,
+
+    // ------------------------------------------------------------------------
+    // Dynamic Runtime Lighting & Console Controls
+    // ------------------------------------------------------------------------
+    /// Manual direct color override for Star A (None = physically based Planck/Rayleigh).
+    pub star_a_color_override: Option<Color>,
+    /// Manual direct color override for Star B (None = physically based Planck/Mie).
+    pub star_b_color_override: Option<Color>,
+    /// Runtime shadow toggle for Star A DirectionalLight (default: true).
+    pub star_a_shadows_enabled: bool,
+    /// Runtime shadow toggle for Star B DirectionalLight (default: true).
+    pub star_b_shadows_enabled: bool,
+    /// Manual ambient light illuminance override in lux (None = auto-scaled 2.5 - 380 lx).
+    pub ambient_illuminance_lux: Option<f32>,
+    /// Dynamic scale factor for cosmic starfield points of light (default: 1.0).
+    pub starfield_scale: f32,
 }
 
 impl Default for BinarySkyConfig {
@@ -189,9 +273,15 @@ impl Default for BinarySkyConfig {
             mie_absorption_coefficient: 0.0044,
             ground_albedo: 0.18,
             star_a_temperature_kelvin: 5800.0,
-            star_a_base_illuminance_lux: 110_000.0,
+            star_a_base_illuminance_lux: 75_000.0,
             star_b_temperature_kelvin: 3600.0,
-            star_b_base_illuminance_lux: 26_000.0,
+            star_b_base_illuminance_lux: 55_000.0,
+            star_a_color_override: None,
+            star_b_color_override: None,
+            star_a_shadows_enabled: true,
+            star_b_shadows_enabled: true,
+            ambient_illuminance_lux: None,
+            starfield_scale: 1.0,
         }
     }
 }
@@ -541,39 +631,40 @@ pub fn create_billboard_starfield_mesh(star_count: usize) -> Mesh {
         let right = dir.cross(up).normalize();
         let star_up = right.cross(dir).normalize();
 
-        // Astrometric magnitude hierarchy:
-        // Top 5% are prominent guide stars (3.5m - 5.5m)
-        // Next 20% are medium navigational stars (2.2m - 3.2m)
-        // Remaining 75% are background field stars (1.4m - 2.0m)
-        let size = if u3 > 0.95 {
-            3.5 + u4 * 2.0
-        } else if u3 > 0.75 {
-            2.2 + u4 * 1.0
+        // Astrometric magnitude hierarchy for pinpoint stars:
+        // Top 3% are prominent guide stars (0.32m - 0.44m)
+        // Next 18% are medium navigational stars (0.20m - 0.28m)
+        // Remaining 79% are background field stars (0.11m - 0.17m)
+        let size = if u3 > 0.97 {
+            0.32 + u4 * 0.12
+        } else if u3 > 0.82 {
+            0.20 + u4 * 0.08
         } else {
-            1.4 + u4 * 0.6
+            0.11 + u4 * 0.06
         };
 
         let color_idx = (xorshift() % (spectral_colors.len() as u64)) as usize;
         let mut c = spectral_colors[color_idx];
-        if u3 <= 0.75 {
-            let dim = 0.60 + u4 * 0.40;
+        if u3 <= 0.82 {
+            let dim = 0.65 + u4 * 0.35;
             c[0] *= dim;
             c[1] *= dim;
             c[2] *= dim;
         }
 
-        // Diamond quad (4 vertices, 2 triangles) strictly perpendicular to view ray
-        let v_top = center + star_up * size;
-        let v_bottom = center - star_up * size;
-        let v_left = center - right * (size * 0.65);
-        let v_right = center + right * (size * 0.65);
+        // Compact symmetric pinprick quad facing observer at origin
+        let half = size * 0.5;
+        let v0 = center - right * half + star_up * half;
+        let v1 = center + right * half + star_up * half;
+        let v2 = center + right * half - star_up * half;
+        let v3 = center - right * half - star_up * half;
 
         let base_idx = (i * 4) as u32;
 
-        positions.push([v_top.x, v_top.y, v_top.z]);
-        positions.push([v_left.x, v_left.y, v_left.z]);
-        positions.push([v_bottom.x, v_bottom.y, v_bottom.z]);
-        positions.push([v_right.x, v_right.y, v_right.z]);
+        positions.push([v0.x, v0.y, v0.z]);
+        positions.push([v1.x, v1.y, v1.z]);
+        positions.push([v2.x, v2.y, v2.z]);
+        positions.push([v3.x, v3.y, v3.z]);
 
         let norm = [-dir.x, -dir.y, -dir.z];
         normals.push(norm);
@@ -581,10 +672,10 @@ pub fn create_billboard_starfield_mesh(star_count: usize) -> Mesh {
         normals.push(norm);
         normals.push(norm);
 
-        uvs.push([0.5, 1.0]);
-        uvs.push([0.0, 0.5]);
-        uvs.push([0.5, 0.0]);
-        uvs.push([1.0, 0.5]);
+        uvs.push([0.0, 1.0]);
+        uvs.push([1.0, 1.0]);
+        uvs.push([1.0, 0.0]);
+        uvs.push([0.0, 0.0]);
 
         colors.push(c);
         colors.push(c);
@@ -1192,13 +1283,16 @@ pub fn update_atmospheric_scattering_and_cache(
     let sky_scatter_a = config.rayleigh_scattering_coefficients * (cache.star_a_illuminance_lux * 0.00002) * phase_a;
     let sky_scatter_b = Vec3::new(0.024, 0.016, 0.008) * (cache.star_b_illuminance_lux * 0.00003) * phase_b;
 
-    // Deep starlight floor so the night sky is atmospheric dark indigo rather than pitch black
-    let night_starlight = Vec3::new(0.0045, 0.0065, 0.0120);
+    // Deep starlight floor so the night sky is atmospheric navy electric rather than pitch black
+    let night_starlight = COLOR_NAVY_ELECTRIC * 0.018 + Vec3::new(0.002, 0.001, 0.005);
     cache.zenith_radiance = (sky_scatter_a + sky_scatter_b + night_starlight) * cache.conjunction_amplification;
 
     let horizon_scatter_a = filtered_rgb_a * (cache.star_a_illuminance_lux * 0.00004);
     let horizon_scatter_b = filtered_rgb_b * (cache.star_b_illuminance_lux * 0.00005);
-    cache.horizon_radiance = (horizon_scatter_a + horizon_scatter_b + night_starlight * 1.5) * cache.conjunction_amplification;
+    let max_elev = effective_elev_a.max(effective_elev_b);
+    let sunset_chrom = evaluate_sunset_palette_color(max_elev);
+    let chromatic_horizon = sunset_chrom * ((cache.star_a_illuminance_lux + cache.star_b_illuminance_lux) * 0.000035).max(0.006);
+    cache.horizon_radiance = (horizon_scatter_a + horizon_scatter_b + chromatic_horizon + night_starlight * 1.5) * cache.conjunction_amplification;
 
     // ------------------------------------------------------------------------
     // 4. Scene Ambient Light & Ground Bounce Irradiance
@@ -1212,8 +1306,10 @@ pub fn update_atmospheric_scattering_and_cache(
         (ambient_rgb.z / max_c).clamp(0.0, 1.0),
     );
 
-    // Total ambient illuminance in lux (minimum night floor: 2.5 lx for comfortable visibility)
-    let total_lux = (cache.star_a_illuminance_lux * 0.08 + cache.star_b_illuminance_lux * 0.10).max(2.5);
+    // Total ambient illuminance in lux (scaled appropriately to prevent washing out dual penumbras)
+    let total_lux = config.ambient_illuminance_lux.unwrap_or_else(|| {
+        ((cache.star_a_illuminance_lux + cache.star_b_illuminance_lux) * 0.0028 + 2.5).clamp(2.5, 360.0)
+    });
     cache.ambient_brightness_lux = total_lux;
 
     let ground_irradiance = ambient_rgb * config.ground_albedo * 0.5;
@@ -1245,6 +1341,7 @@ pub fn determine_shadow_caster_priority(elev_a_deg: f32, elev_b_deg: f32) -> Sha
 
 /// Synchronizes Bevy's `DirectionalLight` components and `AmbientLight` resource.
 pub fn sync_stellar_directional_lights(
+    config: Res<BinarySkyConfig>,
     ephemeris: Res<BinaryEphemerisState>,
     cache: Res<AtmosphericRadianceCache>,
     mut ambient_light: ResMut<AmbientLight>,
@@ -1252,13 +1349,13 @@ pub fn sync_stellar_directional_lights(
     mut star_b_query: Query<(&mut DirectionalLight, &mut Transform), (With<SecondaryStar>, Without<PrimaryStar>)>,
 ) {
     ambient_light.color = cache.ambient_color;
-    ambient_light.brightness = cache.ambient_brightness_lux;
+    ambient_light.brightness = config.ambient_illuminance_lux.unwrap_or(cache.ambient_brightness_lux);
 
     if let Ok((mut light_a, mut transform_a)) = star_a_query.get_single_mut() {
-        light_a.color = cache.star_a_color;
+        light_a.color = config.star_a_color_override.unwrap_or(cache.star_a_color);
         light_a.illuminance = cache.star_a_illuminance_lux;
-        // Simultaneous dual shadow casting: active whenever above horizon
-        light_a.shadows_enabled = ephemeris.star_a_elevation > -0.05;
+        // Simultaneous dual shadow casting: active whenever above horizon and enabled
+        light_a.shadows_enabled = config.star_a_shadows_enabled && ephemeris.star_a_elevation > -0.05;
 
         let target_dir = -ephemeris.star_a_direction;
         if target_dir.length_squared() > 1e-4 {
@@ -1267,10 +1364,10 @@ pub fn sync_stellar_directional_lights(
     }
 
     if let Ok((mut light_b, mut transform_b)) = star_b_query.get_single_mut() {
-        light_b.color = cache.star_b_color;
+        light_b.color = config.star_b_color_override.unwrap_or(cache.star_b_color);
         light_b.illuminance = cache.star_b_illuminance_lux;
-        // Simultaneous dual shadow casting: active whenever above horizon
-        light_b.shadows_enabled = ephemeris.star_b_elevation > -0.05;
+        // Simultaneous dual shadow casting: active whenever above horizon and enabled
+        light_b.shadows_enabled = config.star_b_shadows_enabled && ephemeris.star_b_elevation > -0.05;
 
         let target_dir = -ephemeris.star_b_direction;
         if target_dir.length_squared() > 1e-4 {
@@ -1283,6 +1380,7 @@ pub fn sync_stellar_directional_lights(
 /// aurora ribbons, and precipitation streaks relative to the active camera.
 pub fn sync_celestial_visuals(
     time: Res<Time>,
+    config: Res<BinarySkyConfig>,
     ephemeris: Res<BinaryEphemerisState>,
     cache: Res<AtmosphericRadianceCache>,
     weather: Res<AtmosphericWeather>,
@@ -1314,20 +1412,17 @@ pub fn sync_celestial_visuals(
             tf_a.look_at(cam_pos, Vec3::Y);
             if let Some(mat) = materials.get_mut(mat_handle_a) {
                 let chrom = if ephemeris.star_a_elevation > 0.15 {
-                    Color::srgb(1.0, 0.98, 0.92)
-                } else if ephemeris.star_a_elevation > 0.0 {
-                    let t = ephemeris.star_a_elevation / 0.15;
-                    Color::srgb(1.0, 0.45 + 0.53 * t, 0.10 + 0.82 * t)
+                    config.star_a_color_override.unwrap_or(Color::srgb(1.0, 0.98, 0.92))
                 } else {
-                    let t = ((ephemeris.star_a_elevation + 0.10) / 0.10).clamp(0.0, 1.0);
-                    Color::srgb(1.0, 0.15 + 0.30 * t, 0.04 + 0.06 * t)
+                    let palette_rgb = evaluate_sunset_palette_color(ephemeris.star_a_elevation);
+                    Color::srgb(palette_rgb.x, palette_rgb.y, palette_rgb.z)
                 };
                 mat.base_color = chrom;
             }
         }
     }
 
-    // 2. Sync Companion Star B Disk (Amber dwarf with crimson horizon shift)
+    // 2. Sync Companion Star B Disk (Amber dwarf with blaze-orange & fuchsia horizon shift)
     if let Ok((mut tf_b, mut vis_b, mat_handle_b)) = celestial_set.p2().get_single_mut() {
         if ephemeris.star_b_elevation < -0.10 {
             *vis_b = Visibility::Hidden;
@@ -1337,22 +1432,20 @@ pub fn sync_celestial_visuals(
             tf_b.look_at(cam_pos, Vec3::Y);
             if let Some(mat) = materials.get_mut(mat_handle_b) {
                 let chrom = if ephemeris.star_b_elevation > 0.15 {
-                    Color::srgb(1.0, 0.65, 0.28)
-                } else if ephemeris.star_b_elevation > 0.0 {
-                    let t = ephemeris.star_b_elevation / 0.15;
-                    Color::srgb(1.0, 0.30 + 0.35 * t, 0.08 + 0.20 * t)
+                    config.star_b_color_override.unwrap_or(Color::srgb(1.0, 0.60, 0.22))
                 } else {
-                    let t = ((ephemeris.star_b_elevation + 0.10) / 0.10).clamp(0.0, 1.0);
-                    Color::srgb(0.95, 0.12 + 0.18 * t, 0.03 + 0.05 * t)
+                    let palette_rgb = evaluate_sunset_palette_color(ephemeris.star_b_elevation);
+                    Color::srgb(palette_rgb.x, palette_rgb.y, palette_rgb.z)
                 };
                 mat.base_color = chrom;
             }
         }
     }
 
-    // 3. Sync Cosmic Starfield (Camera-facing diamond stars glittering at night)
+    // 3. Sync Cosmic Starfield (Camera-facing pinprick stars glittering at night)
     if let Ok((mut tf_stars, mut vis_stars, mat_handle_stars)) = celestial_set.p3().get_single_mut() {
         tf_stars.translation = cam_pos;
+        tf_stars.scale = Vec3::splat(config.starfield_scale);
         let total_sun_lux = cache.star_a_illuminance_lux + cache.star_b_illuminance_lux;
         let night_factor = (1.0 - (total_sun_lux / 16000.0).clamp(0.0, 1.0)).powi(2);
         if night_factor <= 0.02 {
@@ -1361,6 +1454,7 @@ pub fn sync_celestial_visuals(
             *vis_stars = Visibility::Visible;
             if let Some(mat) = materials.get_mut(mat_handle_stars) {
                 mat.base_color = Color::srgba(1.0, 1.0, 1.0, night_factor);
+                mat.emissive = LinearRgba::new(night_factor * 4.0, night_factor * 4.0, night_factor * 4.0, 1.0);
             }
         }
     }
@@ -1492,20 +1586,21 @@ pub fn handle_sky_time_and_weather_inputs(
 }
 
 /// Updates camera clear color and volumetric atmospheric distance fog
-/// matching the unified participating medium's extinction profiles.
+/// matching the unified participating medium's extinction profiles and sunset palette.
 pub fn update_atmospheric_cameras_and_fog(
-    cache: Res<AtmosphericRadianceCache>,
+    ephemeris: Res<BinaryEphemerisState>,
+    _cache: Res<AtmosphericRadianceCache>,
     weather: Res<AtmosphericWeather>,
     mut commands: Commands,
     camera_query: Query<Entity, With<AtmosphericCamera>>,
     mut clear_color: ResMut<ClearColor>,
 ) {
-    let horizon = cache.horizon_radiance;
-    let max_h = horizon.x.max(horizon.y).max(horizon.z).max(1e-4);
+    let max_elev = ephemeris.star_a_elevation.max(ephemeris.star_b_elevation);
+    let palette_rgb = evaluate_sunset_palette_color(max_elev);
     let mut horizon_color = Color::srgb(
-        (horizon.x / max_h).clamp(0.0, 1.0),
-        (horizon.y / max_h).clamp(0.0, 1.0),
-        (horizon.z / max_h).clamp(0.0, 1.0),
+        palette_rgb.x.clamp(0.0, 1.0),
+        palette_rgb.y.clamp(0.0, 1.0),
+        palette_rgb.z.clamp(0.0, 1.0),
     );
 
     if weather.weather_type == WeatherType::OvercastPrecipitation {
@@ -1823,12 +1918,11 @@ mod tests {
         assert_eq!(aurora_tf.translation.x, active_pos.x);
         assert_eq!(aurora_tf.translation.z, active_pos.z);
 
-        // 3. Verify ClearColor is sapphire night sky color (normalized starlight)
+        // 3. Verify ClearColor is electric navy night sky color from the palette
         let clear_col = app.world().resource::<ClearColor>().0;
         let srgba = clear_col.to_srgba();
-        assert!((srgba.blue - 1.0).abs() < 0.05, "Blue channel should be normalized to ~1.0 at night, got {}", srgba.blue);
-        assert!(srgba.green > 0.45 && srgba.green < 0.65, "Green channel should be ~0.54 at night, got {}", srgba.green);
-        assert!(srgba.red > 0.30 && srgba.red < 0.45, "Red channel should be ~0.38 at night, got {}", srgba.red);
+        assert!(srgba.blue > 0.25, "Blue channel should be prominent in electric navy night, got {}", srgba.blue);
+        assert!(srgba.red > 0.08, "Red channel should have electric navy violet tint, got {}", srgba.red);
     }
 
     #[test]
