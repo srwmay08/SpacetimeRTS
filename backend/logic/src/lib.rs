@@ -5,7 +5,7 @@
 use noise::{NoiseFn, Perlin};
 
 // ----------------------------------------------------------------------------
-// INVENTORY
+// INVENTORY & ITEM DISCOVERY
 // ----------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -18,6 +18,7 @@ pub struct InventorySlot {
 pub struct Inventory {
     pub entity_id: u64,
     pub slots: Vec<InventorySlot>,
+    pub discovered_items: Vec<String>,
 }
 
 impl Inventory {
@@ -25,10 +26,19 @@ impl Inventory {
         Self {
             entity_id,
             slots: Vec::new(),
+            discovered_items: Vec::new(),
         }
     }
 
     pub fn add_item(&mut self, item_type: &str, mut amount: u32) {
+        if item_type.is_empty() || amount == 0 {
+            return;
+        }
+
+        if !self.discovered_items.iter().any(|d| d == item_type) {
+            self.discovered_items.push(item_type.to_string());
+        }
+
         const MAX_STACK: u32 = 50;
         const MAX_SLOTS: usize = 16;
 
@@ -97,6 +107,113 @@ impl Inventory {
     pub fn has_item(&self, item_type: &str, count: u32) -> bool {
         self.count_item(item_type) >= count
     }
+
+    pub fn is_discovered(&self, item_type: &str) -> bool {
+        self.discovered_items.iter().any(|d| d == item_type)
+    }
+}
+
+// ----------------------------------------------------------------------------
+// RECIPES & CRAFTING
+// ----------------------------------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecipeIngredient {
+    pub item_type: String,
+    pub count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecipeDefinition {
+    pub recipe_id: String,
+    pub output_item: String,
+    pub output_count: u32,
+    pub required_station: String,
+    pub requires_roof: bool,
+    pub ingredients: Vec<RecipeIngredient>,
+}
+
+impl RecipeDefinition {
+    pub fn new(
+        recipe_id: &str,
+        output_item: &str,
+        output_count: u32,
+        required_station: &str,
+        requires_roof: bool,
+        ingredients: Vec<(&str, u32)>,
+    ) -> Self {
+        Self {
+            recipe_id: recipe_id.to_string(),
+            output_item: output_item.to_string(),
+            output_count,
+            required_station: required_station.to_string(),
+            requires_roof,
+            ingredients: ingredients
+                .into_iter()
+                .map(|(item, count)| RecipeIngredient {
+                    item_type: item.to_string(),
+                    count,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn can_craft(
+        &self,
+        inv: &Inventory,
+        nearby_station: Option<&str>,
+        is_under_roof: bool,
+    ) -> Result<(), &'static str> {
+        if self.requires_roof && !is_under_roof {
+            return Err("Requires roof/shelter");
+        }
+
+        if self.required_station != "None" {
+            match nearby_station {
+                Some(station) if station == self.required_station => {}
+                _ => return Err("Missing required crafting station"),
+            }
+        }
+
+        for ing in &self.ingredients {
+            if !inv.has_item(&ing.item_type, ing.count) {
+                return Err("Missing required ingredients");
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn craft(
+        &self,
+        inv: &mut Inventory,
+        nearby_station: Option<&str>,
+        is_under_roof: bool,
+    ) -> Result<(), &'static str> {
+        self.can_craft(inv, nearby_station, is_under_roof)?;
+
+        for ing in &self.ingredients {
+            inv.remove_item(&ing.item_type, ing.count);
+        }
+
+        inv.add_item(&self.output_item, self.output_count);
+        Ok(())
+    }
+}
+
+pub fn get_canonical_recipes() -> Vec<RecipeDefinition> {
+    vec![
+        RecipeDefinition::new("Hammer", "Hammer", 1, "None", false, vec![("Branch", 1), ("LooseStone", 1)]),
+        RecipeDefinition::new("Stone Axe", "Stone Axe", 1, "None", false, vec![("Branch", 1), ("Flint", 1)]),
+        RecipeDefinition::new("Pickaxe", "Pickaxe", 1, "None", false, vec![("Branch", 2), ("Flint", 2)]),
+        RecipeDefinition::new("Club", "Club", 1, "None", false, vec![("Branch", 2)]),
+        RecipeDefinition::new("Torch", "Torch", 1, "None", false, vec![("Branch", 1), ("Resin", 1)]),
+        RecipeDefinition::new("Crude Bow", "Crude Bow", 1, "Workbench", false, vec![("Wood", 10), ("Leather Scraps", 4)]),
+        RecipeDefinition::new("Flint Arrow", "Flint Arrow", 20, "Workbench", false, vec![("Wood", 8), ("Flint", 2)]),
+        RecipeDefinition::new("Wood Arrow", "Wood Arrow", 20, "None", false, vec![("Wood", 8)]),
+        RecipeDefinition::new("Wooden Shield", "Wooden Shield", 1, "Workbench", false, vec![("Wood", 10), ("Leather Scraps", 2)]),
+        RecipeDefinition::new("Flint Spear", "Flint Spear", 1, "Workbench", false, vec![("Wood", 6), ("Flint", 2), ("Leather Scraps", 2)]),
+    ]
 }
 
 // ----------------------------------------------------------------------------
@@ -139,6 +256,10 @@ pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     y
 }
 
+pub fn world_to_chunk_coord(pos: f32, chunk_size: f32) -> i32 {
+    (pos / chunk_size).floor() as i32
+}
+
 // ----------------------------------------------------------------------------
 // RESOURCE NODES
 // ----------------------------------------------------------------------------
@@ -160,14 +281,17 @@ impl ResourceNode {
         let (health, required_tool) = match node_type {
             "Tree" => {
                 let health = (3.0 * scale) as u32;
-                let tool = if scale > 1.5 { "Axe" } else { "None" };
+                let tool = if scale > 1.2 { "Stone Axe" } else { "None" };
                 (health, tool)
             }
             "Rock" => {
                 let health = (4.0 * scale) as u32;
-                (health, "None")
+                (health, "Pickaxe")
             }
             "Bush" => (1, "None"),
+            "Branch" => (1, "None"),
+            "Flint" => (1, "None"),
+            "LooseStone" => (1, "None"),
             _ => (1, "None"),
         };
 
@@ -195,19 +319,20 @@ impl ResourceNode {
         self.health = self.health.saturating_sub(1);
 
         if self.health == 0 {
-            // Node destroyed — return full yield
             let (item, base) = match self.node_type.as_str() {
-                "Tree" => ("Wood", 5),
-                "Rock" => ("Ore", 3),
+                "Tree" => ("Wood", 6),
+                "Rock" => ("Stone", 4),
+                "Branch" => ("Branch", 1),
+                "Flint" => ("Flint", 1),
+                "LooseStone" => ("LooseStone", 1),
                 _ => ("Wood", 1),
             };
             let amount = (base as f32 * self.scale).ceil() as u32;
             Some((item, amount))
         } else {
-            // Partial harvest
             let item = match self.node_type.as_str() {
                 "Tree" => "Wood",
-                "Rock" => "Ore",
+                "Rock" => "Stone",
                 _ => "Berry",
             };
             Some((item, 1))
@@ -216,7 +341,7 @@ impl ResourceNode {
 }
 
 // ----------------------------------------------------------------------------
-// COMBAT
+// COMBAT & BALLISTICS
 // ----------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -251,8 +376,27 @@ pub struct Snapshot {
     pub z: f32,
 }
 
-/// Ray-sphere intersection for hitscan weapons.
-/// Returns distance to hit if ray intersects sphere, None otherwise.
+/// Linear interpolation between two snapshots for lag compensation hit registration.
+pub fn interpolate_snapshot(
+    s1: &Snapshot,
+    s2: &Snapshot,
+    target_tick: u64,
+) -> Option<(f32, f32, f32)> {
+    if target_tick < s1.tick_id || target_tick > s2.tick_id {
+        return None;
+    }
+    if s1.tick_id == s2.tick_id {
+        return Some((s1.x, s1.y, s1.z));
+    }
+    let t = (target_tick - s1.tick_id) as f32 / (s2.tick_id - s1.tick_id) as f32;
+    Some((
+        s1.x + (s2.x - s1.x) * t,
+        s1.y + (s2.y - s1.y) * t,
+        s1.z + (s2.z - s1.z) * t,
+    ))
+}
+
+/// Ray-sphere intersection for hitscan weapons and projectile sweep checks.
 pub fn ray_sphere_intersect(
     origin: (f32, f32, f32),
     dir: (f32, f32, f32),
@@ -279,8 +423,68 @@ pub fn ray_sphere_intersect(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectileKind {
+    Arrow,
+    CatapultRock,
+    TrebuchetShell,
+    BallistaSpear,
+    MagicMissile,
+}
+
+impl ProjectileKind {
+    pub fn gravity(&self) -> f32 {
+        match self {
+            Self::Arrow => 9.81,
+            Self::CatapultRock => 15.0,
+            Self::TrebuchetShell => 12.0,
+            Self::BallistaSpear => 4.5,
+            Self::MagicMissile => 0.0,
+        }
+    }
+
+    pub fn base_speed(&self) -> f32 {
+        match self {
+            Self::Arrow => 45.0,
+            Self::CatapultRock => 25.0,
+            Self::TrebuchetShell => 35.0,
+            Self::BallistaSpear => 60.0,
+            Self::MagicMissile => 30.0,
+        }
+    }
+
+    pub fn base_damage(&self) -> f32 {
+        match self {
+            Self::Arrow => 25.0,
+            Self::CatapultRock => 120.0,
+            Self::TrebuchetShell => 250.0,
+            Self::BallistaSpear => 85.0,
+            Self::MagicMissile => 40.0,
+        }
+    }
+}
+
+pub fn simulate_projectile_step(
+    pos: (f32, f32, f32),
+    vel: (f32, f32, f32),
+    kind: ProjectileKind,
+    dt: f32,
+) -> ((f32, f32, f32), (f32, f32, f32)) {
+    let new_vel = (
+        vel.0,
+        vel.1 - kind.gravity() * dt,
+        vel.2,
+    );
+    let new_pos = (
+        pos.0 + new_vel.0 * dt,
+        pos.1 + new_vel.1 * dt,
+        pos.2 + new_vel.2 * dt,
+    );
+    (new_pos, new_vel)
+}
+
 // ----------------------------------------------------------------------------
-// BUILDING
+// BUILDING & DURABILITY
 // ----------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -290,9 +494,26 @@ pub struct Structure {
     pub piece_type: String,
     pub stability: u32,
     pub is_grounded: bool,
+    pub is_blueprint: bool,
+    pub construction_progress: u32,
+    pub current_health: f32,
+    pub max_health: f32,
 }
 
 impl Structure {
+    pub fn piece_max_health(piece_type: &str) -> f32 {
+        match piece_type {
+            "Foundation" => 400.0,
+            "Wall" => 200.0,
+            "Floor" => 150.0,
+            "Roof" => 150.0,
+            "Ramp" => 250.0,
+            "Workbench" => 150.0,
+            "Campfire" => 60.0,
+            _ => 100.0,
+        }
+    }
+
     pub fn foundation() -> Self {
         Self {
             structure_id: 0,
@@ -300,6 +521,25 @@ impl Structure {
             piece_type: "Foundation".to_string(),
             stability: 100,
             is_grounded: true,
+            is_blueprint: false,
+            construction_progress: 100,
+            current_health: 400.0,
+            max_health: 400.0,
+        }
+    }
+
+    pub fn new_blueprint(structure_id: u64, parent_id: Option<u64>, piece_type: &str, stability: u32, is_grounded: bool) -> Self {
+        let max_hp = Self::piece_max_health(piece_type);
+        Self {
+            structure_id,
+            parent_id,
+            piece_type: piece_type.to_string(),
+            stability,
+            is_grounded,
+            is_blueprint: true,
+            construction_progress: 0,
+            current_health: 1.0,
+            max_health: max_hp,
         }
     }
 
@@ -320,13 +560,48 @@ impl Structure {
             return None;
         }
 
+        let max_hp = Self::piece_max_health(piece_type);
         Some(Self {
             structure_id,
             parent_id: Some(self.structure_id),
             piece_type: piece_type.to_string(),
             stability: self.stability - decay,
             is_grounded: false,
+            is_blueprint: false,
+            construction_progress: 100,
+            current_health: max_hp,
+            max_health: max_hp,
         })
+    }
+
+    pub fn contribute_construction(&mut self, percent: u32) -> bool {
+        if !self.is_blueprint {
+            return false;
+        }
+        self.construction_progress = (self.construction_progress + percent).min(100);
+        if self.construction_progress >= 100 {
+            self.is_blueprint = false;
+            self.current_health = self.max_health;
+            true
+        } else {
+            self.current_health = (self.max_health * (self.construction_progress as f32 / 100.0)).max(1.0);
+            false
+        }
+    }
+
+    pub fn repair(&mut self, amount: f32) -> f32 {
+        if self.is_blueprint {
+            return 0.0;
+        }
+        let missing = self.max_health - self.current_health;
+        let actual_repair = missing.min(amount);
+        self.current_health += actual_repair;
+        actual_repair
+    }
+
+    pub fn damage(&mut self, amount: f32) -> bool {
+        self.current_health = (self.current_health - amount).max(0.0);
+        self.current_health <= 0.0
     }
 }
 
@@ -359,7 +634,7 @@ pub fn is_stale_tick(tick_id: u64, last_processed: u64) -> bool {
 }
 
 // ----------------------------------------------------------------------------
-// AI
+// AI & FACTIONS
 // ----------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq)]
@@ -463,6 +738,15 @@ impl Peasant {
     pub fn is_carrying_max(&self, max: u32) -> bool {
         self.carrying_amount >= max
     }
+
+    pub fn note_stuck_tick(&mut self) -> bool {
+        self.consecutive_stuck_ticks += 1;
+        self.consecutive_stuck_ticks >= 10 // Flag stuck after 10 ticks
+    }
+
+    pub fn reset_stuck_ticks(&mut self) {
+        self.consecutive_stuck_ticks = 0;
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -509,6 +793,33 @@ impl PetComponent {
             stance: PetStance::Follow,
         }
     }
+
+    pub fn should_attack_target(&self, target_standing: FactionStanding, is_attacking_owner: bool) -> bool {
+        match self.stance {
+            PetStance::Aggressive => target_standing == FactionStanding::KillOnSight,
+            PetStance::Defensive => is_attacking_owner,
+            PetStance::Stay | PetStance::Follow => false,
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// DAY / NIGHT CYCLE & WORLD STATE
+// ----------------------------------------------------------------------------
+
+pub fn advance_time_of_day(current_time: f32, dt_hours: f32) -> f32 {
+    let mut t = current_time + dt_hours;
+    while t >= 24.0 {
+        t -= 24.0;
+    }
+    while t < 0.0 {
+        t += 24.0;
+    }
+    t
+}
+
+pub fn is_daylight(time_of_day: f32) -> bool {
+    time_of_day >= 6.0 && time_of_day < 20.0
 }
 
 // ----------------------------------------------------------------------------

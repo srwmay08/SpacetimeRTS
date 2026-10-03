@@ -17,6 +17,7 @@ mod inventory {
         assert_eq!(inv.slots.len(), 1);
         assert_eq!(inv.slots[0].item_type, "Wood");
         assert_eq!(inv.slots[0].count, 10);
+        assert!(inv.is_discovered("Wood"));
     }
 
     #[test]
@@ -95,10 +96,6 @@ mod inventory {
         inv.add_item("Wood", 50);
         inv.add_item("Wood", 25);
         assert!(inv.remove_item("Wood", 40));
-        // 50 + 25 = 75, remove 40 = 35 remaining
-        // First slot: 50 - 40 = 10, second slot: 25 (unchanged)
-        // But remove_item iterates and drains: slot1 50->10 (removed 40), done
-        // So we have 10 + 25 = 35 across 2 slots
         assert_eq!(inv.slots.len(), 2);
         assert_eq!(inv.count_item("Wood"), 35);
     }
@@ -132,6 +129,131 @@ mod inventory {
         assert!(inv.has_item("Wood", 20));
         assert!(!inv.has_item("Wood", 31));
         assert!(!inv.has_item("Ore", 1));
+    }
+
+    #[test]
+    fn item_discovery_tracking() {
+        let mut inv = Inventory::new(1);
+        assert!(!inv.is_discovered("Branch"));
+        inv.add_item("Branch", 3);
+        assert!(inv.is_discovered("Branch"));
+        assert!(!inv.is_discovered("Flint"));
+    }
+}
+
+// ============================================================================
+// CRAFTING & RECIPES TESTS
+// ============================================================================
+
+mod crafting {
+    use super::*;
+
+    #[test]
+    fn canonical_recipes_exist() {
+        let recipes = get_canonical_recipes();
+        assert!(recipes.len() >= 10);
+        assert!(recipes.iter().any(|r| r.recipe_id == "Hammer"));
+        assert!(recipes.iter().any(|r| r.recipe_id == "Stone Axe"));
+        assert!(recipes.iter().any(|r| r.recipe_id == "Crude Bow"));
+    }
+
+    #[test]
+    fn craft_hand_recipe_success() {
+        let recipes = get_canonical_recipes();
+        let hammer_recipe = recipes.iter().find(|r| r.recipe_id == "Hammer").unwrap();
+
+        let mut inv = Inventory::new(1);
+        inv.add_item("Branch", 1);
+        inv.add_item("LooseStone", 1);
+
+        assert!(hammer_recipe.can_craft(&inv, None, false).is_ok());
+        let res = hammer_recipe.craft(&mut inv, None, false);
+        assert!(res.is_ok());
+
+        assert_eq!(inv.count_item("Branch"), 0);
+        assert_eq!(inv.count_item("LooseStone"), 0);
+        assert_eq!(inv.count_item("Hammer"), 1);
+    }
+
+    #[test]
+    fn craft_hand_recipe_missing_ingredients() {
+        let recipes = get_canonical_recipes();
+        let axe_recipe = recipes.iter().find(|r| r.recipe_id == "Stone Axe").unwrap();
+
+        let mut inv = Inventory::new(1);
+        inv.add_item("Branch", 1); // Missing Flint!
+
+        assert!(axe_recipe.can_craft(&inv, None, false).is_err());
+        let res = axe_recipe.craft(&mut inv, None, false);
+        assert!(res.is_err());
+        assert_eq!(inv.count_item("Branch"), 1);
+    }
+
+    #[test]
+    fn craft_workbench_recipe_fails_without_station() {
+        let recipes = get_canonical_recipes();
+        let bow_recipe = recipes.iter().find(|r| r.recipe_id == "Crude Bow").unwrap();
+
+        let mut inv = Inventory::new(1);
+        inv.add_item("Wood", 10);
+        inv.add_item("Leather Scraps", 4);
+
+        // No station provided
+        assert_eq!(
+            bow_recipe.can_craft(&inv, None, false),
+            Err("Missing required crafting station")
+        );
+    }
+
+    #[test]
+    fn craft_workbench_recipe_succeeds_with_station() {
+        let recipes = get_canonical_recipes();
+        let bow_recipe = recipes.iter().find(|r| r.recipe_id == "Crude Bow").unwrap();
+
+        let mut inv = Inventory::new(1);
+        inv.add_item("Wood", 10);
+        inv.add_item("Leather Scraps", 4);
+
+        let res = bow_recipe.craft(&mut inv, Some("Workbench"), false);
+        assert!(res.is_ok());
+        assert_eq!(inv.count_item("Wood"), 0);
+        assert_eq!(inv.count_item("Leather Scraps"), 0);
+        assert_eq!(inv.count_item("Crude Bow"), 1);
+    }
+
+    #[test]
+    fn craft_yields_multiple_items() {
+        let recipes = get_canonical_recipes();
+        let arrow_recipe = recipes.iter().find(|r| r.recipe_id == "Wood Arrow").unwrap();
+
+        let mut inv = Inventory::new(1);
+        inv.add_item("Wood", 8);
+
+        let res = arrow_recipe.craft(&mut inv, None, false);
+        assert!(res.is_ok());
+        assert_eq!(inv.count_item("Wood"), 0);
+        assert_eq!(inv.count_item("Wood Arrow"), 20);
+    }
+
+    #[test]
+    fn craft_shelter_requirement() {
+        let custom_recipe = RecipeDefinition::new(
+            "Enchanted Staff",
+            "Enchanted Staff",
+            1,
+            "Workbench",
+            true, // Requires roof!
+            vec![("Wood", 5)],
+        );
+
+        let mut inv = Inventory::new(1);
+        inv.add_item("Wood", 5);
+
+        assert_eq!(
+            custom_recipe.can_craft(&inv, Some("Workbench"), false),
+            Err("Requires roof/shelter")
+        );
+        assert!(custom_recipe.can_craft(&inv, Some("Workbench"), true).is_ok());
     }
 }
 
@@ -194,6 +316,16 @@ mod terrain {
         let nearby = get_terrain_height(-20.0, -20.0);
         assert!(lake_center < nearby, "Lake center ({}) should be lower than nearby ({})", lake_center, nearby);
     }
+
+    #[test]
+    fn chunk_coordinate_quantization() {
+        assert_eq!(world_to_chunk_coord(0.0, 50.0), 0);
+        assert_eq!(world_to_chunk_coord(49.9, 50.0), 0);
+        assert_eq!(world_to_chunk_coord(50.0, 50.0), 1);
+        assert_eq!(world_to_chunk_coord(-0.1, 50.0), -1);
+        assert_eq!(world_to_chunk_coord(-50.0, 50.0), -1);
+        assert_eq!(world_to_chunk_coord(-50.1, 50.0), -2);
+    }
 }
 
 // ============================================================================
@@ -207,22 +339,22 @@ mod resource_node {
     fn tree_creation() {
         let tree = ResourceNode::new(1, "Tree", 10.0, 5.0, 10.0, 2.0);
         assert_eq!(tree.node_type, "Tree");
-        assert_eq!(tree.health, 6); // 3.0 * 2.0
-        assert_eq!(tree.required_tool, "Axe"); // scale > 1.5
+        assert_eq!(tree.health, 6);
+        assert_eq!(tree.required_tool, "Stone Axe");
     }
 
     #[test]
     fn small_tree_no_axe_required() {
         let tree = ResourceNode::new(1, "Tree", 10.0, 5.0, 10.0, 1.0);
-        assert_eq!(tree.required_tool, "None"); // scale <= 1.5
+        assert_eq!(tree.required_tool, "None");
     }
 
     #[test]
     fn rock_creation() {
         let rock = ResourceNode::new(2, "Rock", 20.0, 15.0, 20.0, 1.5);
         assert_eq!(rock.node_type, "Rock");
-        assert_eq!(rock.health, 6); // 4.0 * 1.5
-        assert_eq!(rock.required_tool, "None");
+        assert_eq!(rock.health, 6);
+        assert_eq!(rock.required_tool, "Pickaxe");
     }
 
     #[test]
@@ -231,6 +363,17 @@ mod resource_node {
         assert_eq!(bush.node_type, "Bush");
         assert_eq!(bush.health, 1);
         assert_eq!(bush.required_tool, "None");
+    }
+
+    #[test]
+    fn branch_and_flint_nodes() {
+        let branch = ResourceNode::new(4, "Branch", 1.0, 1.0, 1.0, 1.0);
+        assert_eq!(branch.health, 1);
+        assert_eq!(branch.required_tool, "None");
+
+        let flint = ResourceNode::new(5, "Flint", 2.0, 1.0, 2.0, 1.0);
+        assert_eq!(flint.health, 1);
+        assert_eq!(flint.required_tool, "None");
     }
 
     #[test]
@@ -247,10 +390,8 @@ mod resource_node {
         let result = bush.harvest();
         assert!(result.is_some());
         let (item, amount) = result.unwrap();
-        // Bush falls through to the "_" match arm, returning "Wood"
-        // This is the actual behavior in lib.rs — bushes give "Wood" on final hit
         assert_eq!(item, "Wood");
-        assert_eq!(amount, 1); // 1 * 1.0
+        assert_eq!(amount, 1);
         assert!(bush.is_depleted());
     }
 
@@ -261,7 +402,7 @@ mod resource_node {
         assert!(result.is_some());
         let (item, amount) = result.unwrap();
         assert_eq!(item, "Wood");
-        assert_eq!(amount, 1); // Partial harvest gives 1
+        assert_eq!(amount, 1);
         assert!(!tree.is_depleted());
         assert_eq!(tree.health, 5);
     }
@@ -269,13 +410,13 @@ mod resource_node {
     #[test]
     fn harvest_tree_full() {
         let mut tree = ResourceNode::new(1, "Tree", 0.0, 0.0, 0.0, 1.0);
-        tree.health = 1; // Set to 1 hit remaining
+        tree.health = 1;
         
         let result = tree.harvest();
         assert!(result.is_some());
         let (item, amount) = result.unwrap();
         assert_eq!(item, "Wood");
-        assert_eq!(amount, 5); // Full yield: 5 * 1.0
+        assert_eq!(amount, 6);
         assert!(tree.is_depleted());
     }
 
@@ -287,22 +428,22 @@ mod resource_node {
         let result = rock.harvest();
         assert!(result.is_some());
         let (item, amount) = result.unwrap();
-        assert_eq!(item, "Ore");
-        assert_eq!(amount, 6); // Full yield: 3 * 2.0
+        assert_eq!(item, "Stone");
+        assert_eq!(amount, 8);
         assert!(rock.is_depleted());
     }
 
     #[test]
     fn harvest_depleted_returns_none() {
         let mut bush = ResourceNode::new(1, "Bush", 0.0, 0.0, 0.0, 1.0);
-        bush.harvest(); // Depletes it
+        bush.harvest();
         let result = bush.harvest();
         assert!(result.is_none());
     }
 }
 
 // ============================================================================
-// COMBAT TESTS
+// COMBAT & BALLISTICS TESTS
 // ============================================================================
 
 mod combat {
@@ -349,7 +490,6 @@ mod combat {
 
     #[test]
     fn ray_sphere_hit() {
-        // Ray from origin going +Z, sphere at (0, 0, 5) with radius 1
         let hit = ray_sphere_intersect(
             (0.0, 0.0, 0.0),
             (0.0, 0.0, 1.0),
@@ -357,12 +497,11 @@ mod combat {
             1.0,
         );
         assert!(hit.is_some());
-        assert_eq!(hit.unwrap(), 4.0); // Distance to near surface
+        assert_eq!(hit.unwrap(), 4.0);
     }
 
     #[test]
     fn ray_sphere_miss() {
-        // Ray from origin going +Z, sphere at (10, 0, 5) — way off to the side
         let hit = ray_sphere_intersect(
             (0.0, 0.0, 0.0),
             (0.0, 0.0, 1.0),
@@ -374,7 +513,6 @@ mod combat {
 
     #[test]
     fn ray_sphere_behind() {
-        // Ray going +Z, sphere behind at -5
         let hit = ray_sphere_intersect(
             (0.0, 0.0, 0.0),
             (0.0, 0.0, 1.0),
@@ -386,19 +524,74 @@ mod combat {
 
     #[test]
     fn ray_sphere_grazing() {
-        // Ray that just barely misses (sphere at edge of radius)
         let hit = ray_sphere_intersect(
             (0.0, 0.0, 0.0),
             (0.0, 0.0, 1.0),
-            (1.5, 0.0, 5.0), // 1.5 units off-center, radius 1
+            (1.5, 0.0, 5.0),
             1.0,
         );
         assert!(hit.is_none());
     }
+
+    #[test]
+    fn snapshot_interpolation_exact() {
+        let s1 = Snapshot { tick_id: 10, x: 0.0, y: 0.0, z: 0.0 };
+        let s2 = Snapshot { tick_id: 20, x: 10.0, y: 0.0, z: 20.0 };
+        let pos = interpolate_snapshot(&s1, &s2, 10).unwrap();
+        assert_eq!(pos, (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn snapshot_interpolation_midpoint() {
+        let s1 = Snapshot { tick_id: 10, x: 0.0, y: 2.0, z: 0.0 };
+        let s2 = Snapshot { tick_id: 20, x: 10.0, y: 4.0, z: 20.0 };
+        let pos = interpolate_snapshot(&s1, &s2, 15).unwrap();
+        assert_eq!(pos, (5.0, 3.0, 10.0));
+    }
+
+    #[test]
+    fn snapshot_interpolation_out_of_bounds() {
+        let s1 = Snapshot { tick_id: 10, x: 0.0, y: 0.0, z: 0.0 };
+        let s2 = Snapshot { tick_id: 20, x: 10.0, y: 0.0, z: 20.0 };
+        assert!(interpolate_snapshot(&s1, &s2, 5).is_none());
+        assert!(interpolate_snapshot(&s1, &s2, 25).is_none());
+    }
+
+    #[test]
+    fn projectile_flight_simulation_arrow() {
+        let pos = (0.0, 10.0, 0.0);
+        let vel = (0.0, 0.0, 45.0); // 45 m/s forward
+        let dt = 0.1;
+        let (new_pos, new_vel) = simulate_projectile_step(pos, vel, ProjectileKind::Arrow, dt);
+
+        assert!((new_pos.2 - 4.5).abs() < 0.001); // 45 * 0.1
+        assert!(new_pos.1 < 10.0, "Gravity drops Y pos");
+        assert!(new_vel.1 < 0.0, "Gravity pulls downward");
+        assert_eq!(new_vel.2, 45.0);
+    }
+
+    #[test]
+    fn projectile_magic_missile_zero_gravity() {
+        let pos = (0.0, 10.0, 0.0);
+        let vel = (0.0, 0.0, 30.0);
+        let dt = 0.5;
+        let (new_pos, new_vel) = simulate_projectile_step(pos, vel, ProjectileKind::MagicMissile, dt);
+
+        assert_eq!(new_pos.1, 10.0, "Magic missiles travel horizontally without gravity drop");
+        assert_eq!(new_vel.1, 0.0);
+        assert_eq!(new_pos.2, 15.0);
+    }
+
+    #[test]
+    fn projectile_properties() {
+        assert_eq!(ProjectileKind::Arrow.base_damage(), 25.0);
+        assert_eq!(ProjectileKind::TrebuchetShell.base_damage(), 250.0);
+        assert!(ProjectileKind::BallistaSpear.base_speed() > ProjectileKind::Arrow.base_speed());
+    }
 }
 
 // ============================================================================
-// BUILDING TESTS
+// BUILDING & DURABILITY TESTS
 // ============================================================================
 
 mod building {
@@ -411,6 +604,9 @@ mod building {
         assert_eq!(f.stability, 100);
         assert!(f.is_grounded);
         assert!(f.parent_id.is_none());
+        assert_eq!(f.max_health, 400.0);
+        assert_eq!(f.current_health, 400.0);
+        assert!(!f.is_blueprint);
     }
 
     #[test]
@@ -421,6 +617,7 @@ mod building {
         assert_eq!(wall.stability, 80); // 100 - 20
         assert!(!wall.is_grounded);
         assert_eq!(wall.parent_id, Some(f.structure_id));
+        assert_eq!(wall.max_health, 200.0);
     }
 
     #[test]
@@ -468,10 +665,60 @@ mod building {
     #[test]
     fn can_support_check() {
         let f = Structure::foundation();
-        assert!(f.can_support(20)); // 100 > 20
-        assert!(f.can_support(99)); // 100 > 99
-        assert!(!f.can_support(100)); // 100 > 100 is false
-        assert!(!f.can_support(101)); // 100 > 101 is false
+        assert!(f.can_support(20));
+        assert!(f.can_support(99));
+        assert!(!f.can_support(100));
+        assert!(!f.can_support(101));
+    }
+
+    #[test]
+    fn blueprint_construction_progression() {
+        let mut bp = Structure::new_blueprint(10, None, "Wall", 80, false);
+        assert!(bp.is_blueprint);
+        assert_eq!(bp.construction_progress, 0);
+
+        // Cannot repair blueprint
+        assert_eq!(bp.repair(50.0), 0.0);
+
+        // Contribute 50%
+        let finished = bp.contribute_construction(50);
+        assert!(!finished);
+        assert_eq!(bp.construction_progress, 50);
+        assert_eq!(bp.current_health, 100.0); // 50% of 200
+
+        // Finish remaining 50%
+        let finished2 = bp.contribute_construction(50);
+        assert!(finished2);
+        assert!(!bp.is_blueprint);
+        assert_eq!(bp.construction_progress, 100);
+        assert_eq!(bp.current_health, 200.0);
+    }
+
+    #[test]
+    fn physical_structure_damage_and_repair() {
+        let mut wall = Structure::foundation().attach_child("Wall", 1).unwrap();
+        assert_eq!(wall.current_health, 200.0);
+
+        let destroyed = wall.damage(50.0);
+        assert!(!destroyed);
+        assert_eq!(wall.current_health, 150.0);
+
+        let healed = wall.repair(30.0);
+        assert_eq!(healed, 30.0);
+        assert_eq!(wall.current_health, 180.0);
+
+        // Cannot overheal beyond max_health
+        let overhealed = wall.repair(50.0);
+        assert_eq!(overhealed, 20.0);
+        assert_eq!(wall.current_health, 200.0);
+    }
+
+    #[test]
+    fn structure_destruction_threshold() {
+        let mut wall = Structure::foundation().attach_child("Wall", 1).unwrap();
+        let destroyed = wall.damage(250.0);
+        assert!(destroyed);
+        assert_eq!(wall.current_health, 0.0);
     }
 }
 
@@ -492,15 +739,13 @@ mod movement {
     #[test]
     fn clamp_exceeds_limit() {
         let (dx, dy, dz) = clamp_movement_delta(6.0, 8.0, 0.0, 5.0);
-        // Original magnitude: 10, clamped to 5
         let mag = (dx * dx + dy * dy + dz * dz).sqrt();
         assert!((mag - 5.0).abs() < 0.001);
     }
 
     #[test]
     fn clamp_exactly_at_limit() {
-        let (dx, dy, dz) = clamp_movement_delta(3.0, 4.0, 0.0, 5.0);
-        // Magnitude is exactly 5, should not change
+        let (dx, dy, _dz) = clamp_movement_delta(3.0, 4.0, 0.0, 5.0);
         assert_eq!(dx, 3.0);
         assert_eq!(dy, 4.0);
     }
@@ -515,14 +760,14 @@ mod movement {
 
     #[test]
     fn stale_tick_detection() {
-        assert!(is_stale_tick(5, 10)); // 5 <= 10, stale
-        assert!(is_stale_tick(10, 10)); // 10 <= 10, stale
-        assert!(!is_stale_tick(11, 10)); // 11 > 10, fresh
+        assert!(is_stale_tick(5, 10));
+        assert!(is_stale_tick(10, 10));
+        assert!(!is_stale_tick(11, 10));
     }
 }
 
 // ============================================================================
-// AI TESTS
+// AI & NPC BEHAVIOR TESTS
 // ============================================================================
 
 mod ai {
@@ -549,11 +794,23 @@ mod ai {
     #[test]
     fn peasant_is_carrying_max() {
         let mut p = Peasant::new(1, 100);
-        assert!(!p.is_carrying_max(10)); // 0 >= 10 is false
+        assert!(!p.is_carrying_max(10));
         p.carrying_amount = 10;
-        assert!(p.is_carrying_max(10)); // 10 >= 10 is true
+        assert!(p.is_carrying_max(10));
         p.carrying_amount = 11;
-        assert!(p.is_carrying_max(10)); // 11 >= 10 is true
+        assert!(p.is_carrying_max(10));
+    }
+
+    #[test]
+    fn peasant_stuck_tick_counting() {
+        let mut p = Peasant::new(1, 100);
+        for _ in 0..9 {
+            assert!(!p.note_stuck_tick());
+        }
+        // 10th consecutive stuck tick triggers unstuck routine
+        assert!(p.note_stuck_tick());
+        p.reset_stuck_ticks();
+        assert_eq!(p.consecutive_stuck_ticks, 0);
     }
 
     #[test]
@@ -610,7 +867,7 @@ mod prng {
 }
 
 // ============================================================================
-// FACTION TESTS
+// FACTION & PET TESTS
 // ============================================================================
 
 mod faction {
@@ -644,51 +901,10 @@ mod faction {
 
     #[test]
     fn same_faction_neutral() {
-        // Same faction relationships default to Neutral
         assert_eq!(get_standing(&Faction::Player, &Faction::Player), FactionStanding::Neutral);
         assert_eq!(get_standing(&Faction::Goblin, &Faction::Goblin), FactionStanding::Neutral);
     }
 }
-
-// ============================================================================
-// NPC BRAIN TESTS
-// ============================================================================
-
-mod npc_brain {
-    use super::*;
-
-    #[test]
-    fn new_brain_defaults() {
-        let brain = NpcBrain::new(1, AiType::Deer, 10.0, 20.0);
-        assert_eq!(brain.entity_id, 1);
-        assert_eq!(brain.ai_type, AiType::Deer);
-        assert_eq!(brain.state, BrainState::Idle);
-        assert_eq!(brain.target_id, None);
-        assert_eq!(brain.timer, 0.0);
-        assert_eq!(brain.home_x, 10.0);
-        assert_eq!(brain.home_z, 20.0);
-        assert_eq!(brain.wander_x, 10.0);
-        assert_eq!(brain.wander_z, 20.0);
-    }
-
-    #[test]
-    fn ai_type_equality() {
-        assert_eq!(AiType::Deer, AiType::Deer);
-        assert_ne!(AiType::Deer, AiType::Boar);
-        assert_ne!(AiType::Goblin, AiType::Friendly);
-    }
-
-    #[test]
-    fn brain_state_equality() {
-        assert_eq!(BrainState::Idle, BrainState::Idle);
-        assert_ne!(BrainState::Idle, BrainState::Fleeing);
-        assert_ne!(BrainState::Chasing, BrainState::Attacking);
-    }
-}
-
-// ============================================================================
-// PET TESTS
-// ============================================================================
 
 mod pet {
     use super::*;
@@ -702,92 +918,59 @@ mod pet {
     }
 
     #[test]
-    fn pet_stance_equality() {
-        assert_eq!(PetStance::Stay, PetStance::Stay);
-        assert_ne!(PetStance::Stay, PetStance::Follow);
-        assert_ne!(PetStance::Aggressive, PetStance::Defensive);
+    fn pet_stance_combat_targeting() {
+        let mut pet = PetComponent::new(1, 100);
+
+        // Follow stance doesn't auto-attack
+        pet.stance = PetStance::Follow;
+        assert!(!pet.should_attack_target(FactionStanding::KillOnSight, false));
+        assert!(!pet.should_attack_target(FactionStanding::KillOnSight, true));
+
+        // Aggressive attacks any KillOnSight enemy
+        pet.stance = PetStance::Aggressive;
+        assert!(pet.should_attack_target(FactionStanding::KillOnSight, false));
+        assert!(!pet.should_attack_target(FactionStanding::Neutral, false));
+
+        // Defensive only attacks enemies that attack the owner
+        pet.stance = PetStance::Defensive;
+        assert!(!pet.should_attack_target(FactionStanding::KillOnSight, false));
+        assert!(pet.should_attack_target(FactionStanding::KillOnSight, true));
+        assert!(pet.should_attack_target(FactionStanding::Neutral, true));
     }
 }
 
 // ============================================================================
-// STRUCTURE BUILDING TESTS (Extended)
+// DAY / NIGHT CYCLE TESTS
 // ============================================================================
 
-mod structure_building {
+mod day_night {
     use super::*;
 
     #[test]
-    fn place_foundation_grounded() {
-        // Foundation with no parent, anchored to terrain
-        let s = Structure {
-            structure_id: 1,
-            parent_id: None,
-            piece_type: "Foundation".to_string(),
-            stability: 100,
-            is_grounded: true,
-        };
-        assert!(s.is_grounded);
-        assert_eq!(s.stability, 100);
+    fn advance_time_normal() {
+        let t = advance_time_of_day(8.0, 2.5);
+        assert!((t - 10.5).abs() < 0.001);
     }
 
     #[test]
-    fn attach_wall_to_foundation() {
-        let f = Structure::foundation();
-        let wall = f.attach_child("Wall", 2).unwrap();
-        assert_eq!(wall.piece_type, "Wall");
-        assert_eq!(wall.stability, 80);
-        assert!(!wall.is_grounded);
-        assert_eq!(wall.parent_id, Some(f.structure_id));
+    fn advance_time_wraparound_midnight() {
+        let t = advance_time_of_day(23.0, 2.0);
+        assert!((t - 1.0).abs() < 0.001);
     }
 
     #[test]
-    fn attach_floor_to_foundation() {
-        let f = Structure::foundation();
-        let floor = f.attach_child("Floor", 2).unwrap();
-        assert_eq!(floor.stability, 75);
+    fn advance_time_multiple_cycles() {
+        let t = advance_time_of_day(0.0, 50.0); // 2 full cycles + 2 hours
+        assert!((t - 2.0).abs() < 0.001);
     }
 
     #[test]
-    fn attach_roof_to_foundation() {
-        let f = Structure::foundation();
-        let roof = f.attach_child("Roof", 2).unwrap();
-        assert_eq!(roof.stability, 70);
-    }
-
-    #[test]
-    fn attach_ramp_to_foundation() {
-        let f = Structure::foundation();
-        let ramp = f.attach_child("Ramp", 2).unwrap();
-        assert_eq!(ramp.stability, 75);
-    }
-
-    #[test]
-    fn chain_structures() {
-        let f = Structure::foundation();
-        let wall = f.attach_child("Wall", 2).unwrap();
-        let floor = wall.attach_child("Floor", 3).unwrap();
-        assert_eq!(floor.stability, 55); // 80 - 25
-    }
-
-    #[test]
-    fn cannot_attach_to_weak_structure() {
-        let mut f = Structure::foundation();
-        f.stability = 15;
-        assert!(f.attach_child("Wall", 2).is_none());
-    }
-
-    #[test]
-    fn cannot_attach_unknown_piece() {
-        let f = Structure::foundation();
-        assert!(f.attach_child("Unknown", 2).is_none());
-    }
-
-    #[test]
-    fn can_support_check() {
-        let f = Structure::foundation();
-        assert!(f.can_support(20));
-        assert!(f.can_support(99));
-        assert!(!f.can_support(100));
-        assert!(!f.can_support(101));
+    fn daylight_schedule() {
+        assert!(is_daylight(8.0));  // Morning
+        assert!(is_daylight(12.0)); // Noon
+        assert!(is_daylight(19.9)); // Dusk
+        assert!(!is_daylight(20.0)); // Night
+        assert!(!is_daylight(23.5)); // Midnight
+        assert!(!is_daylight(4.0));  // Pre-dawn
     }
 }

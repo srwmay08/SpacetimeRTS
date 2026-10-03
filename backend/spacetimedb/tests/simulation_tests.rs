@@ -19,9 +19,11 @@ fn test_inventory_add_remove_atomic() {
     };
 
     add_item(&mut inv, "Wood", 65);
-    assert_eq!(inv.slots.len(), 2);
+    assert_eq!(inv.slots.len(), 16);
     assert_eq!(inv.slots[0].count, 50);
     assert_eq!(inv.slots[1].count, 15);
+    let active_count = inv.slots.iter().filter(|s| s.count > 0).count();
+    assert_eq!(active_count, 2);
 
     let success = remove_item(&mut inv, "Wood", 20);
     assert!(success);
