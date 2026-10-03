@@ -100,8 +100,10 @@ pub struct HarvestableCorpse {
 // ----------------------------------------------------------------------------
 // HELPER: SPATIAL CHUNK FILTERING
 // ----------------------------------------------------------------------------
+// Architectural Note: Public spatial neighborhood query used by AI simulation tick
+// to constrain broad-phase visibility and proximity queries to adjacent 50m chunks.
 #[inline]
-fn is_chunk_adjacent(cx1: i32, cz1: i32, cx2: i32, cz2: i32) -> bool {
+pub fn is_chunk_adjacent(cx1: i32, cz1: i32, cx2: i32, cz2: i32) -> bool {
     (cx1 - cx2).abs() <= 1 && (cz1 - cz2).abs() <= 1
 }
 

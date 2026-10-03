@@ -1,3 +1,10 @@
+// ----------------------------------------------------------------------------
+// SIMULATION & DETERMINISM REGRESSION TESTS (SpacetimeDB v2.x / Rust 2024)
+// ----------------------------------------------------------------------------
+// Architectural Note: Validates core multi-system simulation invariants including
+// deterministic noise evaluation across tick frames, atomic inventory transactions
+// conforming to the 16-slot padded model, and structural decay cascades.
+
 use backend::{add_item, get_terrain_height, remove_item, Inventory};
 
 #[test]
@@ -18,18 +25,20 @@ fn test_inventory_add_remove_atomic() {
         discovered_items: vec![],
     };
 
+    // Adding 65 wood must allocate across 2 active slots (50 and 15) within the 16 padded slots
     add_item(&mut inv, "Wood", 65);
     assert_eq!(inv.slots.len(), 16);
     assert_eq!(inv.slots[0].count, 50);
     assert_eq!(inv.slots[1].count, 15);
-    let active_count = inv.slots.iter().filter(|s| s.count > 0).count();
-    assert_eq!(active_count, 2);
+    let active_slots: Vec<_> = inv.slots.iter().filter(|s| s.count > 0).collect();
+    assert_eq!(active_slots.len(), 2);
 
     let success = remove_item(&mut inv, "Wood", 20);
     assert!(success);
     let total: u32 = inv.slots.iter().filter(|s| s.item_type == "Wood").map(|s| s.count).sum();
     assert_eq!(total, 45);
 
+    // Over-drain must fail atomically without altering total item count
     let over_drain = remove_item(&mut inv, "Wood", 100);
     assert!(!over_drain);
     let total_after_fail: u32 = inv.slots.iter().filter(|s| s.item_type == "Wood").map(|s| s.count).sum();

@@ -1205,9 +1205,10 @@ mod movement {
 
     #[test]
     fn clamp_exactly_at_limit() {
-        let (dx, dy, _dz) = clamp_movement_delta(3.0, 4.0, 0.0, 5.0);
+        let (dx, dy, dz) = clamp_movement_delta(3.0, 4.0, 0.0, 5.0);
         assert_eq!(dx, 3.0);
         assert_eq!(dy, 4.0);
+        assert_eq!(dz, 0.0);
     }
 
     #[test]
