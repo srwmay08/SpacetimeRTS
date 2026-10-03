@@ -2316,7 +2316,7 @@ pub fn update_reticle_crosshair_ui(
     camera_mode: Res<State<CameraMode>>,
     player_q: Query<&avian3d::prelude::LinearVelocity, With<PlayerBody>>,
     mut root_q: Query<&mut Visibility, With<ReticleHudRoot>>,
-    mut arms_q: Query<(&ReticleCrosshairArm, &mut Style, &mut BackgroundColor, &mut BorderColor)>,
+    mut arms_q: Query<(&ReticleCrosshairArm, &mut Style, &mut BackgroundColor, &mut BorderColor), Without<ReticleCrosshairDot>>,
     mut dot_q: Query<(&mut Style, &mut BackgroundColor), (With<ReticleCrosshairDot>, Without<ReticleCrosshairArm>)>,
 ) {
     let Ok(mut root_vis) = root_q.get_single_mut() else { return; };
@@ -2397,9 +2397,9 @@ pub fn update_reticle_adjacent_hud(
     weapon_state: Res<crate::weapons::WeaponState>,
     conn: Res<SpacetimeConnection>,
     camera_mode: Res<State<CameraMode>>,
-    mut ammo_text_q: Query<&mut Text, With<ReticleAmmoText>>,
+    mut ammo_text_q: Query<&mut Text, (With<ReticleAmmoText>, Without<ReticleCriticalHealthAlert>)>,
     mut bow_bar_q: Query<(&mut Style, &mut BackgroundColor), With<ReticleBowChargeBar>>,
-    mut crit_alert_q: Query<&mut Text, With<ReticleCriticalHealthAlert>>,
+    mut crit_alert_q: Query<&mut Text, (With<ReticleCriticalHealthAlert>, Without<ReticleAmmoText>)>,
 ) {
     if *camera_mode.get() != CameraMode::FPS { return; }
 
