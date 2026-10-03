@@ -13,7 +13,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
 use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
-use bevy::pbr::{FogFalloff, FogSettings};
+use bevy::pbr::{FogFalloff, FogSettings, NotShadowCaster};
 use avian3d::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -929,6 +929,7 @@ pub fn init_network_connection(
             },
             RenderLayers::layer(2),
             SelectionRing,
+            NotShadowCaster,
         ));
 
         parent.spawn((
@@ -961,6 +962,7 @@ pub fn init_network_connection(
                 },
                 RenderLayers::layer(1),
                 ViewModelArm, FPSMesh,
+                NotShadowCaster,
             ));
         });
     });
@@ -1229,6 +1231,7 @@ pub fn sync_transforms(
                     transform: BevyTransform::from_xyz(0.0, -0.4, 0.0), visibility: Visibility::Hidden, ..default()
                 },
                 RenderLayers::layer(2), SelectionRing,
+                NotShadowCaster,
             ));
         });
         spawned_ids.insert(id);

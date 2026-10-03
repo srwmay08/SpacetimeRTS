@@ -48,6 +48,7 @@
 use std::f32::consts::PI;
 use bevy::prelude::*;
 use bevy::pbr::{CascadeShadowConfigBuilder, DirectionalLightShadowMap};
+use bevy::render::view::RenderLayers;
 
 // ============================================================================
 // 1. CONFIGURATION RESOURCE & DATA STRUCTURES
@@ -288,6 +289,7 @@ pub fn setup_binary_star_system(
             ..default()
         },
         PrimaryStar,
+        RenderLayers::from_layers(&[0, 2]),
         StellarOrbitalData {
             direction: Vec3::new(0.0, 0.7071, 0.7071),
             elevation_radians: PI * 0.25,
@@ -331,6 +333,7 @@ pub fn setup_binary_star_system(
             ..default()
         },
         SecondaryStar,
+        RenderLayers::from_layers(&[0, 2]),
         StellarOrbitalData {
             direction: Vec3::new(0.5, 0.6, 0.62).normalize(),
             elevation_radians: PI * 0.20,

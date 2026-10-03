@@ -40,6 +40,7 @@ use std::f32::consts::PI;
 use bevy::prelude::*;
 use bevy::pbr::{
     CascadeShadowConfigBuilder, DirectionalLightShadowMap, FogFalloff, FogSettings,
+    NotShadowCaster,
 };
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
@@ -939,6 +940,7 @@ pub fn setup_binary_sky_environment(
             ..default()
         },
         PrimaryStar,
+        RenderLayers::from_layers(&[0, 2]),
         Name::new("Host Star A (Primary)"),
     ));
 
@@ -965,6 +967,7 @@ pub fn setup_binary_sky_environment(
             ..default()
         },
         SecondaryStar,
+        RenderLayers::from_layers(&[0, 2]),
         Name::new("Companion Star B (Secondary)"),
     ));
 
@@ -984,6 +987,7 @@ pub fn setup_binary_sky_environment(
             ..default()
         },
         StarAVolumetricDisk,
+        NotShadowCaster,
         RenderLayers::from_layers(&[0, 1, 2]),
         Name::new("Host Star A Volumetric Disk"),
     ));
@@ -1004,6 +1008,7 @@ pub fn setup_binary_sky_environment(
             ..default()
         },
         StarBVolumetricDisk,
+        NotShadowCaster,
         RenderLayers::from_layers(&[0, 1, 2]),
         Name::new("Companion Star B Dwarf Disk"),
     ));
@@ -1024,6 +1029,7 @@ pub fn setup_binary_sky_environment(
             ..default()
         },
         CosmicStarfield,
+        NotShadowCaster,
         RenderLayers::from_layers(&[0, 1, 2]),
         Name::new("Cosmic Starfield Dome"),
     ));
@@ -1047,6 +1053,7 @@ pub fn setup_binary_sky_environment(
             ..default()
         },
         AuroraCurtain,
+        NotShadowCaster,
         RenderLayers::from_layers(&[0, 1, 2]),
         Name::new("Stellar Wind Aurora Curtains"),
     ));
@@ -1068,6 +1075,7 @@ pub fn setup_binary_sky_environment(
             ..default()
         },
         PrecipitationStreaks,
+        NotShadowCaster,
         RenderLayers::from_layers(&[0, 1, 2]),
         Name::new("Volumetric Rain Streaks"),
     ));
@@ -1955,5 +1963,48 @@ mod tests {
         let mut starfield_query = app.world_mut().query_filtered::<(&Transform, &Visibility), With<CosmicStarfield>>();
         let (_, star_vis) = starfield_query.single(app.world());
         assert_eq!(*star_vis, Visibility::Hidden, "Starfield must be hidden during daytime");
+    }
+
+    #[test]
+    fn test_celestial_disks_not_shadow_casters_and_lights_cover_player_layer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+        app.add_plugins(BinarySkyPlugin);
+
+        app.update();
+
+        // 1. Verify Star A Volumetric Disk has NotShadowCaster so it does NOT cast a giant circular shadow on the player
+        let mut star_a_query = app.world_mut().query_filtered::<Entity, (With<StarAVolumetricDisk>, With<NotShadowCaster>)>();
+        assert_eq!(star_a_query.iter(app.world()).count(), 1, "Star A disk must have NotShadowCaster");
+
+        // 2. Verify Star B Dwarf Disk has NotShadowCaster
+        let mut star_b_query = app.world_mut().query_filtered::<Entity, (With<StarBVolumetricDisk>, With<NotShadowCaster>)>();
+        assert_eq!(star_b_query.iter(app.world()).count(), 1, "Star B disk must have NotShadowCaster");
+
+        // 3. Verify Cosmic Starfield, Aurora, and Rain have NotShadowCaster
+        let mut starfield_query = app.world_mut().query_filtered::<Entity, (With<CosmicStarfield>, With<NotShadowCaster>)>();
+        assert_eq!(starfield_query.iter(app.world()).count(), 1, "Starfield must have NotShadowCaster");
+
+        let mut aurora_query = app.world_mut().query_filtered::<Entity, (With<AuroraCurtain>, With<NotShadowCaster>)>();
+        assert_eq!(aurora_query.iter(app.world()).count(), 1, "Aurora must have NotShadowCaster");
+
+        let mut rain_query = app.world_mut().query_filtered::<Entity, (With<PrecipitationStreaks>, With<NotShadowCaster>)>();
+        assert_eq!(rain_query.iter(app.world()).count(), 1, "Rain must have NotShadowCaster");
+
+        // 4. Verify DirectionalLights include Layer 2 (so the player character on layer 2 casts shadows)
+        let mut light_a_query = app.world_mut().query_filtered::<&RenderLayers, With<PrimaryStar>>();
+        let light_a_layers = light_a_query.single(app.world());
+        assert!(light_a_layers.intersects(&RenderLayers::layer(0)), "Star A light must intersect world layer 0");
+        assert!(light_a_layers.intersects(&RenderLayers::layer(2)), "Star A light must intersect player layer 2 to cast player character shadow");
+        assert!(!light_a_layers.intersects(&RenderLayers::layer(1)), "Star A light must NOT intersect viewmodel layer 1");
+
+        let mut light_b_query = app.world_mut().query_filtered::<&RenderLayers, With<SecondaryStar>>();
+        let light_b_layers = light_b_query.single(app.world());
+        assert!(light_b_layers.intersects(&RenderLayers::layer(0)), "Star B light must intersect world layer 0");
+        assert!(light_b_layers.intersects(&RenderLayers::layer(2)), "Star B light must intersect player layer 2 to cast player character shadow");
+        assert!(!light_b_layers.intersects(&RenderLayers::layer(1)), "Star B light must NOT intersect viewmodel layer 1");
     }
 }

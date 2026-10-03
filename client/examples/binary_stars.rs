@@ -26,6 +26,7 @@
 
 use std::f32::consts::PI;
 use bevy::prelude::*;
+use bevy::pbr::NotShadowCaster;
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use client::binary_stars::*;
 
@@ -231,6 +232,7 @@ fn setup_demonstration_scene(
             ..default()
         },
         VisualStarADisk,
+        NotShadowCaster,
         Name::new("Visual Star A Solar Disk"),
     ));
 
@@ -248,6 +250,7 @@ fn setup_demonstration_scene(
             ..default()
         },
         VisualStarBDisk,
+        NotShadowCaster,
         Name::new("Visual Star B Amber Disk"),
     ));
 

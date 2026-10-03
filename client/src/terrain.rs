@@ -13,6 +13,7 @@ use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
+use bevy::pbr::NotShadowCaster;
 use avian3d::prelude::*;
 use noise::{NoiseFn, Perlin};
 use std::sync::OnceLock;
@@ -433,6 +434,7 @@ pub fn spawn_initial_world(
                 transform: BevyTransform::from_xyz(0.0, -0.4, 0.0), visibility: Visibility::Hidden, ..default()
             },
             RenderLayers::layer(2), SelectionRing,
+            NotShadowCaster,
         ));
     });
 }
