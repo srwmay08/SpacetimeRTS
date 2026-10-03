@@ -146,6 +146,9 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "hud",
     "togglehud",
     "skyhud",
+    "f3",
+    "fps",
+    "diag",
     "help",
 ];
 
@@ -169,6 +172,8 @@ pub struct ClientEquippedBags {
 #[derive(Component)] pub struct InventoryCapacityHeader;
 #[derive(Component)] pub struct CelestialHudRoot;
 #[derive(Component)] pub struct CelestialHudText;
+#[derive(Component)] pub struct DiagnosticOverlayRoot;
+#[derive(Component)] pub struct DiagnosticOverlayText;
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn(Camera2dBundle {
@@ -320,6 +325,55 @@ pub fn setup_ui(mut commands: Commands) {
                 },
             ),
             CelestialHudText,
+        ));
+    });
+
+    // ------------------------------------------------------------------------
+    // BEVY F3 TELEMETRY & SYSTEM DIAGNOSTICS OVERLAY (Top-Right, below Celestial Pill)
+    // ------------------------------------------------------------------------
+    commands.spawn((
+        NodeBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                top: Val::Px(52.0),
+                right: Val::Px(15.0),
+                padding: UiRect::new(Val::Px(14.0), Val::Px(14.0), Val::Px(8.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.5)),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexStart,
+                justify_content: JustifyContent::Center,
+                row_gap: Val::Px(3.0),
+                min_width: Val::Px(150.0),
+                display: Display::None,
+                ..default()
+            },
+            background_color: Color::srgba(0.08, 0.08, 0.12, 0.85).into(),
+            border_color: Color::srgba(0.40, 0.50, 0.70, 0.60).into(),
+            z_index: ZIndex::Global(15),
+            ..default()
+        },
+        DiagnosticOverlayRoot,
+    )).with_children(|box_node| {
+        box_node.spawn((
+            TextBundle::from_sections([
+                TextSection::new(
+                    "DIAGNOSTICS [F3]\n",
+                    TextStyle {
+                        font_size: 11.0,
+                        color: Color::srgb(0.50, 0.75, 1.0),
+                        ..default()
+                    },
+                ),
+                TextSection::new(
+                    "Collecting telemetry...",
+                    TextStyle {
+                        font_size: 13.0,
+                        color: Color::srgb(0.92, 0.95, 1.0),
+                        ..default()
+                    },
+                ),
+            ]),
+            DiagnosticOverlayText,
         ));
     });
 
@@ -1312,6 +1366,7 @@ pub fn handle_console_input(
     mut sky_config: Option<ResMut<crate::binary_sky::BinarySkyConfig>>,
     mut sky_weather: Option<ResMut<crate::binary_sky::AtmosphericWeather>>,
     mut hud_pill_query: Query<&mut Style, With<CelestialHudRoot>>,
+    mut diag_pill_query: Query<&mut Style, (With<DiagnosticOverlayRoot>, Without<CelestialHudRoot>)>,
 ) {
     if !console.is_open {
         return;
@@ -1624,6 +1679,32 @@ pub fn handle_console_input(
                     console.logs.push("[HUD] Celestial HUD element not found.".into());
                 }
             }
+            "f3" | "fps" | "diag" | "diagnostics" => {
+                let sub = tokens.get(1).map(|s| s.to_lowercase());
+                if let Ok(mut style) = diag_pill_query.get_single_mut() {
+                    match sub.as_deref() {
+                        Some("on") | Some("show") | Some("1") | Some("true") => {
+                            style.display = Display::Flex;
+                            console.logs.push("[Diagnostics] F3 telemetry overlay toggled ON (visible).".into());
+                        }
+                        Some("off") | Some("hide") | Some("0") | Some("false") => {
+                            style.display = Display::None;
+                            console.logs.push("[Diagnostics] F3 telemetry overlay toggled OFF (hidden).".into());
+                        }
+                        Some("toggle") | None => {
+                            let new_state = style.display == Display::None;
+                            style.display = if new_state { Display::Flex } else { Display::None };
+                            let action_str = if new_state { "toggled ON (visible)" } else { "toggled OFF (hidden)" };
+                            console.logs.push(format!("[Diagnostics] F3 telemetry overlay {}.", action_str));
+                        }
+                        _ => {
+                            console.logs.push("[Syntax Error] Usage: f3 [on|off|toggle] (or press [F3])".into());
+                        }
+                    }
+                } else {
+                    console.logs.push("[Diagnostics] F3 overlay element not found.".into());
+                }
+            }
             "clearinv" | "clear" => {
                 if let Err(e) = conn.db.reducers.admin_clear_inventory() {
                     console.logs.push(format!("[Server Error] Failed to clear inventory: {:?}", e));
@@ -1877,6 +1958,7 @@ pub fn handle_console_input(
                 console.logs.push("weather <clear|aurora> : Sets atmospheric weather preset [F9]".into());
                 console.logs.push("aurora / rain / haze   : Direct weather command shortcuts".into());
                 console.logs.push("hud [on|off|toggle]    : Toggles celestial clock & weather HUD pill [F10]".into());
+                console.logs.push("f3 / fps [on|off]       : Toggles performance diagnostics HUD [F3]".into());
                 console.logs.push("timescale <speed>      : Sets cycle rate (e.g. 1.0, 60.0) [ - / = ]".into());
                 console.logs.push("spawn <mob> [amt]      : Spawns Deer, Boar, Goblin, Peasant".into());
                 console.logs.push("nuke [radius]          : Demolishes terrain with spherical blast".into());
@@ -3132,5 +3214,46 @@ mod tests {
         assert!(CONSOLE_COMMANDS.contains(&"hud"), "CONSOLE_COMMANDS must contain 'hud'");
         assert!(CONSOLE_COMMANDS.contains(&"togglehud"), "CONSOLE_COMMANDS must contain 'togglehud'");
         assert!(CONSOLE_COMMANDS.contains(&"skyhud"), "CONSOLE_COMMANDS must contain 'skyhud'");
+        assert!(CONSOLE_COMMANDS.contains(&"f3"), "CONSOLE_COMMANDS must contain 'f3'");
+        assert!(CONSOLE_COMMANDS.contains(&"fps"), "CONSOLE_COMMANDS must contain 'fps'");
+        assert!(CONSOLE_COMMANDS.contains(&"diag"), "CONSOLE_COMMANDS must contain 'diag'");
+    }
+
+    #[test]
+    fn test_diagnostic_overlay_root_toggle_and_display() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        app.world_mut().spawn((
+            NodeBundle {
+                style: Style {
+                    display: Display::None,
+                    ..default()
+                },
+                ..default()
+            },
+            DiagnosticOverlayRoot,
+        )).with_children(|box_node| {
+            box_node.spawn((
+                TextBundle::from_sections([
+                    TextSection::new("DIAGNOSTICS [F3]\n", TextStyle::default()),
+                    TextSection::new("FPS: 60.0", TextStyle::default()),
+                ]),
+                DiagnosticOverlayText,
+            ));
+        });
+
+        // 1. Initial State: Display::None (hidden until toggled)
+        let mut q = app.world_mut().query_filtered::<&mut Style, With<DiagnosticOverlayRoot>>();
+        let mut style = q.single_mut(app.world_mut());
+        assert_eq!(style.display, Display::None);
+
+        // 2. Toggle ON -> Display::Flex
+        style.display = Display::Flex;
+        assert_eq!(style.display, Display::Flex);
+
+        // 3. Toggle OFF -> Display::None
+        style.display = Display::None;
+        assert_eq!(style.display, Display::None);
     }
 }

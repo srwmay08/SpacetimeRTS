@@ -196,55 +196,55 @@ fn main() {
         .run();
 }
 
-#[derive(Component)]
-struct DiagnosticOverlay;
-
 fn update_diagnostic_overlay(
-    mut commands: Commands,
     diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
-    mut existing: Query<(Entity, &mut Text), With<DiagnosticOverlay>>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    mut root_q: Query<&mut Style, With<DiagnosticOverlayRoot>>,
+    mut text_q: Query<&mut Text, With<DiagnosticOverlayText>>,
 ) {
     if keyboard.just_pressed(KeyCode::F3) {
-        if let Some((entity, _)) = existing.iter().next() {
-            commands.entity(entity).despawn();
-            return;
-        } else {
-            commands.spawn((
-                TextBundle::from_section(
-                    "Loading diagnostics...",
-                    TextStyle { font_size: 14.0, color: Color::srgb(0.0, 1.0, 0.0), ..default() }
-                ).with_style(Style {
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(10.0),
-                    right: Val::Px(10.0),
-                    ..default()
-                }),
-                DiagnosticOverlay,
-            ));
-            return;
+        if let Ok(mut style) = root_q.get_single_mut() {
+            style.display = if style.display == Display::None {
+                Display::Flex
+            } else {
+                Display::None
+            };
         }
     }
-    
-    for (_, mut text) in existing.iter_mut() {
-        let mut output = String::new();
-        
-        if let Some(fps) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS) {
-            if let Some(value) = fps.value() {
-                output.push_str(&format!("FPS: {:.1}\n", value));
-            }
+
+    let Ok(style) = root_q.get_single() else { return; };
+    if style.display == Display::None {
+        return;
+    }
+
+    let Ok(mut text) = text_q.get_single_mut() else { return; };
+    let mut output = String::new();
+
+    if let Some(fps) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS) {
+        if let Some(value) = fps.value().or_else(|| fps.smoothed()) {
+            output.push_str(&format!("FPS: {:.1}\n", value));
         }
-        if let Some(frame_time) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME) {
-            if let Some(value) = frame_time.value() {
-                output.push_str(&format!("Frame: {:.2}ms\n", value));
-            }
+    }
+    if let Some(frame_time) = diagnostics.get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME) {
+        if let Some(value) = frame_time.value().or_else(|| frame_time.smoothed()) {
+            output.push_str(&format!("Frame: {:.2} ms\n", value));
         }
-        if let Some(entities) = diagnostics.get(&bevy::diagnostic::EntityCountDiagnosticsPlugin::ENTITY_COUNT) {
-            if let Some(value) = entities.value() {
-                output.push_str(&format!("Entities: {:.0}\n", value));
-            }
+    }
+    if let Some(entities) = diagnostics.get(&bevy::diagnostic::EntityCountDiagnosticsPlugin::ENTITY_COUNT) {
+        if let Some(value) = entities.value() {
+            output.push_str(&format!("Entities: {:.0}", value));
         }
-        
+    }
+
+    if output.is_empty() {
+        output = "Collecting telemetry...".to_string();
+    }
+
+    if text.sections.len() > 1 {
+        if text.sections[1].value != output {
+            text.sections[1].value = output;
+        }
+    } else if !text.sections.is_empty() && text.sections[0].value != output {
         text.sections[0].value = output;
     }
 }
