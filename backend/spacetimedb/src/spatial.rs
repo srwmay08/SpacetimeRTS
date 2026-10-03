@@ -6,7 +6,7 @@
 // AI target finding, and proximity checks. Grid cell size matches chunk size (50m).
 
 use spacetimedb::{ReducerContext, Table};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::RwLock;
 use crate::movement::transform;
 use crate::building::structure;
@@ -16,15 +16,15 @@ pub const GRID_CELL_SIZE: f32 = 50.0;
 
 /// Spatial hash grid: (cell_x, cell_z) -> Vec<entity_id>
 /// Thread-safe with RwLock for concurrent read access during ticks
-static SPATIAL_GRID: RwLock<Option<HashMap<(i32, i32), Vec<u64>>>> = RwLock::new(None);
+static SPATIAL_GRID: RwLock<Option<BTreeMap<(i32, i32), Vec<u64>>>> = RwLock::new(None);
 
 /// Initialize the spatial grid (called once at module load)
-fn get_grid() -> std::sync::RwLockReadGuard<'static, Option<HashMap<(i32, i32), Vec<u64>>>> {
+fn get_grid() -> std::sync::RwLockReadGuard<'static, Option<BTreeMap<(i32, i32), Vec<u64>>>> {
     SPATIAL_GRID.read().unwrap()
 }
 
 /// Get mutable access to initialize the grid
-fn get_grid_mut() -> std::sync::RwLockWriteGuard<'static, Option<HashMap<(i32, i32), Vec<u64>>>> {
+fn get_grid_mut() -> std::sync::RwLockWriteGuard<'static, Option<BTreeMap<(i32, i32), Vec<u64>>>> {
     SPATIAL_GRID.write().unwrap()
 }
 
@@ -40,7 +40,7 @@ pub fn world_to_cell(x: f32, z: f32) -> (i32, i32) {
 /// Rebuild the spatial grid from all transform records
 /// Called at the start of each tick to ensure consistency
 pub fn rebuild_spatial_grid(ctx: &ReducerContext) {
-    let mut grid = HashMap::with_capacity(1000);
+    let mut grid = BTreeMap::new();
     
     // Index all entities with transforms
     for t in ctx.db.transform().iter() {

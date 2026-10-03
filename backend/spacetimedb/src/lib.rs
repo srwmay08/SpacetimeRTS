@@ -80,6 +80,8 @@ impl ResourceNodeType {
 pub struct GlobalState {
     #[primary_key] pub id: u32,
     pub time_of_day: f32,
+    #[default(0)]
+    pub last_npc_check: u64,
 }
 
 #[table(accessor = waypoint, public)]
@@ -433,7 +435,7 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_at: ScheduleAt::Interval(Duration::from_millis(100).into()),
     });
 
-    ctx.db.global_state().insert(GlobalState { id: 0, time_of_day: 8.0 });
+    ctx.db.global_state().insert(GlobalState { id: 0, time_of_day: 8.0, last_npc_check: 0 });
 
     seed_authoritative_recipes(ctx);
     ensure_npc_population(ctx);
@@ -573,6 +575,17 @@ pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
         if state.time_of_day >= 24.0 {
             state.time_of_day -= 24.0;
         }
+
+        // P2 Fix: Throttle NPC population checks to every 10 seconds instead of every 100ms tick
+        // This relies on the deterministic GlobalState rather than an AtomicU64 to preserve rollback safety.
+        let now_micros = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+        if now_micros.saturating_sub(state.last_npc_check) > 10_000_000 {
+            state.last_npc_check = now_micros;
+            if ctx.db.npc_brain().iter().count() < 8 {
+                ensure_npc_population(ctx);
+            }
+        }
+
         ctx.db.global_state().id().update(state);
     }
 
@@ -584,21 +597,6 @@ pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
 
     for id in expired_ids {
         ctx.db.waypoint().waypoint_id().delete(id);
-    }
-
-    // P2 Fix: Throttle NPC population checks to every 10 seconds instead of every 100ms tick
-    // This prevents server hitches from counting all NPCs and potentially spawning 16+ NPCs synchronously
-    static LAST_NPC_CHECK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let now_micros = ctx.timestamp.to_micros_since_unix_epoch() as u64;
-    let last_check = LAST_NPC_CHECK.load(std::sync::atomic::Ordering::Relaxed);
-    
-    // Check every 10 seconds (10_000_000 microseconds)
-    if now_micros.saturating_sub(last_check) > 10_000_000 {
-        LAST_NPC_CHECK.store(now_micros, std::sync::atomic::Ordering::Relaxed);
-        
-        if ctx.db.npc_brain().iter().count() < 8 {
-            ensure_npc_population(ctx);
-        }
     }
 }
 

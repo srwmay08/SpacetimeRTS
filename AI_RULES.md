@@ -17,6 +17,26 @@ We are developing a multiplayer fantasy real-time strategy and survival game pro
 - Leverage Rust's type system fully. Handle all `Result` and `Option` types explicitly—do not use `.unwrap()` in production logic unless invariants are absolutely guaranteed.
 - Write highly optimized code. Keep SpacetimeDB's compute energy (TeV) efficiency in mind by avoiding unnecessary allocations and optimizing index lookups.
 
+## 2.1 Agent Guardrails 🟡 (Phase 1 Checklist)
+**CRITICAL: SpacetimeDB Reducer Determinism & Rollback Safety**
+
+SpacetimeDB's rollback and multi-node determinism guarantees depend entirely on reducers being free of I/O, local clock reads, and unseeded randomness. AI agents *must* adhere to these constraints, as desync bugs surface silently at runtime, not at compile time.
+
+1. **Strict Determinism (No I/O or Clocks):** 
+   - NEVER use `std::time::SystemTime`, `std::time::Instant`, or OS-level time. ALWAYS use `ctx.timestamp` for time-dependent logic.
+   - NEVER perform file I/O (`std::fs`), network requests (`std::net`, HTTP), or threading.
+2. **Deterministic Randomness Only:** 
+   - NEVER use the `rand` crate's OS entropy (`thread_rng()`). 
+   - ALWAYS use a deterministic PRNG (like Xorshift) seeded by stable inputs like `ctx.timestamp.to_micros_since_unix_epoch()` or entity IDs.
+3. **Stable Iteration Orders:** 
+   - NEVER use `std::collections::HashMap` or `std::collections::HashSet`. Their default SipHash is randomized per-execution, destroying state determinism when iterated.
+   - ALWAYS use `std::collections::BTreeMap` or `std::collections::BTreeSet`.
+4. **Global State & Caching Limitations:** 
+   - Avoid mutating static global state unless explicitly used for non-authoritative caches (e.g., spatial grids). 
+   - Global caches MUST be deterministically rebuilt every tick, as SpacetimeDB rollbacks do not rewind WebAssembly linear memory/statics.
+5. **Mandatory Human Review:** 
+   - Treat ANY agent-authored reducer or logic change as needing explicit human review specifically for determinism. Even if tests pass, desyncs from these bugs surface late.
+
 ### 3. Documentation, Change Tracking & Version Control
 - Provide descriptive, in-line commentary for *every* architectural choice or logic modification. 
 - Clearly explain *why* a change was made directly above the modified block. Keep the reasoning tied to game mechanics, multiplayer sync efficiency, or schema design.

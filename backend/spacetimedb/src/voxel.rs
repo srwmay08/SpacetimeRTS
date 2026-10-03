@@ -204,7 +204,7 @@ pub fn mutate_voxel_sphere(
     radius: f32,
     blast_damage: f32,
 ) -> Vec<(i32, i32, i32)> {
-    let mut modified_chunk_keys = std::collections::HashSet::new();
+    let mut modified_chunk_keys = std::collections::BTreeSet::new();
     let mut invalidated_voxels = Vec::new();
 
     let min_x = ((center_x - radius) / VOXEL_SIZE).floor() as i32;
@@ -273,7 +273,7 @@ pub fn mutate_voxel_sphere(
 // 8.0-meter physical connectivity span before overhangs collapse into falling rubble.
 fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i32, i32)]) {
     let mut check_queue = std::collections::VecDeque::new();
-    let mut visited = std::collections::HashSet::new();
+    let mut visited = std::collections::BTreeSet::new();
 
     for &(rx, ry, rz) in removed_voxels {
         let neighbors = [
@@ -310,7 +310,7 @@ fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i3
         if wy <= ground_y || y <= 0 {
             has_ground_support = true;
         } else {
-            let mut search_visited = std::collections::HashSet::new();
+            let mut search_visited = std::collections::BTreeSet::new();
             let mut search_queue = std::collections::VecDeque::new();
             search_queue.push_back((x, y, z, 0));
             search_visited.insert((x, y, z));
