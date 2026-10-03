@@ -2,11 +2,11 @@
 // COMBAT MODULE & AUTHORITATIVE RESOLUTION (SpacetimeDB v2.x / Rust 2024)
 // ----------------------------------------------------------------------------
 // Architectural Note: Implements the server-authoritative combat validation loop.
-// Projectiles are authoritatively tracked through `ActiveProjectile` records with
-// ballistic simulation (gravity, drag, ray swept checks). Hit registration matches
-// against `HitboxHistory` snapshots using client tick IDs to provide responsive,
-// anti-cheat verified lag compensation. Player avatars persist across disconnections,
-// remaining vulnerable to combat damage and dropping corpse containers upon death.
+// Features a classless weapon system supporting 1H, 2H, polearms, brawling,
+// runestaves, dual-wielding (dual melee, hybrid melee/ranged, dual ranged),
+// and ballistic simulation for sniper rifles, shotguns, revolvers, bows, and spells.
+// Hit registration matches against `HitboxHistory` snapshots using client tick IDs
+// for responsive, anti-cheat verified lag compensation.
 
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
 use crate::movement::player_session;
@@ -17,10 +17,6 @@ use crate::inventory;
 use crate::ai::{npc_brain, pet_component, peasant, harvestable_corpse};
 use crate::building::structure;
 use crate::voxel;
-
-// Architectural Note: Bringing the `player` accessor trait into scope is strictly
-// required by SpacetimeDB v2.x so `ctx.db.player()` can be called during damage
-// resolution to check avatar persistence across disconnect states without E0599.
 use crate::player;
 
 // ----------------------------------------------------------------------------
@@ -83,6 +79,11 @@ pub enum ProjectileKind {
     TrebuchetShell,
     BallistaSpear,
     MagicMissile,
+    HandCrossbowBolt,
+    RevolverBullet,
+    ShotgunPellet,
+    SniperBullet,
+    FireballBall,
 }
 
 /// Architectural Note: Authoritative ballistic trajectory simulation table.
@@ -109,6 +110,36 @@ pub struct ActiveProjectile {
     pub lifetime: f32,
 }
 
+/// Architectural Note: Classless player combat skill and weapon experience table.
+/// Any player can train in any weapon type without class restrictions.
+#[derive(Clone)]
+#[table(accessor = weapon_skill, public)]
+pub struct WeaponSkill {
+    #[primary_key]
+    pub entity_id: u64,
+    pub generic_physical: u32,
+    pub edged_xp: u32,
+    pub pointed_xp: u32,
+    pub blunt_xp: u32,
+    pub two_handed_xp: u32,
+    pub polearm_xp: u32,
+    pub brawling_xp: u32,
+    pub missile_xp: u32,
+    pub firearm_xp: u32,
+    pub runestaff_xp: u32,
+}
+
+/// Architectural Note: Equipment loadout table tracking MainHand and OffHand items.
+/// Enforces physical constraints (2H occupies both hands; 1H can be dual-wielded).
+#[derive(Clone)]
+#[table(accessor = equipment_loadout, public)]
+pub struct EquipmentLoadout {
+    #[primary_key]
+    pub entity_id: u64,
+    pub main_hand: String,
+    pub off_hand: String,
+}
+
 // ----------------------------------------------------------------------------
 // CORE LOGIC & HELPERS
 // ----------------------------------------------------------------------------
@@ -124,10 +155,13 @@ pub fn get_standing(a: &Faction, b: &Faction) -> FactionStanding {
     }
 }
 
-/// Architectural Note: Applies authoritative combat damage to any entity.
-/// Disconnected/offline players retain their physical avatars in the world.
-/// If an offline player dies, their inventory is spilled into a `HarvestableCorpse`,
-/// and their avatar is reset to origin while maintaining disconnected state.
+pub fn is_weapon_two_handed(weapon_name: &str) -> bool {
+    matches!(
+        weapon_name,
+        "Greatsword" | "Maul" | "Halberd" | "Spear" | "Longbow" | "Shotgun" | "Sniper Rifle" | "Runestaff"
+    )
+}
+
 pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
     let Some(mut hp) = ctx.db.health().entity_id().find(target_id) else {
         return;
@@ -136,7 +170,6 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
     hp.current = (hp.current - amount).max(0.0);
 
     if hp.current == 0.0 {
-        // Query `Player` table directly to verify player identity regardless of online/offline status
         if let Some(player) = ctx.db.player().entity_id().find(target_id) {
             hp.current = hp.max;
             ctx.db.health().entity_id().update(hp);
@@ -171,7 +204,6 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
                     ctx.db.inventory().entity_id().update(inv);
                 }
 
-                // Relocate avatar to safe respawn point; remains persistent if offline
                 transform.x = 0.0;
                 transform.z = 0.0;
                 transform.y = crate::get_terrain_height(0.0, 0.0) + 1.05;
@@ -183,7 +215,6 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
                 target_id, player.is_online
             );
         } else {
-            // Target is an NPC, Pet, or Peasant
             ctx.db.health().entity_id().delete(target_id);
             ctx.db.transform().entity_id().delete(target_id);
             ctx.db.faction_component().entity_id().delete(target_id);
@@ -205,12 +236,7 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
 // PROJECTILE BALLISTICS TICK SYSTEM
 // ----------------------------------------------------------------------------
 
-/// Architectural Note: Server-Authoritative Ballistic Simulation Loop.
-/// Executed during the high-frequency server tick (16ms) to integrate trajectory,
-/// execute swept raycasts against entities, and mutate the voxel grid on impact.
-/// P1 Fix: Early exit when no projectiles exist to avoid unnecessary table scans.
 pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
-    // P1 Fix: Skip entire tick if no active projectiles
     let projectile_count = ctx.db.active_projectile().iter().count();
     if projectile_count == 0 {
         return;
@@ -247,7 +273,6 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
             let ndy = segment_dy / segment_len;
             let ndz = segment_dz / segment_len;
 
-            // 1. RAPIER OPTIMIZATION: Ray sweep against entities and structures
             if let Some((user_data, hx, hy, hz, _toi)) = crate::physics::cast_ray(
                 prev_x, prev_y, prev_z,
                 ndx, ndy, ndz,
@@ -267,7 +292,6 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
                 }
             }
 
-            // 2. Check collision with destructible voxel terrain
             if !hit_detected {
                 let voxel_mat = voxel::get_voxel_at(ctx, proj.pos_x, proj.pos_y, proj.pos_z);
                 if voxel_mat.is_solid() {
@@ -283,7 +307,6 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
                     apply_damage(ctx, target_id, proj.damage);
                 }
 
-                // If explosive or siege projectile, mutate the voxel grid
                 if proj.blast_radius > 0.0 {
                     voxel::mutate_voxel_sphere(
                         ctx,
@@ -295,13 +318,20 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
                     );
                 }
 
+                let event_type = match proj.kind {
+                    ProjectileKind::CatapultRock | ProjectileKind::TrebuchetShell => "SiegeImpact".to_string(),
+                    ProjectileKind::BallistaSpear => "BallistaImpact".to_string(),
+                    ProjectileKind::FireballBall => "FireballExplosion".to_string(),
+                    ProjectileKind::RevolverBullet => "BulletHit".to_string(),
+                    ProjectileKind::SniperBullet => "SniperImpact".to_string(),
+                    ProjectileKind::ShotgunPellet => "PelletHit".to_string(),
+                    ProjectileKind::HandCrossbowBolt => "BoltHit".to_string(),
+                    _ => "ProjectileHit".to_string(),
+                };
+
                 ctx.db.combat_event().insert(CombatEvent {
                     id: 0,
-                    event_type: match proj.kind {
-                        ProjectileKind::CatapultRock | ProjectileKind::TrebuchetShell => "SiegeImpact".to_string(),
-                        ProjectileKind::BallistaSpear => "BallistaImpact".to_string(),
-                        _ => "ProjectileHit".to_string(),
-                    },
+                    event_type,
                     x: hit_point.0,
                     y: hit_point.1,
                     z: hit_point.2,
@@ -316,8 +346,268 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
 }
 
 // ----------------------------------------------------------------------------
-// COMBAT REDUCERS
+// LOADOUT & WEAPON REDUCERS
 // ----------------------------------------------------------------------------
+
+#[reducer]
+pub fn equip_weapon(
+    ctx: &ReducerContext,
+    slot: String,
+    weapon_name: String,
+) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let inv = ctx.db.inventory().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Inventory not found.".to_string())?;
+
+    if !crate::has_item(&inv, &weapon_name, 1) && weapon_name != "Unarmed" {
+        return Err(format!("Weapon '{}' not in inventory.", weapon_name));
+    }
+
+    let is_two_handed = is_weapon_two_handed(&weapon_name);
+
+    let mut loadout = ctx.db.equipment_loadout().entity_id().find(session.entity_id)
+        .unwrap_or(EquipmentLoadout {
+            entity_id: session.entity_id,
+            main_hand: "None".to_string(),
+            off_hand: "None".to_string(),
+        });
+
+    log::debug!("Player {} equipped {} in {}", session.entity_id, weapon_name, slot);
+
+    if slot == "MainHand" {
+        if is_two_handed && loadout.off_hand != "None" {
+            return Err("Cannot equip two-handed weapon while off-hand is occupied.".to_string());
+        }
+        loadout.main_hand = weapon_name;
+    } else if slot == "OffHand" {
+        if is_weapon_two_handed(&loadout.main_hand) {
+            return Err("Cannot equip off-hand when main-hand is two-handed.".to_string());
+        }
+        if is_two_handed {
+            return Err("Cannot equip a two-handed weapon in off-hand.".to_string());
+        }
+        loadout.off_hand = weapon_name;
+    } else {
+        return Err("Invalid slot: Must be 'MainHand' or 'OffHand'.".to_string());
+    }
+
+    if ctx.db.equipment_loadout().entity_id().find(session.entity_id).is_some() {
+        ctx.db.equipment_loadout().entity_id().update(loadout);
+    } else {
+        ctx.db.equipment_loadout().insert(loadout);
+    }
+
+    Ok(())
+}
+
+#[reducer]
+pub fn unequip_weapon(
+    ctx: &ReducerContext,
+    slot: String,
+) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let mut loadout = ctx.db.equipment_loadout().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Equipment loadout not found.".to_string())?;
+
+    if slot == "MainHand" {
+        loadout.main_hand = "None".to_string();
+    } else if slot == "OffHand" {
+        loadout.off_hand = "None".to_string();
+    } else {
+        return Err("Invalid slot: Must be 'MainHand' or 'OffHand'.".to_string());
+    }
+
+    ctx.db.equipment_loadout().entity_id().update(loadout);
+    Ok(())
+}
+
+#[reducer]
+pub fn fire_ranged_weapon(
+    ctx: &ReducerContext,
+    slot: String,
+    client_tick: u64,
+    origin_x: f32, origin_y: f32, origin_z: f32,
+    dir_x: f32, dir_y: f32, dir_z: f32,
+) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let loadout = ctx.db.equipment_loadout().entity_id().find(session.entity_id)
+        .ok_or_else(|| "No equipment loadout found.".to_string())?;
+
+    let weapon_name = match slot.as_str() {
+        "MainHand" => &loadout.main_hand,
+        "OffHand" => &loadout.off_hand,
+        _ => return Err("Invalid hand slot specified.".to_string()),
+    };
+
+    let dir_len_sq = dir_x * dir_x + dir_y * dir_y + dir_z * dir_z;
+    if dir_len_sq < 0.0001 {
+        return Err("Invalid firing vector: near-zero magnitude.".to_string());
+    }
+    let inv_len = 1.0 / dir_len_sq.sqrt();
+    let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
+
+    match weapon_name.as_str() {
+        "Revolver" => {
+            ctx.db.active_projectile().insert(ActiveProjectile {
+                projectile_id: 0,
+                shooter_id: session.entity_id,
+                kind: ProjectileKind::RevolverBullet,
+                pos_x: origin_x + ndx * 0.6,
+                pos_y: origin_y + ndy * 0.6,
+                pos_z: origin_z + ndz * 0.6,
+                vel_x: ndx * 180.0,
+                vel_y: ndy * 180.0,
+                vel_z: ndz * 180.0,
+                gravity: 2.0,
+                drag: 0.0005,
+                damage: 46.0,
+                blast_radius: 0.0,
+                start_tick: client_tick,
+                lifetime: 2.0,
+            });
+            award_combat_xp(ctx, session.entity_id, "Firearm", 25);
+        }
+        "Hand Crossbow" => {
+            ctx.db.active_projectile().insert(ActiveProjectile {
+                projectile_id: 0,
+                shooter_id: session.entity_id,
+                kind: ProjectileKind::HandCrossbowBolt,
+                pos_x: origin_x + ndx * 0.6,
+                pos_y: origin_y + ndy * 0.6,
+                pos_z: origin_z + ndz * 0.6,
+                vel_x: ndx * 42.0,
+                vel_y: ndy * 42.0,
+                vel_z: ndz * 42.0,
+                gravity: 5.5,
+                drag: 0.001,
+                damage: 28.0,
+                blast_radius: 0.0,
+                start_tick: client_tick,
+                lifetime: 3.0,
+            });
+            award_combat_xp(ctx, session.entity_id, "Missile", 20);
+        }
+        "Shotgun" => {
+            let pellet_spread = [
+                (0.0, 0.0), (-0.03, 0.02), (0.03, 0.02), (-0.02, -0.03), (0.02, -0.03),
+                (0.05, 0.0), (-0.05, 0.0), (0.0, 0.04), (0.0, -0.04), (0.04, 0.04),
+                (-0.04, -0.04), (0.03, -0.02)
+            ];
+            for (sx, sy) in pellet_spread {
+                let px = ndx + sx;
+                let py = ndy + sy;
+                let pz = ndz;
+                let plen = (px * px + py * py + pz * pz).sqrt();
+                ctx.db.active_projectile().insert(ActiveProjectile {
+                    projectile_id: 0,
+                    shooter_id: session.entity_id,
+                    kind: ProjectileKind::ShotgunPellet,
+                    pos_x: origin_x + px * 0.5,
+                    pos_y: origin_y + py * 0.5,
+                    pos_z: origin_z + pz * 0.5,
+                    vel_x: (px / plen) * 120.0,
+                    vel_y: (py / plen) * 120.0,
+                    vel_z: (pz / plen) * 120.0,
+                    gravity: 3.5,
+                    drag: 0.004,
+                    damage: 18.0,
+                    blast_radius: 0.0,
+                    start_tick: client_tick,
+                    lifetime: 1.0,
+                });
+            }
+            award_combat_xp(ctx, session.entity_id, "Firearm", 30);
+        }
+        "Sniper Rifle" => {
+            ctx.db.active_projectile().insert(ActiveProjectile {
+                projectile_id: 0,
+                shooter_id: session.entity_id,
+                kind: ProjectileKind::SniperBullet,
+                pos_x: origin_x + ndx * 0.9,
+                pos_y: origin_y + ndy * 0.9,
+                pos_z: origin_z + ndz * 0.9,
+                vel_x: ndx * 820.0,
+                vel_y: ndy * 820.0,
+                vel_z: ndz * 820.0,
+                gravity: 0.8,
+                drag: 0.0001,
+                damage: 160.0,
+                blast_radius: 0.0,
+                start_tick: client_tick,
+                lifetime: 4.0,
+            });
+            award_combat_xp(ctx, session.entity_id, "Firearm", 45);
+        }
+        "Runestaff" => {
+            ctx.db.active_projectile().insert(ActiveProjectile {
+                projectile_id: 0,
+                shooter_id: session.entity_id,
+                kind: ProjectileKind::MagicMissile,
+                pos_x: origin_x + ndx * 0.8,
+                pos_y: origin_y + ndy * 0.8,
+                pos_z: origin_z + ndz * 0.8,
+                vel_x: ndx * 55.0,
+                vel_y: ndy * 55.0,
+                vel_z: ndz * 55.0,
+                gravity: 0.0,
+                drag: 0.0,
+                damage: 35.0,
+                blast_radius: 0.0,
+                start_tick: client_tick,
+                lifetime: 4.0,
+            });
+            award_combat_xp(ctx, session.entity_id, "Runestaff", 25);
+        }
+        "Crude Bow" | "Longbow" => {
+            ctx.db.active_projectile().insert(ActiveProjectile {
+                projectile_id: 0,
+                shooter_id: session.entity_id,
+                kind: ProjectileKind::Arrow,
+                pos_x: origin_x + ndx * 0.8,
+                pos_y: origin_y + ndy * 0.8,
+                pos_z: origin_z + ndz * 0.8,
+                vel_x: ndx * 50.0,
+                vel_y: ndy * 50.0,
+                vel_z: ndz * 50.0,
+                gravity: 4.8,
+                drag: 0.001,
+                damage: 32.0,
+                blast_radius: 0.0,
+                start_tick: client_tick,
+                lifetime: 5.0,
+            });
+            award_combat_xp(ctx, session.entity_id, "Missile", 20);
+        }
+        _ => return Err(format!("Weapon '{}' in {} cannot fire ranged projectiles.", weapon_name, slot)),
+    }
+
+    Ok(())
+}
+
+fn award_combat_xp(ctx: &ReducerContext, entity_id: u64, category: &str, amount: u32) {
+    if let Some(mut skill) = ctx.db.weapon_skill().entity_id().find(entity_id) {
+        match category {
+            "Edged" => skill.edged_xp = skill.edged_xp.saturating_add(amount),
+            "Pointed" => skill.pointed_xp = skill.pointed_xp.saturating_add(amount),
+            "Blunt" => skill.blunt_xp = skill.blunt_xp.saturating_add(amount),
+            "TwoHanded" => skill.two_handed_xp = skill.two_handed_xp.saturating_add(amount),
+            "Polearm" => skill.polearm_xp = skill.polearm_xp.saturating_add(amount),
+            "Brawling" => skill.brawling_xp = skill.brawling_xp.saturating_add(amount),
+            "Missile" => skill.missile_xp = skill.missile_xp.saturating_add(amount),
+            "Firearm" => skill.firearm_xp = skill.firearm_xp.saturating_add(amount),
+            "Runestaff" => skill.runestaff_xp = skill.runestaff_xp.saturating_add(amount),
+            _ => {}
+        }
+        skill.generic_physical = (skill.generic_physical + (amount / 10)).min(100);
+        ctx.db.weapon_skill().entity_id().update(skill);
+    }
+}
 
 #[reducer]
 pub fn fire_weapon(
@@ -339,7 +629,6 @@ pub fn fire_weapon(
     let inv_len = 1.0 / dir_len_sq.sqrt();
     let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
 
-    // RAPIER LAG COMPENSATION: Build a local physics query pipeline representing the historical state
     let mut colliders = rapier3d::prelude::ColliderSet::new();
     for history in ctx.db.hitbox_history().iter() {
         if history.entity_id == session.entity_id { continue; }
@@ -354,7 +643,6 @@ pub fn fire_weapon(
         }
     }
     
-    // Check structures against their current state (structures don't move so lag compensation isn't needed)
     for s in ctx.db.structure().iter() {
         let col = rapier3d::prelude::ColliderBuilder::cuboid(1.25, 1.25, 1.25)
             .translation(rapier3d::prelude::Vector::new(s.x, s.y, s.z))
@@ -382,35 +670,15 @@ pub fn fire_weapon(
         
         hit_location = (hit_pt.x, hit_pt.y, hit_pt.z);
         
-        let mut damage = 20.0;
-        let mut struct_damage = 20.0;
-        if let Some(mut inv) = ctx.db.inventory().entity_id().find(session.entity_id) {
-            if inv.slots.iter().any(|s| s.item_type == "Revolver" && s.count > 0) {
-                damage = 45.0;
-                struct_damage = 30.0;
-                if crate::has_item(&inv, "Revolver Ammo", 1) {
-                    crate::remove_item(&mut inv, "Revolver Ammo", 1);
-                    ctx.db.inventory().entity_id().update(inv);
-                }
-            } else if inv.slots.iter().any(|s| s.item_type == "Shotgun" && s.count > 0) {
-                damage = 16.0;
-                struct_damage = 15.0;
-                if crate::has_item(&inv, "Shotgun Shell", 1) {
-                    crate::remove_item(&mut inv, "Shotgun Shell", 1);
-                    ctx.db.inventory().entity_id().update(inv);
-                }
-            }
-        }
-
         if is_structure {
-            crate::building::damage_structure(ctx, target_id, struct_damage);
+            crate::building::damage_structure(ctx, target_id, 20.0);
         } else {
-            hit_entity = Some((target_id, damage));
+            hit_entity = Some(target_id);
         }
     }
 
-    if let Some((target_id, dmg)) = hit_entity {
-        apply_damage(ctx, target_id, dmg);
+    if let Some(target_id) = hit_entity {
+        apply_damage(ctx, target_id, 20.0);
 
         ctx.db.combat_event().insert(CombatEvent {
             id: 0,
@@ -420,7 +688,8 @@ pub fn fire_weapon(
             z: hit_location.2,
         });
 
-        log::debug!("Hit validated via Lag Compensation: Entity {} hit {} for {} dmg", session.entity_id, target_id, dmg);
+        award_combat_xp(ctx, session.entity_id, "Edged", 15);
+        log::debug!("Hit validated via Lag Compensation: Entity {} hit {}", session.entity_id, target_id);
     }
 
     Ok(())
@@ -439,44 +708,23 @@ pub fn fire_bow(
     let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
         .ok_or_else(|| "Inventory not found.".to_string())?;
 
-    let is_crossbow = inv.slots.iter().any(|s| s.item_type == "Crossbow" && s.count > 0);
-    let is_hand_crossbow = inv.slots.iter().any(|s| s.item_type == "Hand Crossbow" && s.count > 0);
-    let is_bow = inv.slots.iter().any(|s| (s.item_type == "Bow" || s.item_type == "Crude Bow") && s.count > 0);
-
-    if !is_crossbow && !is_hand_crossbow && !is_bow {
-        return Err("You must have a Bow or Crossbow equipped to fire.".to_string());
+    let has_bow = inv.slots.iter().any(|s| (s.item_type == "Crude Bow" || s.item_type == "Longbow") && s.count > 0);
+    if !has_bow {
+        return Err("You must have a Bow equipped to fire.".to_string());
     }
 
-    let (ammo_type, damage, speed, gravity, drag) = if is_crossbow {
-        if crate::has_item(&inv, "Crossbow Bolt", 1) {
-            ("Crossbow Bolt", 65.0, 75.0, 2.0, 0.0005)
-        } else if crate::has_item(&inv, "Flint Arrow", 1) {
-            ("Flint Arrow", 50.0, 70.0, 2.2, 0.0006)
-        } else if crate::has_item(&inv, "Wood Arrow", 1) {
-            ("Wood Arrow", 40.0, 68.0, 2.5, 0.0007)
-        } else {
-            return Err("No bolts or arrows remaining in inventory.".to_string());
-        }
-    } else if is_hand_crossbow {
-        if crate::has_item(&inv, "Crossbow Bolt", 1) {
-            ("Crossbow Bolt", 42.0, 55.0, 3.2, 0.001)
-        } else if crate::has_item(&inv, "Wood Arrow", 1) {
-            ("Wood Arrow", 28.0, 50.0, 3.6, 0.001)
-        } else {
-            return Err("No bolts or arrows remaining in inventory.".to_string());
-        }
+    let arrow_type = if crate::has_item(&inv, "Flint Arrow", 1) {
+        "Flint Arrow"
+    } else if crate::has_item(&inv, "Wood Arrow", 1) {
+        "Wood Arrow"
     } else {
-        if crate::has_item(&inv, "Flint Arrow", 1) {
-            ("Flint Arrow", 35.0, 48.0, 4.8, 0.001)
-        } else if crate::has_item(&inv, "Wood Arrow", 1) {
-            ("Wood Arrow", 20.0, 46.0, 5.0, 0.001)
-        } else {
-            return Err("No arrows remaining in inventory.".to_string());
-        }
+        return Err("No arrows remaining in inventory.".to_string());
     };
 
-    crate::remove_item(&mut inv, ammo_type, 1);
+    crate::remove_item(&mut inv, arrow_type, 1);
     ctx.db.inventory().entity_id().update(inv);
+
+    let arrow_damage = if arrow_type == "Flint Arrow" { 35.0 } else { 20.0 };
 
     let dir_len_sq = dir_x * dir_x + dir_y * dir_y + dir_z * dir_z;
     if dir_len_sq < 0.0001 {
@@ -485,7 +733,8 @@ pub fn fire_bow(
     let inv_len = 1.0 / dir_len_sq.sqrt();
     let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
 
-    // Spawn authoritative ballistic projectile
+    let speed = 48.0;
+
     ctx.db.active_projectile().insert(ActiveProjectile {
         projectile_id: 0,
         shooter_id: session.entity_id,
@@ -496,14 +745,15 @@ pub fn fire_bow(
         vel_x: ndx * speed,
         vel_y: ndy * speed,
         vel_z: ndz * speed,
-        gravity,
-        drag,
-        damage,
+        gravity: 4.8,
+        drag: 0.001,
+        damage: arrow_damage,
         blast_radius: 0.0,
         start_tick: client_tick,
         lifetime: 5.0,
     });
 
+    award_combat_xp(ctx, session.entity_id, "Missile", 20);
     log::debug!("Player {} fired authoritative arrow projectile.", session.entity_id);
     Ok(())
 }
