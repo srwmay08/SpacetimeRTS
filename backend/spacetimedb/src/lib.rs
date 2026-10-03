@@ -18,7 +18,7 @@ pub mod spatial;
 pub mod physics;
 
 use crate::movement::{transform, player_session};
-use crate::combat::{health, hitbox_history, faction_component, Faction};
+use crate::combat::{health, hitbox_history, faction_component, Faction, weapon_skill, equipment_loadout};
 use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse, peasant, pet_component};
 use crate::building::{structure, Structure};
 use crate::voxel::voxel_chunk;
@@ -759,6 +759,30 @@ pub fn client_connected(ctx: &ReducerContext) {
             });
         }
 
+        if ctx.db.weapon_skill().entity_id().find(entity_id).is_none() {
+            ctx.db.weapon_skill().insert(combat::WeaponSkill {
+                entity_id,
+                generic_physical: 10,
+                edged_xp: 100,
+                pointed_xp: 100,
+                blunt_xp: 100,
+                two_handed_xp: 100,
+                polearm_xp: 100,
+                brawling_xp: 100,
+                missile_xp: 100,
+                firearm_xp: 100,
+                runestaff_xp: 100,
+            });
+        }
+
+        if ctx.db.equipment_loadout().entity_id().find(entity_id).is_none() {
+            ctx.db.equipment_loadout().insert(combat::EquipmentLoadout {
+                entity_id,
+                main_hand: "None".to_string(),
+                off_hand: "None".to_string(),
+            });
+        }
+
         if let Some(mut inv) = ctx.db.inventory().entity_id().find(entity_id) {
             ensure_inventory_capacity(&mut inv);
             ctx.db.inventory().entity_id().update(inv);
@@ -799,6 +823,26 @@ pub fn client_connected(ctx: &ReducerContext) {
 
         ctx.db.hitbox_history().insert(combat::HitboxHistory {
             entity_id, snapshots: Vec::new(),
+        });
+
+        ctx.db.weapon_skill().insert(combat::WeaponSkill {
+            entity_id,
+            generic_physical: 10,
+            edged_xp: 100,
+            pointed_xp: 100,
+            blunt_xp: 100,
+            two_handed_xp: 100,
+            polearm_xp: 100,
+            brawling_xp: 100,
+            missile_xp: 100,
+            firearm_xp: 100,
+            runestaff_xp: 100,
+        });
+
+        ctx.db.equipment_loadout().insert(combat::EquipmentLoadout {
+            entity_id,
+            main_hand: "None".to_string(),
+            off_hand: "None".to_string(),
         });
 
         let mut slots = Vec::with_capacity(16);

@@ -42,11 +42,9 @@ mod inventory {
     #[test]
     fn add_respects_max_slots() {
         let mut inv = Inventory::new(1);
-        // Fill all 16 slots with different items
         for i in 0..16 {
             inv.add_item(&format!("Item{}", i), 50);
         }
-        // Try to add one more
         inv.add_item("Wood", 10);
         assert_eq!(inv.slots.len(), 16);
     }
@@ -54,13 +52,10 @@ mod inventory {
     #[test]
     fn add_partial_fill_when_slots_full() {
         let mut inv = Inventory::new(1);
-        // Fill 15 slots
         for i in 0..15 {
             inv.add_item(&format!("Item{}", i), 50);
         }
-        // 16th slot partially filled
         inv.add_item("Wood", 45);
-        // Add 10 more wood — 5 should fit, 5 lost
         inv.add_item("Wood", 10);
         assert_eq!(inv.slots.len(), 16);
         assert_eq!(inv.slots[15].count, 50);
@@ -155,6 +150,11 @@ mod crafting {
         assert!(recipes.iter().any(|r| r.recipe_id == "Hammer"));
         assert!(recipes.iter().any(|r| r.recipe_id == "Stone Axe"));
         assert!(recipes.iter().any(|r| r.recipe_id == "Crude Bow"));
+        assert!(recipes.iter().any(|r| r.recipe_id == "Hand Crossbow"));
+        assert!(recipes.iter().any(|r| r.recipe_id == "Revolver"));
+        assert!(recipes.iter().any(|r| r.recipe_id == "Shotgun"));
+        assert!(recipes.iter().any(|r| r.recipe_id == "Sniper Rifle"));
+        assert!(recipes.iter().any(|r| r.recipe_id == "Runestaff"));
     }
 
     #[test]
@@ -198,7 +198,6 @@ mod crafting {
         inv.add_item("Wood", 10);
         inv.add_item("Leather Scraps", 4);
 
-        // No station provided
         assert_eq!(
             bow_recipe.can_craft(&inv, None, false),
             Err("Missing required crafting station")
@@ -242,7 +241,7 @@ mod crafting {
             "Enchanted Staff",
             1,
             "Workbench",
-            true, // Requires roof!
+            true,
             vec![("Wood", 5)],
         );
 
@@ -254,6 +253,326 @@ mod crafting {
             Err("Requires roof/shelter")
         );
         assert!(custom_recipe.can_craft(&inv, Some("Workbench"), true).is_ok());
+    }
+}
+
+// ============================================================================
+// WEAPONS SYSTEM & DUAL-WIELDING LOADOUT TESTS
+// ============================================================================
+
+mod weapon_system {
+    use super::*;
+
+    #[test]
+    fn weapon_catalog_categories_and_grips() {
+        let longsword = create_weapon("Longsword").unwrap();
+        assert_eq!(longsword.category, WeaponCategory::Edged);
+        assert_eq!(longsword.grip, WeaponGrip::OneHanded);
+        assert!(longsword.is_one_handed());
+        assert!(!longsword.is_two_handed());
+
+        let rapier = create_weapon("Rapier").unwrap();
+        assert_eq!(rapier.category, WeaponCategory::Pointed);
+        assert_eq!(rapier.grip, WeaponGrip::OneHanded);
+
+        let warhammer = create_weapon("Warhammer").unwrap();
+        assert_eq!(warhammer.category, WeaponCategory::Blunt);
+        assert_eq!(warhammer.grip, WeaponGrip::OneHanded);
+
+        let greatsword = create_weapon("Greatsword").unwrap();
+        assert_eq!(greatsword.category, WeaponCategory::TwoHanded);
+        assert_eq!(greatsword.grip, WeaponGrip::TwoHanded);
+        assert!(greatsword.is_two_handed());
+
+        let halberd = create_weapon("Halberd").unwrap();
+        assert_eq!(halberd.category, WeaponCategory::Polearm);
+        assert_eq!(halberd.grip, WeaponGrip::Polearm);
+        assert!(halberd.reach_meters > 3.0); // Reach weapon
+
+        let cestus = create_weapon("Cestus").unwrap();
+        assert_eq!(cestus.category, WeaponCategory::Brawling);
+        assert!(cestus.attack_speed >= 2.5); // High speed brawling
+    }
+
+    #[test]
+    fn dual_wielding_two_one_handed_melee() {
+        let mut loadout = EquippedLoadout::new();
+        let sword = create_weapon("Longsword").unwrap();
+        let dagger = create_weapon("Dagger").unwrap();
+
+        assert!(loadout.equip(HandSlot::MainHand, sword).is_ok());
+        assert!(loadout.equip(HandSlot::OffHand, dagger).is_ok());
+        assert!(loadout.is_dual_wielding());
+        assert!(!loadout.is_hybrid_melee_ranged());
+    }
+
+    #[test]
+    fn dual_wielding_cross_category_sword_and_revolver() {
+        let mut loadout = EquippedLoadout::new();
+        let sword = create_weapon("Longsword").unwrap();
+        let revolver = create_weapon("Revolver").unwrap();
+
+        // Sword in main-hand, revolver in off-hand
+        assert!(loadout.equip(HandSlot::MainHand, sword).is_ok());
+        assert!(loadout.equip(HandSlot::OffHand, revolver).is_ok());
+        assert!(loadout.is_dual_wielding());
+        assert!(loadout.is_hybrid_melee_ranged());
+    }
+
+    #[test]
+    fn dual_wielding_axe_and_hand_crossbow() {
+        let mut loadout = EquippedLoadout::new();
+        let axe = create_weapon("Handaxe").unwrap();
+        let hand_crossbow = create_weapon("Hand Crossbow").unwrap();
+
+        assert!(loadout.equip(HandSlot::MainHand, axe).is_ok());
+        assert!(loadout.equip(HandSlot::OffHand, hand_crossbow).is_ok());
+        assert!(loadout.is_dual_wielding());
+        assert!(loadout.is_hybrid_melee_ranged());
+    }
+
+    #[test]
+    fn dual_wielding_dual_ranged_gunslinger() {
+        let mut loadout = EquippedLoadout::new();
+        let rev1 = create_weapon("Revolver").unwrap();
+        let rev2 = create_weapon("Revolver").unwrap();
+
+        assert!(loadout.equip(HandSlot::MainHand, rev1).is_ok());
+        assert!(loadout.equip(HandSlot::OffHand, rev2).is_ok());
+        assert!(loadout.is_dual_wielding());
+        assert!(!loadout.is_hybrid_melee_ranged()); // Both are ranged
+    }
+
+    #[test]
+    fn cannot_equip_two_handed_in_offhand() {
+        let mut loadout = EquippedLoadout::new();
+        let sword = create_weapon("Longsword").unwrap();
+        let greatsword = create_weapon("Greatsword").unwrap();
+
+        assert!(loadout.equip(HandSlot::MainHand, sword).is_ok());
+        let res = loadout.equip(HandSlot::OffHand, greatsword);
+        assert_eq!(res, Err("Two-handed weapons cannot be held in the off-hand."));
+    }
+
+    #[test]
+    fn cannot_equip_two_handed_mainhand_while_offhand_occupied() {
+        let mut loadout = EquippedLoadout::new();
+        let dagger = create_weapon("Dagger").unwrap();
+        let sniper = create_weapon("Sniper Rifle").unwrap();
+
+        assert!(loadout.equip(HandSlot::OffHand, dagger).is_ok());
+        let res = loadout.equip(HandSlot::MainHand, sniper);
+        assert_eq!(res, Err("Cannot equip two-handed weapon while off-hand is occupied."));
+    }
+
+    #[test]
+    fn cannot_equip_offhand_when_mainhand_is_two_handed() {
+        let mut loadout = EquippedLoadout::new();
+        let halberd = create_weapon("Halberd").unwrap();
+        let dagger = create_weapon("Dagger").unwrap();
+
+        assert!(loadout.equip(HandSlot::MainHand, halberd).is_ok());
+        let res = loadout.equip(HandSlot::OffHand, dagger);
+        assert_eq!(res, Err("Cannot equip off-hand item when main-hand weapon requires two hands."));
+    }
+}
+
+// ============================================================================
+// RANGED WEAPONS & BALLISTICS BALANCE TESTS
+// ============================================================================
+
+mod ranged_balance {
+    use super::*;
+
+    #[test]
+    fn one_handed_vs_two_handed_ranged_distinction() {
+        let revolver = create_weapon("Revolver").unwrap();
+        let hand_crossbow = create_weapon("Hand Crossbow").unwrap();
+        let sniper = create_weapon("Sniper Rifle").unwrap();
+        let shotgun = create_weapon("Shotgun").unwrap();
+        let longbow = create_weapon("Longbow").unwrap();
+
+        // 1H Ranged are dual-wieldable with compact reach
+        assert_eq!(revolver.grip, WeaponGrip::OneHanded);
+        assert_eq!(hand_crossbow.grip, WeaponGrip::OneHanded);
+        assert!(revolver.reach_meters <= 50.0);
+        assert!(hand_crossbow.reach_meters <= 35.0);
+
+        // 2H Ranged are heavy with high range or specialized spreads
+        assert_eq!(sniper.grip, WeaponGrip::TwoHanded);
+        assert_eq!(shotgun.grip, WeaponGrip::TwoHanded);
+        assert_eq!(longbow.grip, WeaponGrip::TwoHanded);
+        assert!(sniper.reach_meters >= 200.0);
+        assert!(longbow.reach_meters >= 80.0);
+    }
+
+    #[test]
+    fn sniper_rifle_high_velocity_and_penetration() {
+        let sniper = create_weapon("Sniper Rifle").unwrap();
+        let profile = sniper.projectile_profile.as_ref().unwrap();
+
+        assert!(profile.muzzle_velocity >= 800.0, "Sniper velocity must be near-instant/hyper-speed");
+        assert!(profile.gravity < 1.0, "Sniper trajectory has minimal gravity drop");
+        assert!(sniper.armor_penetration >= 0.75, "Sniper ignores most armor");
+        assert_eq!(sniper.base_damage, 160.0);
+    }
+
+    #[test]
+    fn shotgun_pellet_spread_and_close_quarters_power() {
+        let shotgun = create_weapon("Shotgun").unwrap();
+        let profile = shotgun.projectile_profile.as_ref().unwrap();
+
+        assert_eq!(profile.pellet_count, 12, "Shotgun fires 12 spread pellets");
+        assert!(profile.spread_radians > 0.05, "Cone dispersion");
+        let total_point_blank_potential = shotgun.base_damage * profile.pellet_count as f32;
+        assert_eq!(total_point_blank_potential, 216.0, "Point blank shotgun damage is devastating");
+    }
+
+    #[test]
+    fn slow_moving_projectile_spells() {
+        let fireball = ProjectileKind::FireballBall;
+        let magic_missile = ProjectileKind::MagicMissile;
+
+        // Fireball is slow with wide area-of-effect blast
+        assert!(fireball.base_speed() <= 20.0, "Fireball is a slow, dodgeable projectile");
+        assert!(fireball.blast_radius() >= 4.0, "Fireball has explosive AoE blast");
+
+        // Magic missile is fast, direct, zero-g
+        assert!(magic_missile.base_speed() > fireball.base_speed());
+        assert_eq!(magic_missile.gravity(), 0.0, "Magic missile travels straight");
+        assert_eq!(magic_missile.blast_radius(), 0.0, "Magic missile is single-target");
+    }
+
+    #[test]
+    fn runestaff_magical_deflection() {
+        let runestaff = create_weapon("Runestaff").unwrap();
+        assert_eq!(runestaff.category, WeaponCategory::Runestaff);
+        assert_eq!(runestaff.grip, WeaponGrip::TwoHanded);
+
+        let skills = CharacterCombatSkills::new();
+        let mut arrow_weapon = create_weapon("Longbow").unwrap();
+
+        // Target with Runestaff deflecting incoming arrow
+        let result = resolve_weapon_attack(
+            &skills,
+            &mut arrow_weapon,
+            CombatManeuver::Strike,
+            HandSlot::MainHand,
+            false,
+            0.0,
+            true, // target has runestaff!
+        );
+
+        assert!(!result.hit_landed);
+        assert!(result.was_deflected);
+        assert_eq!(result.primary_verb, CombatFeedbackVerb::Resonate);
+        assert_eq!(result.secondary_verb, Some(CombatFeedbackVerb::Whine));
+    }
+}
+
+// ============================================================================
+// CLASSLESS SKILLS & PROGRESSION TESTS
+// ============================================================================
+
+mod classless_progression {
+    use super::*;
+
+    #[test]
+    fn skill_scaling_and_experience_gain() {
+        let mut skills = CharacterCombatSkills::new();
+        assert_eq!(skills.get_skill_level(WeaponCategory::Edged), 1);
+        assert_eq!(skills.damage_scaling_multiplier(WeaponCategory::Edged), 1.01);
+
+        // Train Edged weapons
+        skills.add_experience(WeaponCategory::Edged, 2000);
+        assert_eq!(skills.get_skill_level(WeaponCategory::Edged), 21);
+        assert!((skills.damage_scaling_multiplier(WeaponCategory::Edged) - 1.21).abs() < 0.001);
+
+        // Train Firearm without any class locks
+        skills.add_experience(WeaponCategory::Firearm, 3500);
+        assert_eq!(skills.get_skill_level(WeaponCategory::Firearm), 36);
+        assert!((skills.damage_scaling_multiplier(WeaponCategory::Firearm) - 1.36).abs() < 0.001);
+    }
+
+    #[test]
+    fn dual_wield_penalty_mitigated_by_generic_physical_skill() {
+        let mut skills = CharacterCombatSkills::new();
+        skills.generic_physical = 0;
+        assert_eq!(skills.dual_wield_penalty(), 0.30); // 30% penalty untrained
+
+        skills.generic_physical = 50;
+        assert!((skills.dual_wield_penalty() - 0.15).abs() < 0.001); // 15% penalty half-trained
+
+        skills.generic_physical = 100;
+        assert_eq!(skills.dual_wield_penalty(), 0.0); // 0% penalty fully mastered
+    }
+}
+
+// ============================================================================
+// COMBAT MANEUVERS & SENSORY FEEDBACK VERBS TESTS
+// ============================================================================
+
+mod maneuvers_and_feedback {
+    use super::*;
+
+    #[test]
+    fn maneuver_multipliers() {
+        assert_eq!(CombatManeuver::Chop.damage_multiplier(), 1.45);
+        assert_eq!(CombatManeuver::Riposte.damage_multiplier(), 1.50);
+        assert_eq!(CombatManeuver::Thrust.damage_multiplier(), 1.20);
+        assert_eq!(CombatManeuver::Slash.damage_multiplier(), 1.0);
+        assert_eq!(CombatManeuver::PommelStrike.damage_multiplier(), 0.65);
+        assert_eq!(CombatManeuver::Parry.damage_multiplier(), 0.0);
+    }
+
+    #[test]
+    fn thrust_armor_penetration_bonus() {
+        assert_eq!(CombatManeuver::Thrust.armor_penetration_bonus(), 0.35);
+        assert_eq!(CombatManeuver::Skewer.armor_penetration_bonus(), 0.35);
+        assert_eq!(CombatManeuver::Slash.armor_penetration_bonus(), 0.0);
+    }
+
+    #[test]
+    fn sensory_feedback_and_durability_verbs() {
+        let skills = CharacterCombatSkills::new();
+        let mut sword = create_weapon("Longsword").unwrap();
+
+        // Strike heavily armored target generates RainSparks and Clatter
+        let result = resolve_weapon_attack(
+            &skills,
+            &mut sword,
+            CombatManeuver::Slash,
+            HandSlot::MainHand,
+            false,
+            60.0, // High armor
+            false,
+        );
+
+        assert!(result.hit_landed);
+        assert_eq!(result.primary_verb, CombatFeedbackVerb::RainSparks);
+        assert_eq!(result.secondary_verb, Some(CombatFeedbackVerb::Clatter));
+        assert!(result.durability_loss >= 2);
+    }
+
+    #[test]
+    fn weapon_shattering_on_durability_depletion() {
+        let skills = CharacterCombatSkills::new();
+        let mut fragile_dagger = create_weapon("Dagger").unwrap();
+        fragile_dagger.durability = 1;
+
+        let result = resolve_weapon_attack(
+            &skills,
+            &mut fragile_dagger,
+            CombatManeuver::Chop,
+            HandSlot::MainHand,
+            false,
+            50.0,
+            false,
+        );
+
+        assert!(result.weapon_broken);
+        assert_eq!(result.primary_verb, CombatFeedbackVerb::Shatter);
+        assert_eq!(result.secondary_verb, Some(CombatFeedbackVerb::Snap));
     }
 }
 
@@ -560,11 +879,11 @@ mod combat {
     #[test]
     fn projectile_flight_simulation_arrow() {
         let pos = (0.0, 10.0, 0.0);
-        let vel = (0.0, 0.0, 45.0); // 45 m/s forward
+        let vel = (0.0, 0.0, 45.0);
         let dt = 0.1;
         let (new_pos, new_vel) = simulate_projectile_step(pos, vel, ProjectileKind::Arrow, dt);
 
-        assert!((new_pos.2 - 4.5).abs() < 0.001); // 45 * 0.1
+        assert!((new_pos.2 - 4.5).abs() < 0.001);
         assert!(new_pos.1 < 10.0, "Gravity drops Y pos");
         assert!(new_vel.1 < 0.0, "Gravity pulls downward");
         assert_eq!(new_vel.2, 45.0);
@@ -614,7 +933,7 @@ mod building {
         let f = Structure::foundation();
         let wall = f.attach_child("Wall", 1).unwrap();
         assert_eq!(wall.piece_type, "Wall");
-        assert_eq!(wall.stability, 80); // 100 - 20
+        assert_eq!(wall.stability, 80);
         assert!(!wall.is_grounded);
         assert_eq!(wall.parent_id, Some(f.structure_id));
         assert_eq!(wall.max_health, 200.0);
@@ -624,21 +943,21 @@ mod building {
     fn attach_floor_to_foundation() {
         let f = Structure::foundation();
         let floor = f.attach_child("Floor", 1).unwrap();
-        assert_eq!(floor.stability, 75); // 100 - 25
+        assert_eq!(floor.stability, 75);
     }
 
     #[test]
     fn attach_roof_to_foundation() {
         let f = Structure::foundation();
         let roof = f.attach_child("Roof", 1).unwrap();
-        assert_eq!(roof.stability, 70); // 100 - 30
+        assert_eq!(roof.stability, 70);
     }
 
     #[test]
     fn attach_ramp_to_foundation() {
         let f = Structure::foundation();
         let ramp = f.attach_child("Ramp", 1).unwrap();
-        assert_eq!(ramp.stability, 75); // 100 - 25
+        assert_eq!(ramp.stability, 75);
     }
 
     #[test]
@@ -646,13 +965,13 @@ mod building {
         let f = Structure::foundation();
         let wall = f.attach_child("Wall", 1).unwrap();
         let floor = wall.attach_child("Floor", 2).unwrap();
-        assert_eq!(floor.stability, 55); // 80 - 25
+        assert_eq!(floor.stability, 55);
     }
 
     #[test]
     fn cannot_attach_to_weak_structure() {
         let mut f = Structure::foundation();
-        f.stability = 15; // Too weak for wall (needs > 20)
+        f.stability = 15;
         assert!(f.attach_child("Wall", 1).is_none());
     }
 
@@ -677,16 +996,13 @@ mod building {
         assert!(bp.is_blueprint);
         assert_eq!(bp.construction_progress, 0);
 
-        // Cannot repair blueprint
         assert_eq!(bp.repair(50.0), 0.0);
 
-        // Contribute 50%
         let finished = bp.contribute_construction(50);
         assert!(!finished);
         assert_eq!(bp.construction_progress, 50);
-        assert_eq!(bp.current_health, 100.0); // 50% of 200
+        assert_eq!(bp.current_health, 100.0);
 
-        // Finish remaining 50%
         let finished2 = bp.contribute_construction(50);
         assert!(finished2);
         assert!(!bp.is_blueprint);
@@ -707,7 +1023,6 @@ mod building {
         assert_eq!(healed, 30.0);
         assert_eq!(wall.current_health, 180.0);
 
-        // Cannot overheal beyond max_health
         let overhealed = wall.repair(50.0);
         assert_eq!(overhealed, 20.0);
         assert_eq!(wall.current_health, 200.0);
@@ -807,7 +1122,6 @@ mod ai {
         for _ in 0..9 {
             assert!(!p.note_stuck_tick());
         }
-        // 10th consecutive stuck tick triggers unstuck routine
         assert!(p.note_stuck_tick());
         p.reset_stuck_ticks();
         assert_eq!(p.consecutive_stuck_ticks, 0);
@@ -921,17 +1235,14 @@ mod pet {
     fn pet_stance_combat_targeting() {
         let mut pet = PetComponent::new(1, 100);
 
-        // Follow stance doesn't auto-attack
         pet.stance = PetStance::Follow;
         assert!(!pet.should_attack_target(FactionStanding::KillOnSight, false));
         assert!(!pet.should_attack_target(FactionStanding::KillOnSight, true));
 
-        // Aggressive attacks any KillOnSight enemy
         pet.stance = PetStance::Aggressive;
         assert!(pet.should_attack_target(FactionStanding::KillOnSight, false));
         assert!(!pet.should_attack_target(FactionStanding::Neutral, false));
 
-        // Defensive only attacks enemies that attack the owner
         pet.stance = PetStance::Defensive;
         assert!(!pet.should_attack_target(FactionStanding::KillOnSight, false));
         assert!(pet.should_attack_target(FactionStanding::KillOnSight, true));
@@ -960,17 +1271,17 @@ mod day_night {
 
     #[test]
     fn advance_time_multiple_cycles() {
-        let t = advance_time_of_day(0.0, 50.0); // 2 full cycles + 2 hours
+        let t = advance_time_of_day(0.0, 50.0);
         assert!((t - 2.0).abs() < 0.001);
     }
 
     #[test]
     fn daylight_schedule() {
-        assert!(is_daylight(8.0));  // Morning
-        assert!(is_daylight(12.0)); // Noon
-        assert!(is_daylight(19.9)); // Dusk
-        assert!(!is_daylight(20.0)); // Night
-        assert!(!is_daylight(23.5)); // Midnight
-        assert!(!is_daylight(4.0));  // Pre-dawn
+        assert!(is_daylight(8.0));
+        assert!(is_daylight(12.0));
+        assert!(is_daylight(19.9));
+        assert!(!is_daylight(20.0));
+        assert!(!is_daylight(23.5));
+        assert!(!is_daylight(4.0));
     }
 }

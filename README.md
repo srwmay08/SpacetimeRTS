@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org/)
 [![SpacetimeDB](https://img.shields.io/badge/SpacetimeDB-v2.10-purple.svg)](https://spacetimedb.com)
 [![Bevy](https://img.shields.io/badge/bevy-0.14-blue.svg)](https://bevyengine.org/)
-[![Tests](https://img.shields.io/badge/tests-109%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-128%20passed-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A multiplayer fantasy RTS/survival hybrid exploring **[SpacetimeDB](https://spacetimedb.com)** as a real-time game backend — no traditional game server or networking middleware, just an in-memory relational database running transactional WebAssembly modules.
@@ -68,7 +68,37 @@ In conventional multiplayer architectures, developers maintain a web framework (
   - *Magic Missiles* ($30\,\text{m/s}$, straight-line zero gravity)
 - **Lag-Compensated Hit Registration:** The server maintains a 500ms `HitboxHistory` snapshot buffer, rewinding entity positions to the client's timestamp to perform anti-cheat validated swept intersection tests.
 
-### 5. NPC Ecosystem & Autonomous Population
+### 5. Classless Weapons, Dual-Wielding & Combat Maneuvers
+- **Classless Progression System:** No rigid character classes. Any character can train in any weapon style. Two parallel progression vectors:
+  - **Generic Physical Combat Skill (1–100):** Dictates baseline martial prowess, damage multipliers, critical strike chance, and dual-wield coordination (mitigating the dual-wield offhand penalty from $-30\%$ at skill 1 down to $0\%$ at skill 100).
+  - **Weapon Experience (Category XP):** Accumulates dynamically per weapon category (`Edged`, `Pointed`, `Blunt`, `TwoHanded`, `Polearm`, `Brawling`, `Missile`, `Firearm`, `Runestaff`), boosting base damage by $+2.5\%$ per level and critical chance by $+0.5\%$ per level.
+- **Weapon Grips & Dual-Wielding Matrix:**
+  - `OneHanded`: Compact melee and ranged weapons. Can be paired freely across both hands.
+  - `TwoHanded`: Heavy weaponry (Greatswords, Mauls, Longbows, Shotguns, Sniper Rifles). Requires both hands; disallows any offhand item. Cannot be equipped in offhand.
+  - `Polearm`: Long-hafted weapons (Halberds, Spears). Extended reach ($3.2\text{m} - 3.5\text{m}$), high stagger bonus ($+35\%$). Enforces two-handed grip.
+  - `Versatile`: Adaptable weapons usable one-handed or two-handed.
+- **Hybrid & Cross-Category Loadouts:**
+  - *Dual Melee:* Twin Handaxes, Longsword + Dagger, Knuckle-Dusters.
+  - *Dual Ranged (Gunslinger):* Dual 6-shot Revolvers, Dual Hand Crossbows.
+  - *Cross-Category Hybrids:* Longsword + Revolver, Handaxe + Hand Crossbow.
+  - *Brawling:* Cestus and Knuckle-Dusters provide blistering attack speed ($1.8 - 2.2\,\text{attacks/sec}$) with low stamina drain.
+  - *Runestaves:* Two-handed arcane conduits offering $+18\%$ passive runic deflection against incoming attacks and $+25\%$ spell projectile amplification.
+- **Ranged Weapon Ballistics & Projectile Balance:**
+  - *Hand Crossbow (1H):* 22m range, rapid cycle ($1.2\,\text{s}$), dual-wieldable with melee or offhand ranged.
+  - *Revolver (1H):* 6-shot cylinder, $280\,\text{m/s}$ bullet velocity, rapid trigger response, compact sidearm.
+  - *Shotgun (2H):* 12-pellet spread cone ($0.14\,\text{rad}$ dispersion), devastating point-blank stopping power ($12 \times 9 = 108$ max raw damage), steep damage falloff beyond $15\,\text{m}$.
+  - *Sniper Rifle (2H):* High-velocity round ($820\,\text{m/s}$), $+40\%$ innate armor penetration, flat ballistic trajectory, slow bolt cycle.
+  - *Slow-Moving Spell Projectiles (Fireball):* $18\,\text{m/s}$ travel speed allowing reactive evasion, massive $4.5\,\text{m}$ blast radius with 75 fire damage.
+  - *Pinpoint Arcane Projectiles (Magic Missile):* $55\,\text{m/s}$ zero-gravity line-of-sight tracking projectile.
+- **GemStone IV Maneuver Taxonomy (37 Maneuvers):**
+  - *Offensive:* Thrust, Slash, Chop, Draw Cut, Riposte, Lunge, Pommel Strike, Hilt Punch, Cleave, Overhead Slash, Upward Slash, Skewer, Shred, Puncture, Slice, Impale, Hack, Bash, Flail, Throw.
+  - *Defensive & Tactical:* Parry, Feint, Guard, Disarm, Bind, Dodge, Grapple, Side Step, Charge, Deflect, Counter, Flynning, Sweep.
+- **Sensory & Durability Feedback Verbs:**
+  - *Acoustic:* Hum, Whistle, Sing, Vibrate, Whine, Ring, Resonate, Echo, Clatter.
+  - *Impact:* Jar, Rain Sparks, Spit, Shower, Fountain, Spew, Bounce, Tumble.
+  - *Durability & Degradation:* Shatter, Crack, Crumble, Chip, Bend, Snap, Warp, Fold, Rust, Decay, Melt, Deform, Twist, Drop, Fall.
+
+### 6. NPC Ecosystem & Autonomous Population
 - **Population Manager:** Server automatically guarantees an active 16-creature perimeter around the player spawn, dynamically maintaining all mob archetypes:
   - 🦌 **Deer:** Passive herbivore, flees when startled.
   - 🐗 **Boars:** Defensive wildlife, retaliates when provoked.
@@ -89,7 +119,7 @@ In conventional multiplayer architectures, developers maintain a web framework (
   - `Defensive`: Only engage targets that deal damage to the owner.
   - `Aggressive`: Seek and destroy any `KillOnSight` hostile entering detection radius.
 
-### 6. Procedural Terrain & 3D Voxel World
+### 7. Procedural Terrain & 3D Voxel World
 - Multi-octave deterministic Perlin heightmap featuring natural river canyons and a lake basin at $(-35, -35)$.
 - 3D voxel chunk grid allowing terrain digging and filling.
 
@@ -104,7 +134,7 @@ In conventional multiplayer architectures, developers maintain a web framework (
 | **Physics** | Avian3D 0.1 / Rapier3D | Client prediction & authoritative server collision |
 | **Pure Logic** | `spacetime-rts-logic` | Deterministic, headless game rules crate (`backend/logic`) |
 | **Noise** | `noise` 0.9 | Deterministic procedural terrain generation |
-| **Tests** | **109 Automated Tests** | 90 headless logic tests + 19 backend SpacetimeDB integration tests |
+| **Tests** | **128 Automated Tests** | 109 headless logic tests + 19 backend SpacetimeDB integration tests |
 
 ---
 
@@ -161,12 +191,16 @@ SpacetimeRTS employs a decoupled testing architecture:
 - **`backend/logic` (`spacetime-rts-logic`):** Completely side-effect-free, headless game logic extracted from the database. Runs in **~0.2 seconds** without needing SpacetimeDB or GPU drivers.
 - **`backend/spacetimedb` (`backend`):** Tests database inventory pre-allocation, simulation determinism, and terrain height integration.
 
-### Run All Pure Logic Tests (90 Tests)
+### Run All Pure Logic Tests (109 Tests)
 ```bash
 cargo test -p spacetime-rts-logic
 ```
 
 **Coverage Breakdown:**
+- ⚔️ **Classless Weapons & Dual-Wielding (7 tests):** Grip rules (1H, 2H, Polearm, Versatile), dual melee, dual revolvers, cross-category sword + revolver and axe + hand crossbow, offhand 2H rejection.
+- 🎯 **Ranged Ballistics & Balance (5 tests):** 1H vs 2H ranged cadence, shotgun 12-pellet spread dispersion, sniper rifle $820\,\text{m/s}$ velocity and armor penetration, slow fireball ($18\,\text{m/s}$) vs fast magic missile ($55\,\text{m/s}$), runestaff deflection.
+- 📈 **Classless Progression & Scaling (2 tests):** Dual-wield penalty mitigation via Generic Physical Combat Skill (1–100), Weapon XP damage and crit scaling across categories.
+- 🥋 **Maneuvers, Penetration & Feedback (5 tests):** 37 GemStone IV combat maneuvers, thrust armor penetration bonus, sensory feedback verbs, weapon durability degradation and shattering.
 - 📦 **Inventory & Discovery (13 tests):** Add/remove, stacking (50/slot), 16-slot limits, partial drains, discovery flags.
 - 🔨 **Crafting & Recipes (7 tests):** Hand tools (Hammer, Axe, Pickaxe), Workbench requirements (Bow, Shield), shelter/roof validation (`requires_roof`), yield multipliers.
 - 🌲 **Resource Nodes (13 tests):** Scale multipliers, tool requirements (Stone Axe for trees, Pickaxe for rocks), branch/flint forage, health depletion.
@@ -206,7 +240,7 @@ SpacetimeRTS/
 │   │
 │   └── logic/                    # Pure Game Logic Crate (Headless, Native)
 │       ├── src/lib.rs            # Deterministic, testable game rules
-│       └── tests/logic_tests.rs  # Fast integration test suite (90 tests)
+│       └── tests/logic_tests.rs  # Fast integration test suite (109 tests)
 │
 ├── client/                       # Bevy 0.14 Game Client
 │   ├── src/
@@ -237,7 +271,8 @@ SpacetimeRTS/
 - [x] Ballistic projectile simulation (Arrows, Catapult, Trebuchet, Ballista, Magic)
 - [x] Autonomous 16-mob ecosystem & faction diplomacy matrix
 - [x] Peasant resource harvesting automation & pet stance system
-- [x] 109 automated tests spanning pure logic and backend database layers
+- [x] Classless combat system with dual-wielding, ranged balance & 37 GemStone IV maneuvers
+- [x] 128 automated tests spanning pure logic and backend database layers
 - [ ] Multi-client load & stress test (16+ concurrent sessions)
 - [ ] Save/snapshot database persistence script across republishes
 - [ ] Authentication integration (SpacetimeAuth / OIDC)
