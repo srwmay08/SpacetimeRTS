@@ -120,6 +120,13 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "weapontool",
     "crosshair",
     "abilities",
+    "day",
+    "noon",
+    "night",
+    "midnight",
+    "weather",
+    "timescale",
+    "speed",
     "help",
 ];
 
@@ -1245,6 +1252,9 @@ pub fn handle_console_input(
     mut key_evts: EventReader<KeyboardInput>,
     conn: Res<SpacetimeConnection>,
     time: Res<Time>,
+    mut ephemeris: Option<ResMut<crate::binary_sky::BinaryEphemerisState>>,
+    mut sky_config: Option<ResMut<crate::binary_sky::BinarySkyConfig>>,
+    mut sky_weather: Option<ResMut<crate::binary_sky::AtmosphericWeather>>,
 ) {
     if !console.is_open {
         return;
@@ -1426,15 +1436,77 @@ pub fn handle_console_input(
                     console.logs.push("[Admin] Invulnerability / God mode enabled (99999 HP).".into());
                 }
             }
+            "day" | "noon" => {
+                if let Some(ref mut eph) = ephemeris {
+                    eph.simulation_time_seconds = 0.0;
+                    eph.diurnal_angle = 0.0;
+                }
+                let _ = conn.db.reducers.admin_set_time(12.0);
+                console.logs.push("[Admin] Celestial cycle set to HIGH NOON (12:00). Direct sunlight active.".into());
+            }
+            "night" | "midnight" => {
+                let duration = sky_config.as_ref().map(|c| c.day_duration_seconds as f64).unwrap_or(1440.0);
+                if let Some(ref mut eph) = ephemeris {
+                    eph.simulation_time_seconds = duration * 0.5;
+                    eph.diurnal_angle = std::f32::consts::PI;
+                }
+                let _ = conn.db.reducers.admin_set_time(0.0);
+                console.logs.push("[Admin] Celestial cycle set to DEEP MIDNIGHT (00:00). Starfield & Aurora active.".into());
+            }
             "time" | "settime" => {
                 if let Some(t) = tokens.get(1).and_then(|s| s.parse::<f32>().ok()) {
-                    if let Err(e) = conn.db.reducers.admin_set_time(t) {
-                        console.logs.push(format!("[Server Error] Set time failed: {:?}", e));
-                    } else {
-                        console.logs.push(format!("[Admin] World time set to {:.1}", t));
+                    let hour_clamped = t.rem_euclid(24.0);
+                    let duration = sky_config.as_ref().map(|c| c.day_duration_seconds as f64).unwrap_or(1440.0);
+                    let frac = ((hour_clamped / 24.0) - 0.5).rem_euclid(1.0);
+                    if let Some(ref mut eph) = ephemeris {
+                        eph.simulation_time_seconds = duration * frac as f64;
+                        eph.diurnal_angle = (frac * 2.0 * std::f32::consts::PI) as f32;
+                    }
+                    if let Err(e) = conn.db.reducers.admin_set_time(hour_clamped) {
+                        console.logs.push(format!("[Server Notice] Admin reducer: {:?}", e));
+                    }
+                    console.logs.push(format!("[Admin] World time set to {:.1}h", hour_clamped));
+                } else {
+                    console.logs.push("[Syntax Error] Usage: time <0-24> or 'day' / 'night'".into());
+                }
+            }
+            "timescale" | "speed" => {
+                if let Some(speed) = tokens.get(1).and_then(|s| s.parse::<f32>().ok()) {
+                    if let Some(ref mut cfg) = sky_config {
+                        cfg.time_scale = speed.max(0.0);
+                    }
+                    console.logs.push(format!("[Admin] Celestial time scale set to {:.1}x (Press [-] or [=])", speed));
+                } else {
+                    console.logs.push("[Syntax Error] Usage: timescale <multiplier> (e.g. 1.0, 10.0, 60.0)".into());
+                }
+            }
+            "weather" => {
+                if let Some(w_type) = tokens.get(1) {
+                    if let Some(ref mut w) = sky_weather {
+                        match w_type.to_lowercase().as_str() {
+                            "clear" | "clearsky" => {
+                                w.weather_type = crate::binary_sky::WeatherType::ClearSky;
+                                console.logs.push("[Weather] Set to ClearSky (high visibility, deep Rayleigh blues).".into());
+                            }
+                            "haze" | "aerosol" => {
+                                w.weather_type = crate::binary_sky::WeatherType::AerosolHaze;
+                                console.logs.push("[Weather] Set to AerosolHaze (golden horizon, diffuse Mie halo).".into());
+                            }
+                            "aurora" | "storm" => {
+                                w.weather_type = crate::binary_sky::WeatherType::StellarWindAurora;
+                                console.logs.push("[Weather] Set to StellarWindAurora (binary magnetic curtains).".into());
+                            }
+                            "rain" | "overcast" => {
+                                w.weather_type = crate::binary_sky::WeatherType::OvercastPrecipitation;
+                                console.logs.push("[Weather] Set to OvercastPrecipitation (cloud extinction).".into());
+                            }
+                            _ => {
+                                console.logs.push("[Syntax Error] Options: clear, haze, aurora, rain".into());
+                            }
+                        }
                     }
                 } else {
-                    console.logs.push("[Syntax Error] Usage: time <0-24>".into());
+                    console.logs.push("[Syntax Error] Usage: weather <clear|haze|aurora|rain> (or press [F9])".into());
                 }
             }
             "clearinv" | "clear" => {
@@ -1492,7 +1564,10 @@ pub fn handle_console_input(
                 console.logs.push("tp <x> <z>             : Teleports player to world coordinate".into());
                 console.logs.push("heal [amt]             : Restores player health points".into());
                 console.logs.push("god                    : Sets health to 99999 HP".into());
-                console.logs.push("time <0-24>            : Sets diurnal world clock".into());
+                console.logs.push("time <0-24>            : Sets diurnal world clock ([ [ ] and [ ] ])".into());
+                console.logs.push("day / night            : Quick toggle between High Noon and Midnight [F8]".into());
+                console.logs.push("weather <clear|aurora> : Sets atmospheric weather preset [F9]".into());
+                console.logs.push("timescale <speed>      : Sets cycle rate (e.g. 1.0, 60.0) [ - / = ]".into());
                 console.logs.push("spawn <mob> [amt]      : Spawns Deer, Boar, Goblin, Peasant".into());
                 console.logs.push("nuke [radius]          : Demolishes terrain with spherical blast".into());
                 console.logs.push("clearinv               : Empties inventory slots completely".into());
