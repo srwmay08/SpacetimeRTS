@@ -1008,18 +1008,23 @@ pub fn sync_celestial_visuals(
     ephemeris: Res<BinaryEphemerisState>,
     cache: Res<AtmosphericRadianceCache>,
     weather: Res<AtmosphericWeather>,
-    camera_query: Query<&Transform, With<Camera3d>>,
-    mut star_a_query: Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), (With<StarAVolumetricDisk>, Without<StarBVolumetricDisk>)>,
-    mut star_b_query: Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), (With<StarBVolumetricDisk>, Without<StarAVolumetricDisk>)>,
-    mut starfield_query: Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), (With<CosmicStarfield>, Without<StarAVolumetricDisk>, Without<StarBVolumetricDisk>)>,
-    mut aurora_query: Query<(&mut Transform, &mut Visibility), With<AuroraCurtain>>,
+    mut celestial_set: ParamSet<(
+        Query<&Transform, With<Camera3d>>,
+        Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<StarAVolumetricDisk>>,
+        Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<StarBVolumetricDisk>>,
+        Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<CosmicStarfield>>,
+        Query<(&mut Transform, &mut Visibility), With<AuroraCurtain>>,
+    )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let Ok(cam_tf) = camera_query.get_single() else { return; };
-    let cam_pos = cam_tf.translation;
+    let cam_pos = if let Ok(cam_tf) = celestial_set.p0().get_single() {
+        cam_tf.translation
+    } else {
+        return;
+    };
 
     // 1. Sync Host Star A Disk
-    if let Ok((mut tf_a, mut vis_a, mat_handle_a)) = star_a_query.get_single_mut() {
+    if let Ok((mut tf_a, mut vis_a, mat_handle_a)) = celestial_set.p1().get_single_mut() {
         if ephemeris.star_a_elevation < -0.10 {
             *vis_a = Visibility::Hidden;
         } else {
@@ -1034,7 +1039,7 @@ pub fn sync_celestial_visuals(
     }
 
     // 2. Sync Companion Star B Disk
-    if let Ok((mut tf_b, mut vis_b, mat_handle_b)) = star_b_query.get_single_mut() {
+    if let Ok((mut tf_b, mut vis_b, mat_handle_b)) = celestial_set.p2().get_single_mut() {
         if ephemeris.star_b_elevation < -0.10 {
             *vis_b = Visibility::Hidden;
         } else {
@@ -1049,7 +1054,7 @@ pub fn sync_celestial_visuals(
     }
 
     // 3. Sync Cosmic Starfield (fades in as daylight gives way to twilight and deep night)
-    if let Ok((mut tf_stars, mut vis_stars, mat_handle_stars)) = starfield_query.get_single_mut() {
+    if let Ok((mut tf_stars, mut vis_stars, mat_handle_stars)) = celestial_set.p3().get_single_mut() {
         tf_stars.translation = cam_pos;
         let night_factor = (1.0 - (cache.star_a_illuminance_lux / 25000.0).min(1.0)).max(0.0);
         if night_factor <= 0.02 {
@@ -1063,7 +1068,8 @@ pub fn sync_celestial_visuals(
     }
 
     // 4. Sync Aurora Curtains
-    for (mut tf_aurora, mut vis_aurora) in aurora_query.iter_mut() {
+    let mut p4 = celestial_set.p4();
+    for (mut tf_aurora, mut vis_aurora) in p4.iter_mut() {
         tf_aurora.translation = cam_pos + Vec3::new(0.0, 120.0, 0.0);
         let night_factor = (1.0 - (cache.star_a_illuminance_lux / 20000.0).min(1.0)).max(0.0);
         if weather.weather_type == WeatherType::StellarWindAurora && night_factor > 0.15 {
@@ -1076,11 +1082,12 @@ pub fn sync_celestial_visuals(
 
 /// Interactive user input system for adjusting time of day, scrubbing cycles, and cycling weather.
 pub fn handle_sky_time_and_weather_inputs(
-    keys: Res<ButtonInput<KeyCode>>,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
     mut config: ResMut<BinarySkyConfig>,
     mut ephemeris: ResMut<BinaryEphemerisState>,
     mut weather: ResMut<AtmosphericWeather>,
 ) {
+    let Some(keys) = keys else { return; };
     let day_duration = config.day_duration_seconds as f64;
 
     // [F8] Quick Day/Night Toggle
@@ -1331,8 +1338,14 @@ mod tests {
     fn test_plugin_registration() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
         app.add_plugins(BinarySkyPlugin);
         
+        // Execute frame update to trigger Bevy ECS system param and schedule borrow checks
+        app.update();
+
         assert!(app.world().get_resource::<BinarySkyConfig>().is_some());
         assert!(app.world().get_resource::<BinaryEphemerisState>().is_some());
         assert!(app.world().get_resource::<AtmosphericRadianceCache>().is_some());
