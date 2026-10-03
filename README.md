@@ -239,8 +239,8 @@ SpacetimeRTS/
 │   │   └── tests/                # Backend database integration tests (19 tests)
 │   │
 │   └── logic/                    # Pure Game Logic Crate (Headless, Native)
-│       ├── src/lib.rs            # Deterministic, testable game rules
-│       └── tests/logic_tests.rs  # Fast integration test suite (109 tests)
+│       ├── src/lib.rs            # Deterministic, testable game rules & tactical abilities
+│       └── tests/logic_tests.rs  # Fast integration test suite (120 tests)
 │
 ├── client/                       # Bevy 0.14 Game Client
 │   ├── src/
@@ -249,9 +249,13 @@ SpacetimeRTS/
 │   │   ├── prediction.rs         # Client-side input prediction & reconciliation
 │   │   ├── input.rs              # Action event dispatch (WASD, hotbar, clicks)
 │   │   ├── camera.rs             # FPS and RTS camera controllers
-│   │   ├── building.rs           # Hologram blueprints, snap sockets
+│   │   ├── building.rs           # Blueprints, snap sockets & 1.75m head datum walls
 │   │   ├── terrain.rs            # Procedural terrain meshing
-│   │   ├── ui.rs                 # HUD, health, inventory hotbar, console
+│   │   ├── ui.rs                 # Reticle-adjacent fighting HUD & F7 Crosshair Tuner
+│   │   ├── weapons.rs            # First-person viewmodels & dynamic spread bloom
+│   │   ├── tuner.rs              # Weapon & spell workbench
+│   │   ├── audio_feedback.rs     # Procedural 16-bit PCM WAV combat acoustic cues
+│   │   ├── tactical_abilities.rs # Utility-first ability loop (Dash, Smoke, Intel, Lift)
 │   │   └── module_bindings/      # Generated SpacetimeDB client bindings
 │   └── Cargo.toml
 │
@@ -267,12 +271,16 @@ SpacetimeRTS/
 - [x] Client-side movement prediction & server reconciliation
 - [x] Server-side lag compensation with 500ms rewind buffer
 - [x] Modular structural building with physics stability decay & cascading collapse
+- [x] Map geometry alignment with 1.75m eye-level head datum lines and 1.25m crouch cover
 - [x] Valheim-style crafting, discovery, and workstation requirements
-- [x] Ballistic projectile simulation (Arrows, Catapult, Trebuchet, Ballista, Magic)
+- [x] Ballistic projectile simulation (Arrows, Catapult, Trebuchet, Ballista, Magic, Guns)
 - [x] Autonomous 16-mob ecosystem & faction diplomacy matrix
 - [x] Peasant resource harvesting automation & pet stance system
 - [x] Classless combat system with dual-wielding, ranged balance & 37 GemStone IV maneuvers
-- [x] 128 automated tests spanning pure logic and backend database layers
+- [x] Tactical abilities multiplier system (Phase Dash, Smoke Veil, Intel Dart, Grav-Lift)
+- [x] Reticle-adjacent diegetic HUD & unrestricted crosshair customization (Dynamic vs Static)
+- [x] Auditory sensory feedback system with procedural sharp "dink" headshot & armor-break cues
+- [x] 139 automated tests spanning pure logic, simulation, and backend database layers
 - [ ] Multi-client load & stress test (16+ concurrent sessions)
 - [ ] Save/snapshot database persistence script across republishes
 - [ ] Authentication integration (SpacetimeAuth / OIDC)

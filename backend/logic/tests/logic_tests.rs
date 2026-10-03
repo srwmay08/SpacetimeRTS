@@ -1430,3 +1430,97 @@ mod day_night {
         assert!(!is_daylight(4.0));
     }
 }
+
+// ============================================================================
+// TACTICAL ABILITIES TESTS
+// ============================================================================
+
+mod tactical_abilities {
+    use super::*;
+
+    #[test]
+    fn ability_utility_over_lethality_invariants() {
+        // Core design requirement: abilities must act as multipliers to gunplay, not press-to-kill nukes
+        let dash = get_ability_definition(TacticalAbilityKind::PhaseDash);
+        assert_eq!(dash.base_damage, 0.0);
+        assert!(dash.is_mobility_synergy);
+        assert!(dash.is_utility_focused);
+
+        let smoke = get_ability_definition(TacticalAbilityKind::SmokeVeil);
+        assert_eq!(smoke.base_damage, 0.0);
+        assert!(smoke.effect_radius >= 6.0); // Blocks line of sight / creates space
+        assert!(smoke.duration_seconds >= 6.0);
+
+        let intel = get_ability_definition(TacticalAbilityKind::IntelDart);
+        assert_eq!(intel.base_damage, 0.0);
+        assert!(intel.effect_radius >= 10.0); // Sonar detection range
+
+        let lift = get_ability_definition(TacticalAbilityKind::GravLift);
+        assert_eq!(lift.base_damage, 0.0);
+        assert!(lift.is_mobility_synergy);
+    }
+
+    #[test]
+    fn ability_telegraphing_and_counterplay_definitions() {
+        // Every ability must have clearly communicated telegraphing and counterplay cues
+        for kind in [
+            TacticalAbilityKind::PhaseDash,
+            TacticalAbilityKind::SmokeVeil,
+            TacticalAbilityKind::IntelDart,
+            TacticalAbilityKind::GravLift,
+        ] {
+            let def = get_ability_definition(kind);
+            assert!(!def.telegraph_cue.is_empty(), "Telegraph cue missing for {:?}", kind);
+            assert!(!def.counterplay_cue.is_empty(), "Counterplay cue missing for {:?}", kind);
+        }
+    }
+
+    #[test]
+    fn ability_cooldown_lifecycle_and_triggers() {
+        let mut tracker = TacticalAbilityCooldowns::new();
+
+        // All abilities start ready
+        assert!(tracker.is_ready(TacticalAbilityKind::PhaseDash));
+        assert!(tracker.is_ready(TacticalAbilityKind::SmokeVeil));
+        assert!(tracker.is_ready(TacticalAbilityKind::IntelDart));
+        assert!(tracker.is_ready(TacticalAbilityKind::GravLift));
+
+        // Trigger PhaseDash
+        assert!(tracker.trigger(TacticalAbilityKind::PhaseDash).is_ok());
+        assert!(!tracker.is_ready(TacticalAbilityKind::PhaseDash));
+        assert!(tracker.trigger(TacticalAbilityKind::PhaseDash).is_err()); // Cannot double cast
+        assert!((tracker.cooldown_fraction(TacticalAbilityKind::PhaseDash) - 1.0).abs() < 0.001);
+
+        // Tick partial time
+        tracker.tick(3.0);
+        assert!(!tracker.is_ready(TacticalAbilityKind::PhaseDash));
+        assert!((tracker.cooldown_remaining(TacticalAbilityKind::PhaseDash) - 3.0).abs() < 0.001);
+        assert!((tracker.cooldown_fraction(TacticalAbilityKind::PhaseDash) - 0.5).abs() < 0.001);
+
+        // Finish cooldown
+        tracker.tick(3.5);
+        assert!(tracker.is_ready(TacticalAbilityKind::PhaseDash));
+        assert_eq!(tracker.cooldown_fraction(TacticalAbilityKind::PhaseDash), 0.0);
+    }
+
+    #[test]
+    fn multi_ability_independent_cooldowns() {
+        let mut tracker = TacticalAbilityCooldowns::new();
+        assert!(tracker.trigger(TacticalAbilityKind::SmokeVeil).is_ok());
+        assert!(tracker.trigger(TacticalAbilityKind::IntelDart).is_ok());
+
+        assert!(!tracker.is_ready(TacticalAbilityKind::SmokeVeil));
+        assert!(!tracker.is_ready(TacticalAbilityKind::IntelDart));
+        assert!(tracker.is_ready(TacticalAbilityKind::GravLift)); // Untouched
+
+        // Tick 14.1s (Smoke cooldown is 14.0s, Intel is 16.0s)
+        tracker.tick(14.1);
+        assert!(tracker.is_ready(TacticalAbilityKind::SmokeVeil));
+        assert!(!tracker.is_ready(TacticalAbilityKind::IntelDart));
+
+        // Tick remaining 2.0s
+        tracker.tick(2.0);
+        assert!(tracker.is_ready(TacticalAbilityKind::IntelDart));
+    }
+}
+

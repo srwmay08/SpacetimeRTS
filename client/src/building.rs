@@ -325,6 +325,41 @@ pub fn create_battering_ram_mesh() -> Mesh {
     ])
 }
 
+/// Architectural Note: Procedural architectural wall model engineered for FPS crosshair alignment.
+/// Embeds a distinctive high-contrast horizontal datum band / sightline trim at exactly y = +0.25m
+/// (1.75m above floor level, corresponding to player eye-level in first-person perspective).
+/// Clearing corners alongside this wall trains players to maintain crosshair placement at head height.
+/// Also embeds a 1.25m crouch-cover horizontal ledge and vertical framing posts.
+pub fn create_wall_mesh() -> Mesh {
+    let timber_dark = [0.36, 0.24, 0.14, 1.0];
+    let timber_light = [0.52, 0.38, 0.22, 1.0];
+    let stone_body = [0.48, 0.46, 0.44, 1.0];
+    let iron_trim = [0.25, 0.26, 0.28, 1.0];
+    // High-contrast eye-level head datum line (1.75m eye level)
+    let datum_band = [0.78, 0.62, 0.28, 1.0]; // Bronze/gold architectural datum line
+
+    build_voxel_mesh(&[
+        // Left & Right Structural Upright Framing Posts
+        VoxelBox { min: Vec3::new(-2.0, -1.5, -0.22), max: Vec3::new(-1.75, 1.5, 0.22), color: timber_dark },
+        VoxelBox { min: Vec3::new(1.75, -1.5, -0.22), max: Vec3::new(2.0, 1.5, 0.22), color: timber_dark },
+        // Lower Masonry Foundation Course (y = -1.5 to -0.35)
+        VoxelBox { min: Vec3::new(-1.75, -1.5, -0.18), max: Vec3::new(1.75, -0.35, 0.18), color: stone_body },
+        // 1.25m Crouch Cover Tactical Ledge / Crossbar (-0.25 relative to wall center)
+        VoxelBox { min: Vec3::new(-1.80, -0.35, -0.21), max: Vec3::new(1.80, -0.20, 0.21), color: timber_light },
+        // Mid Wall Section (-0.20 to +0.20)
+        VoxelBox { min: Vec3::new(-1.75, -0.20, -0.18), max: Vec3::new(1.75, 0.20, 0.18), color: stone_body },
+        // 1.75m Head-Level Visual Datum Alignment Band (+0.20 to +0.30)
+        VoxelBox { min: Vec3::new(-1.80, 0.20, -0.21), max: Vec3::new(1.80, 0.30, 0.21), color: datum_band },
+        // Upper Wall Section (+0.30 to +1.35)
+        VoxelBox { min: Vec3::new(-1.75, 0.30, -0.18), max: Vec3::new(1.75, 1.35, 0.18), color: stone_body },
+        // Top Roof Support Header Beam (+1.35 to +1.50)
+        VoxelBox { min: Vec3::new(-2.0, 1.35, -0.22), max: Vec3::new(2.0, 1.50, 0.22), color: timber_dark },
+        // Iron Corner Braces
+        VoxelBox { min: Vec3::new(-1.85, 0.18, -0.22), max: Vec3::new(-1.70, 0.32, 0.22), color: iron_trim },
+        VoxelBox { min: Vec3::new(1.70, 0.18, -0.22), max: Vec3::new(1.85, 0.32, 0.22), color: iron_trim },
+    ])
+}
+
 // ----------------------------------------------------------------------------
 // BUILD MODE & SNAPPING SYSTEMS
 // ----------------------------------------------------------------------------
@@ -402,7 +437,7 @@ pub fn update_build_hologram(
             ModularPieceType::Foundation => meshes.add(Cuboid::new(4.0, 1.0, 4.0)),
             ModularPieceType::Workbench => meshes.add(create_workbench_mesh()),
             ModularPieceType::Campfire => meshes.add(create_campfire_mesh()),
-            ModularPieceType::Wall => meshes.add(Cuboid::new(4.0, 3.0, 0.4)),
+            ModularPieceType::Wall => meshes.add(create_wall_mesh()),
             ModularPieceType::Floor => meshes.add(Cuboid::new(4.0, 0.2, 4.0)),
             ModularPieceType::Roof => meshes.add(Cuboid::new(4.0, 0.2, 4.0)),
             ModularPieceType::Ramp => meshes.add(create_ramp_mesh()), 
@@ -558,7 +593,7 @@ pub fn sync_structures(
         if !spawned_ids.contains(&s.structure_id) {
             let (mesh, color, collider) = match s.piece_type.as_str() {
                 "Foundation" => (meshes.add(Cuboid::new(4.0, 1.0, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 1.0, 4.0)),
-                "Wall" => (meshes.add(Cuboid::new(4.0, 3.0, 0.4)), Color::srgb(0.6, 0.5, 0.4), Collider::cuboid(4.0, 3.0, 0.4)),
+                "Wall" => (meshes.add(create_wall_mesh()), Color::WHITE, Collider::cuboid(4.0, 3.0, 0.4)),
                 "Floor" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.5, 0.4, 0.3), Collider::cuboid(4.0, 0.2, 4.0)),
                 "Roof" => (meshes.add(Cuboid::new(4.0, 0.2, 4.0)), Color::srgb(0.4, 0.3, 0.2), Collider::cuboid(4.0, 0.2, 4.0)),
                 "Ramp" => { 

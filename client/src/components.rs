@@ -176,3 +176,193 @@ pub struct BerryVisual {
 pub struct Particle { 
     pub timer: Timer, 
 }
+
+// ----------------------------------------------------------------------------
+// RETICLE-ADJACENT HUD & CROSSHAIR CUSTOMIZATION
+// ----------------------------------------------------------------------------
+// Architectural Note: Positions vital fighting telemetry directly adjacent to the
+// center crosshair (ammo counter, tactical cooldowns, critical health alerts) so
+// the player's eyes never leave the center of the screen during engagements.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CrosshairColorPreset {
+    #[default]
+    Cyan,
+    BrightGreen,
+    Magenta,
+    Yellow,
+    White,
+    Red,
+    Amber,
+}
+
+impl CrosshairColorPreset {
+    pub fn to_color(&self) -> Color {
+        match self {
+            Self::Cyan => Color::srgb(0.0, 1.0, 1.0),
+            Self::BrightGreen => Color::srgb(0.0, 1.0, 0.2),
+            Self::Magenta => Color::srgb(1.0, 0.0, 1.0),
+            Self::Yellow => Color::srgb(1.0, 0.95, 0.1),
+            Self::White => Color::srgb(1.0, 1.0, 1.0),
+            Self::Red => Color::srgb(1.0, 0.15, 0.15),
+            Self::Amber => Color::srgb(1.0, 0.75, 0.0),
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Cyan => Self::BrightGreen,
+            Self::BrightGreen => Self::Magenta,
+            Self::Magenta => Self::Yellow,
+            Self::Yellow => Self::White,
+            Self::White => Self::Red,
+            Self::Red => Self::Amber,
+            Self::Amber => Self::Cyan,
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Cyan => "Cyan",
+            Self::BrightGreen => "Bright Green",
+            Self::Magenta => "Magenta",
+            Self::Yellow => "Yellow",
+            Self::White => "White",
+            Self::Red => "Red",
+            Self::Amber => "Amber",
+        }
+    }
+}
+
+#[derive(Resource, Clone, Debug)]
+pub struct CrosshairSettings {
+    pub enabled: bool,
+    pub color_preset: CrosshairColorPreset,
+    pub thickness: f32,         // Line thickness in pixels (1.0 - 8.0)
+    pub length: f32,            // Line length in pixels (2.0 - 30.0)
+    pub gap: f32,               // Center gap in pixels (0.0 - 40.0)
+    pub dot: bool,              // Center dot toggle
+    pub dot_size: f32,          // Center dot diameter in pixels
+    pub outline: bool,          // High-contrast black outline
+    pub outline_thickness: f32, // Outline border thickness in pixels
+    pub opacity: f32,           // Crosshair alpha opacity (0.2 - 1.0)
+    pub is_dynamic: bool,       // Dynamic bloom/spread vs rock-solid Static
+}
+
+impl Default for CrosshairSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            color_preset: CrosshairColorPreset::Cyan, // Default high-contrast cyan
+            thickness: 2.0,
+            length: 8.0,
+            gap: 5.0,
+            dot: false,
+            dot_size: 2.0,
+            outline: true,
+            outline_thickness: 1.0,
+            opacity: 1.0,
+            is_dynamic: true, // Teaches spread/velocity by default; toggleable to static
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CrosshairArmDir {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+#[derive(Component)] pub struct ReticleHudRoot;
+#[derive(Component)] pub struct ReticleCrosshairArm(pub CrosshairArmDir);
+#[derive(Component)] pub struct ReticleCrosshairDot;
+#[derive(Component)] pub struct ReticleAmmoText;
+#[derive(Component)] pub struct ReticleBowChargeBar;
+#[derive(Component)] pub struct ReticleAbilityDashText;
+#[derive(Component)] pub struct ReticleAbilitySmokeText;
+#[derive(Component)] pub struct ReticleAbilityIntelText;
+#[derive(Component)] pub struct ReticleAbilityLiftText;
+#[derive(Component)] pub struct ReticleCriticalHealthAlert;
+#[derive(Component)] pub struct ReticleHitMarker;
+#[derive(Component)] pub struct ReticleHitMarkerTick;
+
+#[derive(Component)] pub struct CrosshairMenuRoot;
+#[derive(Component)] pub struct CrosshairMenuButton(pub String);
+#[derive(Component)] pub struct CrosshairMenuText;
+
+#[derive(Resource, Default)]
+pub struct CrosshairMenuState {
+    pub is_open: bool,
+}
+
+// ----------------------------------------------------------------------------
+// TACTICAL ABILITIES & SENSORY STATE
+// ----------------------------------------------------------------------------
+
+#[derive(Resource)]
+pub struct TacticalAbilityState {
+    pub cooldowns: spacetime_rts_logic::TacticalAbilityCooldowns,
+    pub is_dashing: bool,
+    pub dash_timer: Timer,
+    pub dash_velocity: Vec3,
+}
+
+impl Default for TacticalAbilityState {
+    fn default() -> Self {
+        Self {
+            cooldowns: spacetime_rts_logic::TacticalAbilityCooldowns::new(),
+            is_dashing: false,
+            dash_timer: Timer::from_seconds(0.22, TimerMode::Once),
+            dash_velocity: Vec3::ZERO,
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct SmokeCloudMarker {
+    pub timer: Timer,
+    #[allow(dead_code)]
+    pub radius: f32,
+}
+
+#[derive(Component)]
+pub struct IntelDartMarker {
+    pub pings_left: u32,
+    pub ping_timer: Timer,
+    pub radius: f32,
+}
+
+#[derive(Component)]
+pub struct IntelSonarPulseVisual {
+    pub timer: Timer,
+    pub max_radius: f32,
+}
+
+#[derive(Resource)]
+pub struct HitMarkerState {
+    pub timer: Timer,
+    pub is_crit: bool,
+    pub is_armor: bool,
+}
+
+impl Default for HitMarkerState {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(0.0, TimerMode::Once),
+            is_crit: false,
+            is_armor: false,
+        }
+    }
+}
+
+#[derive(Resource, Clone, Default)]
+pub struct CombatAudioHandles {
+    pub dink: Handle<AudioSource>,
+    pub armor_break: Handle<AudioSource>,
+    pub bodyshot_tick: Handle<AudioSource>,
+    pub dash_whoosh: Handle<AudioSource>,
+    pub sonar_ping: Handle<AudioSource>,
+    pub smoke_hiss: Handle<AudioSource>,
+}

@@ -1529,6 +1529,8 @@ pub fn process_combat_events(
     mut materials: ResMut<Assets<StandardMaterial>>,
     conn: Res<SpacetimeConnection>,
     mut tracker: ResMut<EventTracker>,
+    audio_handles: Option<Res<CombatAudioHandles>>,
+    mut hit_marker_state: Option<ResMut<HitMarkerState>>,
 ) {
     let mut highest_id = tracker.last_event_id;
 
@@ -1577,14 +1579,40 @@ pub fn process_combat_events(
                 }
                 _ => {
                     let event_str = event.event_type.as_str();
-                    if event_str == "HitPlayer" {
-                        crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "-35", false);
-                    } else if event_str.starts_with("Crit") {
+
+                    // Auditory Cues & Reticle-Adjacent Hit Confirmation
+                    if event_str.starts_with("Crit") {
+                        if let Some(ref handles) = audio_handles {
+                            crate::audio_feedback::play_sound(&mut commands, &handles.dink);
+                        }
+                        if let Some(ref mut hm) = hit_marker_state {
+                            hm.timer = Timer::from_seconds(0.09, TimerMode::Once);
+                            hm.is_crit = true;
+                            hm.is_armor = false;
+                        }
                         crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "CRIT! 160", true);
+                    } else if event_str.contains("Clang") || event_str.contains("Armor") {
+                        if let Some(ref handles) = audio_handles {
+                            crate::audio_feedback::play_sound(&mut commands, &handles.armor_break);
+                        }
+                        if let Some(ref mut hm) = hit_marker_state {
+                            hm.timer = Timer::from_seconds(0.09, TimerMode::Once);
+                            hm.is_crit = false;
+                            hm.is_armor = true;
+                        }
+                        crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "CLANG!", false);
+                    } else if event_str == "HitPlayer" {
+                        if let Some(ref handles) = audio_handles {
+                            crate::audio_feedback::play_sound(&mut commands, &handles.bodyshot_tick);
+                        }
+                        if let Some(ref mut hm) = hit_marker_state {
+                            hm.timer = Timer::from_seconds(0.07, TimerMode::Once);
+                            hm.is_crit = false;
+                            hm.is_armor = false;
+                        }
+                        crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "-35", false);
                     } else if event_str.contains("Bonk") {
                         crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "BONK!", false);
-                    } else if event_str.contains("Clang") {
-                        crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "CLANG!", false);
                     }
 
                     let color = match event_str {

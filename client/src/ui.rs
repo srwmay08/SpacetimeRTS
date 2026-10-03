@@ -118,6 +118,8 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "killall",
     "tuner",
     "weapontool",
+    "crosshair",
+    "abilities",
     "help",
 ];
 
@@ -862,6 +864,288 @@ pub fn setup_ui(mut commands: Commands) {
         crate::weapons::WeaponHudText,
     ));
 
+    // ------------------------------------------------------------------------
+    // 6. RETICLE-ADJACENT FIGHTING HUD & DYNAMIC CROSSHAIR ROOT
+    // ------------------------------------------------------------------------
+    commands.spawn((
+        NodeBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                left: Val::Percent(50.0),
+                top: Val::Percent(50.0),
+                width: Val::Px(0.0),
+                height: Val::Px(0.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            z_index: ZIndex::Global(110),
+            ..default()
+        },
+        ReticleHudRoot,
+    )).with_children(|reticle| {
+        // Center Dot
+        reticle.spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    width: Val::Px(2.0),
+                    height: Val::Px(2.0),
+                    left: Val::Px(-1.0),
+                    top: Val::Px(-1.0),
+                    display: Display::None,
+                    ..default()
+                },
+                background_color: Color::srgb(0.0, 1.0, 1.0).into(),
+                ..default()
+            },
+            ReticleCrosshairDot,
+        ));
+
+        // 4 Crosshair Arms (Top, Bottom, Left, Right)
+        let arm_configs = [
+            (CrosshairArmDir::Top, Val::Px(-1.0), Val::Px(-12.0), Val::Px(2.0), Val::Px(8.0)),
+            (CrosshairArmDir::Bottom, Val::Px(-1.0), Val::Px(4.0), Val::Px(2.0), Val::Px(8.0)),
+            (CrosshairArmDir::Left, Val::Px(-12.0), Val::Px(-1.0), Val::Px(8.0), Val::Px(2.0)),
+            (CrosshairArmDir::Right, Val::Px(4.0), Val::Px(-1.0), Val::Px(8.0), Val::Px(2.0)),
+        ];
+
+        for (dir, left, top, width, height) in arm_configs {
+            reticle.spawn((
+                NodeBundle {
+                    style: Style {
+                        position_type: PositionType::Absolute,
+                        left,
+                        top,
+                        width,
+                        height,
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    border_color: Color::BLACK.into(),
+                    background_color: Color::srgb(0.0, 1.0, 1.0).into(),
+                    ..default()
+                },
+                ReticleCrosshairArm(dir),
+            ));
+        }
+
+        // Minimalist Reticle Hitmarker (4-tick X-flasher)
+        reticle.spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    width: Val::Px(16.0),
+                    height: Val::Px(16.0),
+                    left: Val::Px(-8.0),
+                    top: Val::Px(-8.0),
+                    display: Display::None,
+                    ..default()
+                },
+                ..default()
+            },
+            ReticleHitMarker,
+        )).with_children(|hm| {
+            let ticks = [
+                (Val::Px(0.0), Val::Px(0.0)),
+                (Val::Px(12.0), Val::Px(0.0)),
+                (Val::Px(0.0), Val::Px(12.0)),
+                (Val::Px(12.0), Val::Px(12.0)),
+            ];
+            for (l, t) in ticks {
+                hm.spawn((
+                    NodeBundle {
+                        style: Style {
+                            position_type: PositionType::Absolute,
+                            left: l,
+                            top: t,
+                            width: Val::Px(4.0),
+                            height: Val::Px(4.0),
+                            ..default()
+                        },
+                        background_color: Color::WHITE.into(),
+                        ..default()
+                    },
+                    ReticleHitMarkerTick,
+                ));
+            }
+        });
+
+        // Reticle-Adjacent Ammo Gauge (Right of Crosshair)
+        reticle.spawn((
+            TextBundle::from_section(
+                "",
+                TextStyle {
+                    font_size: 13.0,
+                    color: Color::srgb(0.0, 1.0, 1.0),
+                    ..default()
+                }
+            ).with_style(Style {
+                position_type: PositionType::Absolute,
+                left: Val::Px(30.0),
+                top: Val::Px(-9.0),
+                ..default()
+            }),
+            ReticleAmmoText,
+        ));
+
+        // Bow Draw / Charge Bar (Below Crosshair)
+        reticle.spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(-20.0),
+                    top: Val::Px(22.0),
+                    width: Val::Px(40.0),
+                    height: Val::Px(3.0),
+                    display: Display::None,
+                    ..default()
+                },
+                background_color: Color::srgb(0.1, 0.1, 0.1).into(),
+                ..default()
+            },
+            ReticleBowChargeBar,
+        ));
+
+        // Reticle-Adjacent Tactical Abilities Cluster (Left of Crosshair)
+        reticle.spawn(NodeBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                right: Val::Px(30.0),
+                top: Val::Px(-28.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                align_items: AlignItems::FlexEnd,
+                ..default()
+            },
+            ..default()
+        }).with_children(|abilities| {
+            abilities.spawn((
+                TextBundle::from_section(
+                    "[Q] DASH",
+                    TextStyle { font_size: 10.0, color: Color::srgb(0.0, 1.0, 1.0), ..default() }
+                ),
+                ReticleAbilityDashText,
+            ));
+            abilities.spawn((
+                TextBundle::from_section(
+                    "[C] SMOKE",
+                    TextStyle { font_size: 10.0, color: Color::srgb(0.7, 0.8, 0.9), ..default() }
+                ),
+                ReticleAbilitySmokeText,
+            ));
+            abilities.spawn((
+                TextBundle::from_section(
+                    "[X] INTEL",
+                    TextStyle { font_size: 10.0, color: Color::srgb(1.0, 0.85, 0.2), ..default() }
+                ),
+                ReticleAbilityIntelText,
+            ));
+            abilities.spawn((
+                TextBundle::from_section(
+                    "[F] LIFT",
+                    TextStyle { font_size: 10.0, color: Color::srgb(0.2, 1.0, 0.4), ..default() }
+                ),
+                ReticleAbilityLiftText,
+            ));
+        });
+
+        // Reticle-Adjacent Low-Profile Critical Health Alert (Directly below crosshair)
+        reticle.spawn((
+            TextBundle::from_section(
+                "",
+                TextStyle {
+                    font_size: 11.0,
+                    color: Color::srgb(1.0, 0.2, 0.2),
+                    ..default()
+                }
+            ).with_style(Style {
+                position_type: PositionType::Absolute,
+                left: Val::Px(-50.0),
+                top: Val::Px(16.0),
+                width: Val::Px(100.0),
+                justify_content: JustifyContent::Center,
+                ..default()
+            }),
+            ReticleCriticalHealthAlert,
+        ));
+    });
+
+    // ------------------------------------------------------------------------
+    // 7. INTERACTIVE CROSSHAIR CUSTOMIZER GUI [F7]
+    // ------------------------------------------------------------------------
+    commands.spawn((
+        NodeBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                right: Val::Px(20.0),
+                top: Val::Px(60.0),
+                width: Val::Px(320.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(12.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                display: Display::None,
+                row_gap: Val::Px(6.0),
+                ..default()
+            },
+            background_color: Color::srgba(0.05, 0.08, 0.12, 0.95).into(),
+            border_color: Color::srgb(0.0, 0.8, 1.0).into(),
+            z_index: ZIndex::Global(150),
+            ..default()
+        },
+        CrosshairMenuRoot,
+    )).with_children(|menu| {
+        menu.spawn(TextBundle::from_section(
+            "CROSSHAIR TUNER [F7]",
+            TextStyle { font_size: 16.0, color: Color::srgb(0.0, 1.0, 1.0), ..default() }
+        ));
+
+        menu.spawn((
+            TextBundle::from_section(
+                "Loading settings...",
+                TextStyle { font_size: 11.0, color: Color::srgb(0.85, 0.9, 0.95), ..default() }
+            ),
+            CrosshairMenuText,
+        ));
+
+        let actions = [
+            ("Cycle Color", "Color"),
+            ("Gap -", "GapDec"),
+            ("Gap +", "GapInc"),
+            ("Length -", "LenDec"),
+            ("Length +", "LenInc"),
+            ("Thickness -", "ThickDec"),
+            ("Thickness +", "ThickInc"),
+            ("Toggle Center Dot", "ToggleDot"),
+            ("Toggle Outline", "ToggleOutline"),
+            ("Toggle Dynamic / Static", "ToggleDynamic"),
+        ];
+
+        for (label, action_id) in actions {
+            menu.spawn((
+                ButtonBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(24.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    border_color: Color::srgb(0.15, 0.45, 0.6).into(),
+                    background_color: Color::srgb(0.08, 0.18, 0.28).into(),
+                    ..default()
+                },
+                CrosshairMenuButton(action_id.to_string()),
+            )).with_children(|btn| {
+                btn.spawn(TextBundle::from_section(
+                    label,
+                    TextStyle { font_size: 11.0, color: Color::srgb(0.9, 0.95, 1.0), ..default() }
+                ));
+            });
+        }
+    });
+
     commands.spawn((NodeBundle {
         style: Style {
             width: Val::Percent(100.0), 
@@ -1191,6 +1475,17 @@ pub fn handle_console_input(
             "tuner" | "weapontool" => {
                 console.logs.push("[Admin] Weapon & Spell Tuner Workbench available via [F6] hotkey.".into());
             }
+            "crosshair" => {
+                console.logs.push("[Settings] Press [F7] to open the interactive Crosshair Tuner GUI.".into());
+                console.logs.push("[Settings] Supports custom colors, thickness, length, gap, dot, outline, and Dynamic/Static lock.".into());
+            }
+            "abilities" | "ability" => {
+                console.logs.push("--- TACTICAL ABILITIES DIRECTORY ---".into());
+                console.logs.push("[Q] Phase Dash  : Instant directional horizontal thrust (6.0s CD)".into());
+                console.logs.push("[C] Smoke Veil  : Obscures vision / blocks lines of sight (14.0s CD)".into());
+                console.logs.push("[E] Intel Dart  : Sonar pulse reconnaissance (16.0s CD)".into());
+                console.logs.push("[F] Grav-Lift   : Kinetic vertical air lift (10.0s CD)".into());
+            }
             "help" => {
                 console.logs.push("--- PLAYTESTING COMMAND DIRECTORY ---".into());
                 console.logs.push("giveitem <Item> [amt]  : Grants item (Press [Tab] to auto-fill)".into());
@@ -1203,6 +1498,8 @@ pub fn handle_console_input(
                 console.logs.push("clearinv               : Empties inventory slots completely".into());
                 console.logs.push("killall                : Destroys all active NPC brains".into());
                 console.logs.push("tuner / weapontool     : Opens Weapon & Spell Tuner [F6]".into());
+                console.logs.push("crosshair              : Opens Crosshair Customizer info [F7]".into());
+                console.logs.push("abilities              : Displays tactical abilities directory".into());
             }
             _ => {
                 console.logs.push(format!("[Error] Unknown command '{}'. Enter 'help' for directory.", tokens[0]));
@@ -2005,3 +2302,341 @@ pub fn tick_particles(
         }
     }
 }
+
+// ----------------------------------------------------------------------------
+// RETICLE-ADJACENT FIGHTING HUD & CROSSHAIR SYSTEMS
+// ----------------------------------------------------------------------------
+// Architectural Note: Renders the reticle-adjacent fighting interface and handles
+// unrestricted crosshair customization (dynamic spread expansion vs competitive
+// static lock, custom thickness, length, gap, dot, outline, and high-contrast palettes).
+
+pub fn update_reticle_crosshair_ui(
+    settings: Res<CrosshairSettings>,
+    weapon_state: Res<crate::weapons::WeaponState>,
+    camera_mode: Res<State<CameraMode>>,
+    player_q: Query<&avian3d::prelude::LinearVelocity, With<PlayerBody>>,
+    mut root_q: Query<&mut Visibility, With<ReticleHudRoot>>,
+    mut arms_q: Query<(&ReticleCrosshairArm, &mut Style, &mut BackgroundColor, &mut BorderColor)>,
+    mut dot_q: Query<(&mut Style, &mut BackgroundColor), (With<ReticleCrosshairDot>, Without<ReticleCrosshairArm>)>,
+) {
+    let Ok(mut root_vis) = root_q.get_single_mut() else { return; };
+    if *camera_mode.get() != CameraMode::FPS || !settings.enabled {
+        *root_vis = Visibility::Hidden;
+        return;
+    }
+    *root_vis = Visibility::Inherited;
+
+    let base_color = settings.color_preset.to_color().with_alpha(settings.opacity);
+    let border_color = if settings.outline {
+        Color::BLACK.with_alpha(settings.opacity)
+    } else {
+        Color::NONE
+    };
+
+    let effective_gap = if settings.is_dynamic {
+        let speed = player_q.get_single().map_or(0.0, |v| v.0.length());
+        let vel_spread = (speed * 0.8).min(8.0);
+        let bloom_spread = weapon_state.dynamic_bloom;
+        settings.gap + vel_spread + bloom_spread
+    } else {
+        settings.gap
+    };
+
+    let thick = settings.thickness;
+    let len = settings.length;
+    let outline_thick = if settings.outline { settings.outline_thickness } else { 0.0 };
+
+    for (arm, mut style, mut bg, mut bc) in arms_q.iter_mut() {
+        *bg = base_color.into();
+        *bc = border_color.into();
+        style.border = UiRect::all(Val::Px(outline_thick));
+
+        match arm.0 {
+            CrosshairArmDir::Top => {
+                style.width = Val::Px(thick);
+                style.height = Val::Px(len);
+                style.left = Val::Px(-thick / 2.0);
+                style.top = Val::Px(-effective_gap - len);
+            }
+            CrosshairArmDir::Bottom => {
+                style.width = Val::Px(thick);
+                style.height = Val::Px(len);
+                style.left = Val::Px(-thick / 2.0);
+                style.top = Val::Px(effective_gap);
+            }
+            CrosshairArmDir::Left => {
+                style.width = Val::Px(len);
+                style.height = Val::Px(thick);
+                style.left = Val::Px(-effective_gap - len);
+                style.top = Val::Px(-thick / 2.0);
+            }
+            CrosshairArmDir::Right => {
+                style.width = Val::Px(len);
+                style.height = Val::Px(thick);
+                style.left = Val::Px(effective_gap);
+                style.top = Val::Px(-thick / 2.0);
+            }
+        }
+    }
+
+    if let Ok((mut dot_style, mut dot_bg)) = dot_q.get_single_mut() {
+        if settings.dot {
+            dot_style.display = Display::Flex;
+            dot_style.width = Val::Px(settings.dot_size);
+            dot_style.height = Val::Px(settings.dot_size);
+            dot_style.left = Val::Px(-settings.dot_size / 2.0);
+            dot_style.top = Val::Px(-settings.dot_size / 2.0);
+            *dot_bg = base_color.into();
+        } else {
+            dot_style.display = Display::None;
+        }
+    }
+}
+
+pub fn update_reticle_adjacent_hud(
+    weapon_state: Res<crate::weapons::WeaponState>,
+    conn: Res<SpacetimeConnection>,
+    camera_mode: Res<State<CameraMode>>,
+    mut ammo_text_q: Query<&mut Text, With<ReticleAmmoText>>,
+    mut bow_bar_q: Query<(&mut Style, &mut BackgroundColor), With<ReticleBowChargeBar>>,
+    mut crit_alert_q: Query<&mut Text, With<ReticleCriticalHealthAlert>>,
+) {
+    if *camera_mode.get() != CameraMode::FPS { return; }
+
+    // 1. Reticle-Adjacent Ammo Gauge (Right of Crosshair)
+    if let Ok(mut text) = ammo_text_q.get_single_mut() {
+        let val = match weapon_state.current_weapon {
+            crate::weapons::WeaponType::Revolver => {
+                if weapon_state.revolver_is_reloading {
+                    "[ RELOADING ]".to_string()
+                } else {
+                    format!("[ {} / {} ]", weapon_state.revolver_ammo, weapon_state.revolver_max_ammo)
+                }
+            }
+            crate::weapons::WeaponType::Shotgun => {
+                if weapon_state.shotgun_is_reloading {
+                    "[ RELOADING ]".to_string()
+                } else if weapon_state.shotgun_is_pumping {
+                    "[ PUMPING ]".to_string()
+                } else {
+                    format!("[ {} / {} ]", weapon_state.shotgun_ammo, weapon_state.shotgun_max_ammo)
+                }
+            }
+            crate::weapons::WeaponType::Crossbow => {
+                if weapon_state.crossbow_loaded {
+                    "[ BOLT READY ]".to_string()
+                } else {
+                    format!("[ CRANK {:.1}s ]", weapon_state.crossbow_reload_timer.remaining_secs())
+                }
+            }
+            crate::weapons::WeaponType::HandCrossbow => {
+                if weapon_state.hand_crossbow_loaded {
+                    "[ READY ]".to_string()
+                } else {
+                    "[ RELOADING ]".to_string()
+                }
+            }
+            crate::weapons::WeaponType::Bow => {
+                if weapon_state.bow_drawing {
+                    format!("[ DRAW: {}% ]", (weapon_state.bow_charge * 100.0) as u32)
+                } else {
+                    "[ READY ]".to_string()
+                }
+            }
+            crate::weapons::WeaponType::None => "".to_string(),
+            _ => "[ READY ]".to_string(),
+        };
+
+        let color = match weapon_state.current_weapon {
+            crate::weapons::WeaponType::Revolver if weapon_state.revolver_ammo == 0 => Color::srgb(1.0, 0.2, 0.2),
+            crate::weapons::WeaponType::Revolver if weapon_state.revolver_ammo <= 2 => Color::srgb(1.0, 0.7, 0.1),
+            crate::weapons::WeaponType::Shotgun if weapon_state.shotgun_ammo == 0 => Color::srgb(1.0, 0.2, 0.2),
+            crate::weapons::WeaponType::Shotgun if weapon_state.shotgun_ammo == 1 => Color::srgb(1.0, 0.7, 0.1),
+            _ => Color::srgb(0.0, 1.0, 1.0),
+        };
+
+        text.sections[0].value = val;
+        text.sections[0].style.color = color;
+    }
+
+    // 2. Bow Charge Bar (Directly below crosshair)
+    if let Ok((mut bar_style, mut bar_bg)) = bow_bar_q.get_single_mut() {
+        if weapon_state.current_weapon == crate::weapons::WeaponType::Bow && weapon_state.bow_drawing {
+            bar_style.display = Display::Flex;
+            bar_style.width = Val::Px(weapon_state.bow_charge * 40.0);
+            *bar_bg = Color::srgb(1.0, 0.85, 0.2).into();
+        } else {
+            bar_style.display = Display::None;
+        }
+    }
+
+    // 3. Reticle-Adjacent Critical Health Warning (Decluttered Periphery)
+    if let Ok(mut text) = crit_alert_q.get_single_mut() {
+        let mut alert_str = String::new();
+        let mut alert_col = Color::srgb(1.0, 0.2, 0.2);
+
+        if let Some(identity) = &conn.identity {
+            if let Some(player) = conn.db.db.player().identity().find(identity) {
+                if let Some(hp) = conn.db.db.health().entity_id().find(&player.entity_id) {
+                    let pct = hp.current / hp.max.max(1.0);
+                    if pct < 0.35 {
+                        alert_str = format!("CRITICAL: {:.0} HP", hp.current);
+                        alert_col = Color::srgb(1.0, 0.15, 0.15);
+                    } else if pct <= 0.50 {
+                        alert_str = format!("{:.0} HP", hp.current);
+                        alert_col = Color::srgb(1.0, 0.75, 0.1);
+                    }
+                }
+            }
+        }
+        text.sections[0].value = alert_str;
+        text.sections[0].style.color = alert_col;
+    }
+}
+
+pub fn update_reticle_abilities_and_hitmarker(
+    time: Res<Time>,
+    ability_state: Res<TacticalAbilityState>,
+    mut hit_marker_state: ResMut<HitMarkerState>,
+    camera_mode: Res<State<CameraMode>>,
+    mut dash_text_q: Query<&mut Text, (With<ReticleAbilityDashText>, Without<ReticleAbilitySmokeText>, Without<ReticleAbilityIntelText>, Without<ReticleAbilityLiftText>)>,
+    mut smoke_text_q: Query<&mut Text, (With<ReticleAbilitySmokeText>, Without<ReticleAbilityDashText>, Without<ReticleAbilityIntelText>, Without<ReticleAbilityLiftText>)>,
+    mut intel_text_q: Query<&mut Text, (With<ReticleAbilityIntelText>, Without<ReticleAbilityDashText>, Without<ReticleAbilitySmokeText>, Without<ReticleAbilityLiftText>)>,
+    mut lift_text_q: Query<&mut Text, (With<ReticleAbilityLiftText>, Without<ReticleAbilityDashText>, Without<ReticleAbilitySmokeText>, Without<ReticleAbilityIntelText>)>,
+    mut hitmarker_q: Query<(&mut Style, &Children), With<ReticleHitMarker>>,
+    mut hitmarker_ticks_q: Query<&mut BackgroundColor, With<ReticleHitMarkerTick>>,
+) {
+    if *camera_mode.get() != CameraMode::FPS { return; }
+
+    // 1. Tactical Ability Cooldowns (Left of Crosshair)
+    if let Ok(mut text) = dash_text_q.get_single_mut() {
+        let cd = ability_state.cooldowns.dash_remaining;
+        if cd <= 0.0 {
+            text.sections[0].value = "[Q] DASH".into();
+            text.sections[0].style.color = Color::srgb(0.0, 1.0, 1.0);
+        } else {
+            text.sections[0].value = format!("[Q] {:.1}s", cd);
+            text.sections[0].style.color = Color::srgb(0.4, 0.5, 0.5);
+        }
+    }
+    if let Ok(mut text) = smoke_text_q.get_single_mut() {
+        let cd = ability_state.cooldowns.smoke_remaining;
+        if cd <= 0.0 {
+            text.sections[0].value = "[C] SMOKE".into();
+            text.sections[0].style.color = Color::srgb(0.7, 0.8, 0.9);
+        } else {
+            text.sections[0].value = format!("[C] {:.1}s", cd);
+            text.sections[0].style.color = Color::srgb(0.4, 0.5, 0.5);
+        }
+    }
+    if let Ok(mut text) = intel_text_q.get_single_mut() {
+        let cd = ability_state.cooldowns.intel_remaining;
+        if cd <= 0.0 {
+            text.sections[0].value = "[X] INTEL".into();
+            text.sections[0].style.color = Color::srgb(1.0, 0.85, 0.2);
+        } else {
+            text.sections[0].value = format!("[X] {:.1}s", cd);
+            text.sections[0].style.color = Color::srgb(0.4, 0.5, 0.5);
+        }
+    }
+    if let Ok(mut text) = lift_text_q.get_single_mut() {
+        let cd = ability_state.cooldowns.lift_remaining;
+        if cd <= 0.0 {
+            text.sections[0].value = "[F] LIFT".into();
+            text.sections[0].style.color = Color::srgb(0.2, 1.0, 0.4);
+        } else {
+            text.sections[0].value = format!("[F] {:.1}s", cd);
+            text.sections[0].style.color = Color::srgb(0.4, 0.5, 0.5);
+        }
+    }
+
+    // 2. Reticle Hitmarker Ticks (Auditory/Visual Balance)
+    hit_marker_state.timer.tick(time.delta());
+    if let Ok((mut hm_style, children)) = hitmarker_q.get_single_mut() {
+        if !hit_marker_state.timer.finished() {
+            hm_style.display = Display::Flex;
+            let tick_color = if hit_marker_state.is_crit {
+                Color::srgb(1.0, 0.2, 0.2) // Red/Gold for Crit
+            } else if hit_marker_state.is_armor {
+                Color::srgb(0.0, 0.8, 1.0) // Cyan for Armor
+            } else {
+                Color::WHITE // White for Bodyshot
+            };
+            for &child in children.iter() {
+                if let Ok(mut bg) = hitmarker_ticks_q.get_mut(child) {
+                    *bg = tick_color.into();
+                }
+            }
+        } else {
+            hm_style.display = Display::None;
+        }
+    }
+}
+
+pub fn toggle_crosshair_menu(
+    keys: Res<ButtonInput<KeyCode>>,
+    console: Res<ConsoleState>,
+    mut menu_state: ResMut<CrosshairMenuState>,
+    mut menu_q: Query<&mut Style, With<CrosshairMenuRoot>>,
+    mut window_q: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    if console.is_open { return; }
+
+    if keys.just_pressed(KeyCode::F7) {
+        menu_state.is_open = !menu_state.is_open;
+        if let Ok(mut style) = menu_q.get_single_mut() {
+            style.display = if menu_state.is_open { Display::Flex } else { Display::None };
+        }
+        if let Ok(mut win) = window_q.get_single_mut() {
+            if menu_state.is_open {
+                win.cursor.grab_mode = CursorGrabMode::None;
+                win.cursor.visible = true;
+            } else {
+                win.cursor.grab_mode = CursorGrabMode::Locked;
+                win.cursor.visible = false;
+            }
+        }
+    }
+}
+
+pub fn handle_crosshair_menu_interactions(
+    mut settings: ResMut<CrosshairSettings>,
+    mut button_q: Query<(&Interaction, &CrosshairMenuButton), (Changed<Interaction>, With<Button>)>,
+    mut text_q: Query<&mut Text, With<CrosshairMenuText>>,
+) {
+    let mut changed = false;
+
+    for (interaction, btn) in button_q.iter_mut() {
+        if *interaction == Interaction::Pressed {
+            changed = true;
+            match btn.0.as_str() {
+                "Color" => settings.color_preset = settings.color_preset.next(),
+                "GapDec" => settings.gap = (settings.gap - 1.0).max(0.0),
+                "GapInc" => settings.gap = (settings.gap + 1.0).min(30.0),
+                "LenDec" => settings.length = (settings.length - 1.0).max(2.0),
+                "LenInc" => settings.length = (settings.length + 1.0).min(30.0),
+                "ThickDec" => settings.thickness = (settings.thickness - 0.5).max(1.0),
+                "ThickInc" => settings.thickness = (settings.thickness + 0.5).min(8.0),
+                "ToggleDot" => settings.dot = !settings.dot,
+                "ToggleOutline" => settings.outline = !settings.outline,
+                "ToggleDynamic" => settings.is_dynamic = !settings.is_dynamic,
+                _ => {}
+            }
+        }
+    }
+
+    if changed || text_q.iter().next().map_or(false, |t| t.sections[0].value.starts_with("Loading")) {
+        if let Ok(mut text) = text_q.get_single_mut() {
+            text.sections[0].value = format!(
+                "Color: {}\nGap: {:.0}px | Length: {:.0}px | Thick: {:.1}px\nDot: {} | Outline: {}\nMode: {}",
+                settings.color_preset.name(),
+                settings.gap,
+                settings.length,
+                settings.thickness,
+                if settings.dot { "ON" } else { "OFF" },
+                if settings.outline { "ON" } else { "OFF" },
+                if settings.is_dynamic { "DYNAMIC (Spread Reactive)" } else { "STATIC (Competitive Lock)" },
+            );
+        }
+    }
+}

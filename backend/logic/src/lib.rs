@@ -1981,3 +1981,171 @@ impl Prng {
         min + self.next_f32() * (max - min)
     }
 }
+
+// ----------------------------------------------------------------------------
+// TACTICAL ABILITIES SYSTEM: MULTIPLIERS TO CORE GUNPLAY
+// ----------------------------------------------------------------------------
+// Architectural Note: Implements ability design centered on utility over lethality,
+// movement synergy, and explicit telegraphing/counter-play. Abilities create space,
+// gather information, and manipulate lines of sight rather than acting as low-skill
+// "press-to-kill" buttons. Opponents receive distinct audio-visual wind-ups so they
+// understand cause-and-effect and can adjust positioning or aim.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TacticalAbilityKind {
+    /// Directional horizontal momentum burst; forces aim adjustment without free damage.
+    PhaseDash,
+    /// Obscuring dense particle sphere; creates space and blocks lines of sight.
+    SmokeVeil,
+    /// Reconnaissance dart with 3 audible sonar pulses; non-lethal intel gathering.
+    IntelDart,
+    /// Vertical kinetic lift thruster; resets falling speed and creates high-ground angles.
+    GravLift,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AbilityDefinition {
+    pub kind: TacticalAbilityKind,
+    pub name: &'static str,
+    pub cooldown_seconds: f32,
+    pub windup_seconds: f32,
+    pub is_mobility_synergy: bool,
+    pub is_utility_focused: bool,
+    pub base_damage: f32,
+    pub effect_radius: f32,
+    pub duration_seconds: f32,
+    pub telegraph_cue: &'static str,
+    pub counterplay_cue: &'static str,
+}
+
+pub fn get_ability_definition(kind: TacticalAbilityKind) -> AbilityDefinition {
+    match kind {
+        TacticalAbilityKind::PhaseDash => AbilityDefinition {
+            kind,
+            name: "Phase Dash",
+            cooldown_seconds: 6.0,
+            windup_seconds: 0.05,
+            is_mobility_synergy: true,
+            is_utility_focused: true,
+            base_damage: 0.0, // Non-lethal; gunplay multiplier only
+            effect_radius: 0.0,
+            duration_seconds: 0.25,
+            telegraph_cue: "Audible air-displacement whoosh and high-contrast particle slipstream",
+            counterplay_cue: "Follow straight-line momentum vector; opponent cannot fire during active dash",
+        },
+        TacticalAbilityKind::SmokeVeil => AbilityDefinition {
+            kind,
+            name: "Smoke Veil",
+            cooldown_seconds: 14.0,
+            windup_seconds: 0.20,
+            is_mobility_synergy: false,
+            is_utility_focused: true,
+            base_damage: 0.0, // Utility only; blocks lines of sight
+            effect_radius: 8.0,
+            duration_seconds: 8.0,
+            telegraph_cue: "Pressurized canister hiss and visible ballistic canister arc",
+            counterplay_cue: "Blind-fire through cloud choke points or reposition around the perimeter",
+        },
+        TacticalAbilityKind::IntelDart => AbilityDefinition {
+            kind,
+            name: "Intel Dart",
+            cooldown_seconds: 16.0,
+            windup_seconds: 0.15,
+            is_mobility_synergy: false,
+            is_utility_focused: true,
+            base_damage: 0.0, // Pure intelligence gathering
+            effect_radius: 15.0,
+            duration_seconds: 4.5, // 3 pulses spaced 1.5s apart
+            telegraph_cue: "Resonant 1750 Hz sonar chime and expanding visual pulse rings",
+            counterplay_cue: "Acoustic ping reveals dart location; destroy dart or rotate outside radius",
+        },
+        TacticalAbilityKind::GravLift => AbilityDefinition {
+            kind,
+            name: "Grav-Lift",
+            cooldown_seconds: 10.0,
+            windup_seconds: 0.10,
+            is_mobility_synergy: true,
+            is_utility_focused: true,
+            base_damage: 0.0, // Upward mobility multiplier
+            effect_radius: 2.5,
+            duration_seconds: 0.60,
+            telegraph_cue: "Rocket-jet air thrust hiss and vertical updraft swirl",
+            counterplay_cue: "Airborne target follows predictable parabolic curve; punish with hitscan fire",
+        },
+    }
+}
+
+/// Architectural Note: Authoritative ability cooldown tracker.
+/// Enforces timers deterministically across simulation ticks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TacticalAbilityCooldowns {
+    pub dash_remaining: f32,
+    pub smoke_remaining: f32,
+    pub intel_remaining: f32,
+    pub lift_remaining: f32,
+}
+
+impl Default for TacticalAbilityCooldowns {
+    fn default() -> Self {
+        Self {
+            dash_remaining: 0.0,
+            smoke_remaining: 0.0,
+            intel_remaining: 0.0,
+            lift_remaining: 0.0,
+        }
+    }
+}
+
+impl TacticalAbilityCooldowns {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn tick(&mut self, dt: f32) {
+        self.dash_remaining = (self.dash_remaining - dt).max(0.0);
+        self.smoke_remaining = (self.smoke_remaining - dt).max(0.0);
+        self.intel_remaining = (self.intel_remaining - dt).max(0.0);
+        self.lift_remaining = (self.lift_remaining - dt).max(0.0);
+    }
+
+    pub fn is_ready(&self, kind: TacticalAbilityKind) -> bool {
+        match kind {
+            TacticalAbilityKind::PhaseDash => self.dash_remaining <= 0.0,
+            TacticalAbilityKind::SmokeVeil => self.smoke_remaining <= 0.0,
+            TacticalAbilityKind::IntelDart => self.intel_remaining <= 0.0,
+            TacticalAbilityKind::GravLift => self.lift_remaining <= 0.0,
+        }
+    }
+
+    pub fn cooldown_remaining(&self, kind: TacticalAbilityKind) -> f32 {
+        match kind {
+            TacticalAbilityKind::PhaseDash => self.dash_remaining,
+            TacticalAbilityKind::SmokeVeil => self.smoke_remaining,
+            TacticalAbilityKind::IntelDart => self.intel_remaining,
+            TacticalAbilityKind::GravLift => self.lift_remaining,
+        }
+    }
+
+    pub fn cooldown_fraction(&self, kind: TacticalAbilityKind) -> f32 {
+        let def = get_ability_definition(kind);
+        if def.cooldown_seconds <= 0.0 {
+            return 0.0;
+        }
+        (self.cooldown_remaining(kind) / def.cooldown_seconds).clamp(0.0, 1.0)
+    }
+
+    pub fn trigger(&mut self, kind: TacticalAbilityKind) -> Result<(), &'static str> {
+        if !self.is_ready(kind) {
+            return Err("Ability on cooldown");
+        }
+        let def = get_ability_definition(kind);
+        match kind {
+            TacticalAbilityKind::PhaseDash => self.dash_remaining = def.cooldown_seconds,
+            TacticalAbilityKind::SmokeVeil => self.smoke_remaining = def.cooldown_seconds,
+            TacticalAbilityKind::IntelDart => self.intel_remaining = def.cooldown_seconds,
+            TacticalAbilityKind::GravLift => self.lift_remaining = def.cooldown_seconds,
+        }
+        Ok(())
+    }
+}
+

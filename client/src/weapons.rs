@@ -167,6 +167,7 @@ pub struct WeaponState {
     pub recoil_offset: Vec3,
     pub recoil_rot: Quat,
     pub sway_time: f32,
+    pub dynamic_bloom: f32,
 }
 
 impl Default for WeaponState {
@@ -194,6 +195,7 @@ impl Default for WeaponState {
             recoil_offset: Vec3::ZERO,
             recoil_rot: Quat::IDENTITY,
             sway_time: 0.0,
+            dynamic_bloom: 0.0,
         }
     }
 }
@@ -708,9 +710,13 @@ pub fn animate_weapon_viewmodel(
         *vis = Visibility::Inherited;
     }
 
-    // 3. Recoil Recovery (Exponential Decay)
+    // 3. Recoil Recovery (Exponential Decay) & Dynamic Bloom Decay
     weapon_state.recoil_offset = weapon_state.recoil_offset.lerp(Vec3::ZERO, (dt * 14.0).min(1.0));
     weapon_state.recoil_rot = weapon_state.recoil_rot.slerp(Quat::IDENTITY, (dt * 16.0).min(1.0));
+    weapon_state.dynamic_bloom = (weapon_state.dynamic_bloom - dt * 28.0).max(0.0);
+    if weapon_state.current_weapon == WeaponType::Bow && weapon_state.bow_drawing {
+        weapon_state.dynamic_bloom = (1.0 - weapon_state.bow_charge) * 12.0;
+    }
 
     // 4. Transform Animation on ViewModelWeaponRoot
     let Ok(mut root_t) = root_q.get_single_mut() else { return; };

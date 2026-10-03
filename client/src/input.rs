@@ -433,6 +433,7 @@ pub fn context_aware_action_dispatcher(
 
                                     weapons.weapon_state.recoil_offset += Vec3::new(0.0, 0.065, 0.11);
                                     weapons.weapon_state.recoil_rot *= Quat::from_rotation_x(-0.48);
+                                    weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 8.0).min(30.0);
 
                                     let hit = spatial_query.cast_ray(
                                         origin, cam_transform.forward(), 80.0, true,
@@ -473,6 +474,7 @@ pub fn context_aware_action_dispatcher(
 
                                     weapons.weapon_state.recoil_offset += Vec3::new(0.0, 0.095, 0.15);
                                     weapons.weapon_state.recoil_rot *= Quat::from_rotation_x(-0.62);
+                                    weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 16.0).min(40.0);
 
                                     let spread_offsets = [
                                         (0.0, 0.0), (0.025, 0.02), (-0.025, 0.02), (0.02, -0.025),

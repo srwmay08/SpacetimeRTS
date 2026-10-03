@@ -13,6 +13,8 @@ mod prediction;
 mod building; 
 mod weapons;
 mod tuner;
+mod audio_feedback;
+mod tactical_abilities;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -27,6 +29,8 @@ use crate::ui::*;
 use crate::building::*;
 use crate::weapons::*;
 use crate::tuner::*;
+use crate::audio_feedback::*;
+use crate::tactical_abilities::*;
 
 // P2 Fix: SystemSets for explicit ordering and predictable behavior
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -91,11 +95,15 @@ fn main() {
         .init_resource::<WeaponTunerState>()
         .init_resource::<EquippedHandSide>()
         .init_resource::<ClientEquippedBags>()
+        .init_resource::<CrosshairSettings>()
+        .init_resource::<CrosshairMenuState>()
+        .init_resource::<TacticalAbilityState>()
+        .init_resource::<HitMarkerState>()
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))
 
-        .add_systems(OnEnter(GameState::InGame), (spawn_initial_world, setup_ui, setup_tuner_ui))
+        .add_systems(OnEnter(GameState::InGame), (spawn_initial_world, setup_ui, setup_tuner_ui, setup_procedural_combat_audio))
         .add_systems(OnEnter(CameraMode::FPS), enable_fps_perspective)
         .add_systems(OnEnter(CameraMode::RTS), enable_rts_perspective)
 
@@ -156,10 +164,20 @@ fn main() {
             action_bar_interaction,       
             toggle_action_bar_visibility,
             update_floating_health_bars,
+        ).run_if(in_state(GameState::InGame)))
+
+        .add_systems(Update, (
             spawn_or_update_view_model_weapon,
             animate_weapon_viewmodel,
             weapon_reload_input_system,
             update_weapon_hud,
+            update_reticle_crosshair_ui,
+            update_reticle_adjacent_hud,
+            update_reticle_abilities_and_hitmarker,
+            toggle_crosshair_menu,
+            handle_crosshair_menu_interactions,
+            tactical_ability_input_system,
+            update_tactical_abilities_system,
         ).run_if(in_state(GameState::InGame)))    
 
         .add_systems(Update, fps_look.run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
