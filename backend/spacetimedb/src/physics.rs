@@ -1,6 +1,8 @@
-use spacetimedb::ReducerContext;
+use spacetimedb::{ReducerContext, Table};
 use std::sync::RwLock;
 use rapier3d::prelude::*;
+use crate::movement::transform;
+use crate::building::structure;
 
 /// Global cache for our purely stateless QueryPipeline
 static PHYSICS_CACHE: RwLock<Option<(ColliderSet, QueryPipeline)>> = RwLock::new(None);
@@ -15,7 +17,7 @@ pub fn rebuild_physics_cache(ctx: &ReducerContext) {
     for t in ctx.db.transform().iter() {
         // Humanoid shape: 1.0m height total (half-height 0.5), 0.8m width (radius 0.4)
         let collider = ColliderBuilder::capsule_y(0.5, 0.4)
-            .translation(vector![t.x, t.y + 0.5, t.z]) 
+            .translation(Vector::new(t.x, t.y + 0.5, t.z)) 
             .user_data(t.entity_id as u128) 
             .build();
         colliders.insert(collider);
@@ -25,7 +27,7 @@ pub fn rebuild_physics_cache(ctx: &ReducerContext) {
     for s in ctx.db.structure().iter() {
         // Basic 2.5m x 2.5m block representation
         let collider = ColliderBuilder::cuboid(1.25, 1.25, 1.25)
-            .translation(vector![s.x, s.y, s.z])
+            .translation(Vector::new(s.x, s.y, s.z))
             .user_data((s.structure_id as u128) | (1 << 64)) // High bit indicates Structure
             .build();
         colliders.insert(collider);
@@ -51,15 +53,18 @@ pub fn cast_ray(
     let colliders = &cache.0;
     let query_pipeline = &cache.1;
 
-    let ray = Ray::new(point![origin_x, origin_y, origin_z], vector![dir_x, dir_y, dir_z]);
+    let ray = Ray::new(Point::new(origin_x, origin_y, origin_z), Vector::new(dir_x, dir_y, dir_z));
     
     // Ignore the shooter so bullets don't instantly hit them
-    let filter = QueryFilter::default().predicate(&|_, collider| {
+    let predicate = |_, collider: &Collider| {
         let id = (collider.user_data & 0xFFFFFFFFFFFFFFFF) as u64;
         id != exclude_entity
-    });
+    };
+    let filter = QueryFilter::default().predicate(&predicate);
     
+    let rigid_bodies = RigidBodySet::new();
     if let Some((handle, toi)) = query_pipeline.cast_ray(
+        &rigid_bodies,
         colliders,
         &ray,
         max_dist,

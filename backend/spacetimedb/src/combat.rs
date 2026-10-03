@@ -330,7 +330,6 @@ pub fn fire_weapon(
         .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
 
     let mut hit_entity = None;
-    let mut closest_dist = f32::MAX;
     let mut hit_location = (0.0, 0.0, 0.0);
 
     let dir_len_sq = dir_x * dir_x + dir_y * dir_y + dir_z * dir_z;
@@ -348,7 +347,7 @@ pub fn fire_weapon(
 
         if let Some(snap) = history.snapshots.iter().min_by_key(|s| (s.tick_id as i64 - client_tick as i64).abs()) {
             let col = rapier3d::prelude::ColliderBuilder::capsule_y(0.5, 0.4)
-                .translation(rapier3d::prelude::vector![snap.x, snap.y + 0.5, snap.z])
+                .translation(rapier3d::prelude::Vector::new(snap.x, snap.y + 0.5, snap.z))
                 .user_data(history.entity_id as u128)
                 .build();
             colliders.insert(col);
@@ -358,7 +357,7 @@ pub fn fire_weapon(
     // Check structures against their current state (structures don't move so lag compensation isn't needed)
     for s in ctx.db.structure().iter() {
         let col = rapier3d::prelude::ColliderBuilder::cuboid(1.25, 1.25, 1.25)
-            .translation(rapier3d::prelude::vector![s.x, s.y, s.z])
+            .translation(rapier3d::prelude::Vector::new(s.x, s.y, s.z))
             .user_data((s.structure_id as u128) | (1 << 64))
             .build();
         colliders.insert(col);
@@ -368,12 +367,13 @@ pub fn fire_weapon(
     query_pipeline.update(&colliders);
 
     let ray = rapier3d::prelude::Ray::new(
-        rapier3d::prelude::point![origin_x, origin_y, origin_z],
-        rapier3d::prelude::vector![ndx, ndy, ndz]
+        rapier3d::prelude::Point::new(origin_x, origin_y, origin_z),
+        rapier3d::prelude::Vector::new(ndx, ndy, ndz)
     );
 
+    let rigid_bodies = rapier3d::prelude::RigidBodySet::new();
     if let Some((handle, toi)) = query_pipeline.cast_ray(
-        &colliders, &ray, 300.0, true, rapier3d::prelude::QueryFilter::default()
+        &rigid_bodies, &colliders, &ray, 300.0, true, rapier3d::prelude::QueryFilter::default()
     ) {
         let user_data = colliders[handle].user_data;
         let is_structure = (user_data >> 64) == 1;
