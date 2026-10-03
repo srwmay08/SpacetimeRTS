@@ -247,42 +247,23 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
             let ndy = segment_dy / segment_len;
             let ndz = segment_dz / segment_len;
 
-            // P1 Fix: Use spatial grid for broad-phase entity lookup instead of full table scan
-            let nearby_entities = crate::spatial::get_nearby_entities(proj.pos_x, proj.pos_z, segment_len + 2.0);
-            
-            // 1. Ray sweep against entity hitboxes (only nearby entities from spatial grid)
-            for entity_id in nearby_entities {
-                if entity_id == proj.shooter_id {
-                    continue;
-                }
+            // 1. RAPIER OPTIMIZATION: Ray sweep against entities and structures
+            if let Some((user_data, hx, hy, hz, _toi)) = crate::physics::cast_ray(
+                prev_x, prev_y, prev_z,
+                ndx, ndy, ndz,
+                segment_len,
+                proj.shooter_id,
+            ) {
+                let is_structure = (user_data >> 64) == 1;
+                let target_id = (user_data & 0xFFFFFFFFFFFFFFFF) as u64;
                 
-                let Some(history) = ctx.db.hitbox_history().entity_id().find(entity_id) else {
-                    continue;
-                };
+                hit_detected = true;
+                hit_point = (hx, hy, hz);
                 
-                if ctx.db.harvestable_corpse().entity_id().find(entity_id).is_some() {
-                    continue;
-                }
-
-                if let Some(snap) = history.snapshots.last() {
-                    let radius = 0.9_f32;
-                    let ocx = prev_x - snap.x;
-                    let ocy = prev_y - (snap.y + 1.0);
-                    let ocz = prev_z - snap.z;
-
-                    let b = (ocx * ndx + ocy * ndy + ocz * ndz) * 2.0;
-                    let c = ocx * ocx + ocy * ocy + ocz * ocz - (radius * radius);
-                    let discriminant = b * b - 4.0 * c;
-
-                    if discriminant >= 0.0 {
-                        let dist = (-b - discriminant.sqrt()) / 2.0;
-                        if dist > 0.0 && dist <= segment_len {
-                            hit_detected = true;
-                            hit_point = (prev_x + ndx * dist, prev_y + ndy * dist, prev_z + ndz * dist);
-                            hit_target_id = Some(entity_id);
-                            break;
-                        }
-                    }
+                if is_structure {
+                    crate::building::damage_structure(ctx, target_id, proj.damage);
+                } else {
+                    hit_target_id = Some(target_id);
                 }
             }
 
@@ -292,25 +273,6 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
                 if voxel_mat.is_solid() {
                     hit_detected = true;
                     hit_point = (proj.pos_x, proj.pos_y, proj.pos_z);
-                }
-            }
-
-            // 3. Check collision with modular structures (using spatial grid)
-            if !hit_detected {
-                let nearby_structures = crate::spatial::get_nearby_entities(proj.pos_x, proj.pos_z, 2.0);
-                for structure_id in nearby_structures {
-                    let Some(s) = ctx.db.structure().structure_id().find(structure_id) else {
-                        continue;
-                    };
-                    let dx = s.x - proj.pos_x;
-                    let dy = s.y - proj.pos_y;
-                    let dz = s.z - proj.pos_z;
-                    if (dx * dx + dy * dy + dz * dz) <= 4.0 {
-                        hit_detected = true;
-                        hit_point = (s.x, s.y, s.z);
-                        crate::building::damage_structure(ctx, s.structure_id, proj.damage);
-                        break;
-                    }
                 }
             }
         }
@@ -378,43 +340,52 @@ pub fn fire_weapon(
     let inv_len = 1.0 / dir_len_sq.sqrt();
     let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
 
+    // RAPIER LAG COMPENSATION: Build a local physics query pipeline representing the historical state
+    let mut colliders = rapier3d::prelude::ColliderSet::new();
     for history in ctx.db.hitbox_history().iter() {
-        if history.entity_id == session.entity_id {
-            continue;
+        if history.entity_id == session.entity_id { continue; }
+        if ctx.db.harvestable_corpse().entity_id().find(history.entity_id).is_some() { continue; }
+
+        if let Some(snap) = history.snapshots.iter().min_by_key(|s| (s.tick_id as i64 - client_tick as i64).abs()) {
+            let col = rapier3d::prelude::ColliderBuilder::capsule_y(0.5, 0.4)
+                .translation(rapier3d::prelude::vector![snap.x, snap.y + 0.5, snap.z])
+                .user_data(history.entity_id as u128)
+                .build();
+            colliders.insert(col);
         }
-        if ctx.db.harvestable_corpse().entity_id().find(history.entity_id).is_some() {
-            continue;
-        }
+    }
+    
+    // Check structures against their current state (structures don't move so lag compensation isn't needed)
+    for s in ctx.db.structure().iter() {
+        let col = rapier3d::prelude::ColliderBuilder::cuboid(1.25, 1.25, 1.25)
+            .translation(rapier3d::prelude::vector![s.x, s.y, s.z])
+            .user_data((s.structure_id as u128) | (1 << 64))
+            .build();
+        colliders.insert(col);
+    }
 
-        let closest_snapshot = history.snapshots.iter()
-            .min_by_key(|s| (s.tick_id as i64 - client_tick as i64).abs());
+    let mut query_pipeline = rapier3d::prelude::QueryPipeline::new();
+    query_pipeline.update(&colliders);
 
-        if let Some(snap) = closest_snapshot {
-            let radius = 0.8_f32;
-            let cx = snap.x;
-            let cy = snap.y + 1.0;
-            let cz = snap.z;
+    let ray = rapier3d::prelude::Ray::new(
+        rapier3d::prelude::point![origin_x, origin_y, origin_z],
+        rapier3d::prelude::vector![ndx, ndy, ndz]
+    );
 
-            let ocx = origin_x - cx;
-            let ocy = origin_y - cy;
-            let ocz = origin_z - cz;
-
-            let b = (ocx * ndx + ocy * ndy + ocz * ndz) * 2.0;
-            let c = ocx * ocx + ocy * ocy + ocz * ocz - (radius * radius);
-            let discriminant = b * b - 4.0 * c;
-
-            if discriminant >= 0.0 {
-                let dist = (-b - discriminant.sqrt()) / 2.0;
-                if dist > 0.0 && dist < closest_dist {
-                    closest_dist = dist;
-                    hit_entity = Some(history.entity_id);
-                    hit_location = (
-                        origin_x + ndx * dist,
-                        origin_y + ndy * dist,
-                        origin_z + ndz * dist,
-                    );
-                }
-            }
+    if let Some((handle, toi)) = query_pipeline.cast_ray(
+        &colliders, &ray, 300.0, true, rapier3d::prelude::QueryFilter::default()
+    ) {
+        let user_data = colliders[handle].user_data;
+        let is_structure = (user_data >> 64) == 1;
+        let target_id = (user_data & 0xFFFFFFFFFFFFFFFF) as u64;
+        let hit_pt = ray.point_at(toi);
+        
+        hit_location = (hit_pt.x, hit_pt.y, hit_pt.z);
+        
+        if is_structure {
+            crate::building::damage_structure(ctx, target_id, 20.0);
+        } else {
+            hit_entity = Some(target_id);
         }
     }
 
