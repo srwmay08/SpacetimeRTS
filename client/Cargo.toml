@@ -3,6 +3,18 @@ name = "client"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "client"
+path = "src/lib.rs"
+
+[[bin]]
+name = "client"
+path = "src/main.rs"
+
+[[example]]
+name = "binary_stars"
+path = "examples/binary_stars.rs"
+
 [dependencies]
 avian3d = "0.1"
 bevy = { version = "0.14.0", features = ["wav"] }

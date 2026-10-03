@@ -16,6 +16,7 @@ mod tuner;
 mod audio_feedback;
 mod tactical_abilities;
 pub mod binary_sky;
+pub mod binary_stars;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;

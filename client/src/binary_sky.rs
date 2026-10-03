@@ -38,7 +38,9 @@
 
 use std::f32::consts::PI;
 use bevy::prelude::*;
-use bevy::pbr::{FogFalloff, FogSettings};
+use bevy::pbr::{
+    CascadeShadowConfigBuilder, DirectionalLightShadowMap, FogFalloff, FogSettings,
+};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
@@ -823,7 +825,16 @@ pub fn setup_binary_sky_environment(
 ) {
     info!("Initializing Dynamic Binary Sky System (S-Type Circumstellar Architecture)...");
 
-    // Spawn Host Primary Star A Directional Light (Dominant Shadow Caster)
+    // Spawn Host Primary Star A Directional Light (Dominant Shadow Caster - Higher Fidelity CSM)
+    let cascade_config_a = CascadeShadowConfigBuilder {
+        num_cascades: 3,
+        minimum_distance: 0.1,
+        maximum_distance: 160.0,
+        first_cascade_far_bound: 15.0,
+        overlap_proportion: 0.20,
+    }
+    .build();
+
     commands.spawn((
         DirectionalLightBundle {
             directional_light: DirectionalLight {
@@ -833,22 +844,33 @@ pub fn setup_binary_sky_environment(
                 ..default()
             },
             transform: Transform::from_xyz(0.0, 100.0, -100.0).looking_at(Vec3::ZERO, Vec3::Y),
+            cascade_shadow_config: cascade_config_a,
             ..default()
         },
         PrimaryStar,
         Name::new("Host Star A (Primary)"),
     ));
 
-    // Spawn Secondary Dwarf Star B Directional Light (Secondary Shadow Candidate)
+    // Spawn Secondary Dwarf Star B Directional Light (Asymmetric CSM Tier: 2 cascades, 75m)
+    let cascade_config_b = CascadeShadowConfigBuilder {
+        num_cascades: 2,
+        minimum_distance: 0.1,
+        maximum_distance: 75.0,
+        first_cascade_far_bound: 12.0,
+        overlap_proportion: 0.20,
+    }
+    .build();
+
     commands.spawn((
         DirectionalLightBundle {
             directional_light: DirectionalLight {
                 color: Color::srgb(1.0, 0.65, 0.35),
                 illuminance: config.star_b_base_illuminance_lux,
-                shadows_enabled: false,
+                shadows_enabled: true,
                 ..default()
             },
             transform: Transform::from_xyz(50.0, 60.0, -80.0).looking_at(Vec3::ZERO, Vec3::Y),
+            cascade_shadow_config: cascade_config_b,
             ..default()
         },
         SecondaryStar,
@@ -1235,7 +1257,8 @@ pub fn sync_stellar_directional_lights(
     if let Ok((mut light_a, mut transform_a)) = star_a_query.get_single_mut() {
         light_a.color = cache.star_a_color;
         light_a.illuminance = cache.star_a_illuminance_lux;
-        light_a.shadows_enabled = cache.active_shadow_caster == ShadowCasterRole::StarA;
+        // Simultaneous dual shadow casting: active whenever above horizon
+        light_a.shadows_enabled = ephemeris.star_a_elevation > -0.05;
 
         let target_dir = -ephemeris.star_a_direction;
         if target_dir.length_squared() > 1e-4 {
@@ -1246,7 +1269,8 @@ pub fn sync_stellar_directional_lights(
     if let Ok((mut light_b, mut transform_b)) = star_b_query.get_single_mut() {
         light_b.color = cache.star_b_color;
         light_b.illuminance = cache.star_b_illuminance_lux;
-        light_b.shadows_enabled = cache.active_shadow_caster == ShadowCasterRole::StarB;
+        // Simultaneous dual shadow casting: active whenever above horizon
+        light_b.shadows_enabled = ephemeris.star_b_elevation > -0.05;
 
         let target_dir = -ephemeris.star_b_direction;
         if target_dir.length_squared() > 1e-4 {
@@ -1523,7 +1547,8 @@ pub struct BinarySkyPlugin;
 
 impl Plugin for BinarySkyPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<BinarySkyConfig>()
+        app.insert_resource(DirectionalLightShadowMap { size: 4096 })
+            .init_resource::<BinarySkyConfig>()
             .init_resource::<BinaryEphemerisState>()
             .init_resource::<AtmosphericRadianceCache>()
             .init_resource::<AtmosphericWeather>()
