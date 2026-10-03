@@ -382,15 +382,35 @@ pub fn fire_weapon(
         
         hit_location = (hit_pt.x, hit_pt.y, hit_pt.z);
         
+        let mut damage = 20.0;
+        let mut struct_damage = 20.0;
+        if let Some(mut inv) = ctx.db.inventory().entity_id().find(session.entity_id) {
+            if inv.slots.iter().any(|s| s.item_type == "Revolver" && s.count > 0) {
+                damage = 45.0;
+                struct_damage = 30.0;
+                if crate::has_item(&inv, "Revolver Ammo", 1) {
+                    crate::remove_item(&mut inv, "Revolver Ammo", 1);
+                    ctx.db.inventory().entity_id().update(inv);
+                }
+            } else if inv.slots.iter().any(|s| s.item_type == "Shotgun" && s.count > 0) {
+                damage = 16.0;
+                struct_damage = 15.0;
+                if crate::has_item(&inv, "Shotgun Shell", 1) {
+                    crate::remove_item(&mut inv, "Shotgun Shell", 1);
+                    ctx.db.inventory().entity_id().update(inv);
+                }
+            }
+        }
+
         if is_structure {
-            crate::building::damage_structure(ctx, target_id, 20.0);
+            crate::building::damage_structure(ctx, target_id, struct_damage);
         } else {
-            hit_entity = Some(target_id);
+            hit_entity = Some((target_id, damage));
         }
     }
 
-    if let Some(target_id) = hit_entity {
-        apply_damage(ctx, target_id, 20.0);
+    if let Some((target_id, dmg)) = hit_entity {
+        apply_damage(ctx, target_id, dmg);
 
         ctx.db.combat_event().insert(CombatEvent {
             id: 0,
@@ -400,7 +420,7 @@ pub fn fire_weapon(
             z: hit_location.2,
         });
 
-        log::debug!("Hit validated via Lag Compensation: Entity {} hit {}", session.entity_id, target_id);
+        log::debug!("Hit validated via Lag Compensation: Entity {} hit {} for {} dmg", session.entity_id, target_id, dmg);
     }
 
     Ok(())
@@ -419,23 +439,44 @@ pub fn fire_bow(
     let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
         .ok_or_else(|| "Inventory not found.".to_string())?;
 
-    let has_bow = inv.slots.iter().any(|s| s.item_type == "Crude Bow" && s.count > 0);
-    if !has_bow {
-        return Err("You must have a Bow equipped to fire.".to_string());
+    let is_crossbow = inv.slots.iter().any(|s| s.item_type == "Crossbow" && s.count > 0);
+    let is_hand_crossbow = inv.slots.iter().any(|s| s.item_type == "Hand Crossbow" && s.count > 0);
+    let is_bow = inv.slots.iter().any(|s| (s.item_type == "Bow" || s.item_type == "Crude Bow") && s.count > 0);
+
+    if !is_crossbow && !is_hand_crossbow && !is_bow {
+        return Err("You must have a Bow or Crossbow equipped to fire.".to_string());
     }
 
-    let arrow_type = if crate::has_item(&inv, "Flint Arrow", 1) {
-        "Flint Arrow"
-    } else if crate::has_item(&inv, "Wood Arrow", 1) {
-        "Wood Arrow"
+    let (ammo_type, damage, speed, gravity, drag) = if is_crossbow {
+        if crate::has_item(&inv, "Crossbow Bolt", 1) {
+            ("Crossbow Bolt", 65.0, 75.0, 2.0, 0.0005)
+        } else if crate::has_item(&inv, "Flint Arrow", 1) {
+            ("Flint Arrow", 50.0, 70.0, 2.2, 0.0006)
+        } else if crate::has_item(&inv, "Wood Arrow", 1) {
+            ("Wood Arrow", 40.0, 68.0, 2.5, 0.0007)
+        } else {
+            return Err("No bolts or arrows remaining in inventory.".to_string());
+        }
+    } else if is_hand_crossbow {
+        if crate::has_item(&inv, "Crossbow Bolt", 1) {
+            ("Crossbow Bolt", 42.0, 55.0, 3.2, 0.001)
+        } else if crate::has_item(&inv, "Wood Arrow", 1) {
+            ("Wood Arrow", 28.0, 50.0, 3.6, 0.001)
+        } else {
+            return Err("No bolts or arrows remaining in inventory.".to_string());
+        }
     } else {
-        return Err("No arrows remaining in inventory.".to_string());
+        if crate::has_item(&inv, "Flint Arrow", 1) {
+            ("Flint Arrow", 35.0, 48.0, 4.8, 0.001)
+        } else if crate::has_item(&inv, "Wood Arrow", 1) {
+            ("Wood Arrow", 20.0, 46.0, 5.0, 0.001)
+        } else {
+            return Err("No arrows remaining in inventory.".to_string());
+        }
     };
 
-    crate::remove_item(&mut inv, arrow_type, 1);
+    crate::remove_item(&mut inv, ammo_type, 1);
     ctx.db.inventory().entity_id().update(inv);
-
-    let arrow_damage = if arrow_type == "Flint Arrow" { 35.0 } else { 20.0 };
 
     let dir_len_sq = dir_x * dir_x + dir_y * dir_y + dir_z * dir_z;
     if dir_len_sq < 0.0001 {
@@ -443,8 +484,6 @@ pub fn fire_bow(
     }
     let inv_len = 1.0 / dir_len_sq.sqrt();
     let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
-
-    let speed = 48.0;
 
     // Spawn authoritative ballistic projectile
     ctx.db.active_projectile().insert(ActiveProjectile {
@@ -457,9 +496,9 @@ pub fn fire_bow(
         vel_x: ndx * speed,
         vel_y: ndy * speed,
         vel_z: ndz * speed,
-        gravity: 4.8,
-        drag: 0.001,
-        damage: arrow_damage,
+        gravity,
+        drag,
+        damage,
         blast_radius: 0.0,
         start_tick: client_tick,
         lifetime: 5.0,

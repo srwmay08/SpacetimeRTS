@@ -33,19 +33,27 @@ use spacetimedb_sdk::Table;
 // Guarantees only properly capitalized and valid items can be auto-filled or submitted.
 pub const CANONICAL_ITEMS: &[&str] = &[
     "Berry",
+    "Bow",
     "Branch",
     "Club",
     "Cooked Meat",
+    "Crossbow",
+    "Crossbow Bolt",
     "Crude Bow",
     "Flint",
     "Flint Arrow",
     "Flint Spear",
     "Hammer",
+    "Hand Crossbow",
     "Honey",
     "Leather Scraps",
     "LooseStone",
     "Pickaxe",
     "Resin",
+    "Revolver",
+    "Revolver Ammo",
+    "Shotgun",
+    "Shotgun Shell",
     "Stone",
     "Stone Axe",
     "Torch",
@@ -295,6 +303,14 @@ pub fn setup_ui(mut commands: Commands) {
                 ("Torch", "1 Branch, 1 Resin"),
                 ("Wood Arrow", "8 Wood (x20)"),
                 ("Crude Bow", "10 Wood, 4 Leather [Workbench]"),
+                ("Bow", "12 Wood, 4 Leather [Workbench]"),
+                ("Crossbow", "15 Wood, 5 Flint, 4 Leather [Workbench]"),
+                ("Hand Crossbow", "8 Wood, 3 Flint, 2 Leather [Workbench]"),
+                ("Crossbow Bolt", "6 Wood, 3 Flint (x15) [Workbench]"),
+                ("Revolver", "10 Stone, 8 Flint, 4 Leather [Workbench]"),
+                ("Revolver Ammo", "4 Stone, 2 Flint, 1 Resin (x12) [Workbench]"),
+                ("Shotgun", "15 Wood, 10 Stone, 6 Flint [Workbench]"),
+                ("Shotgun Shell", "4 Wood, 3 Stone, 1 Resin (x8) [Workbench]"),
                 ("Flint Arrow", "8 Wood, 2 Flint [Workbench]"),
                 ("Flint Spear", "5 Wood, 2 Flint [Workbench]"),
                 ("Wooden Shield", "10 Wood, 2 Leather [Workbench]"),
@@ -576,6 +592,20 @@ pub fn setup_ui(mut commands: Commands) {
             ..default()
         }),
         BuildUIText,
+    ));
+
+    commands.spawn((
+        TextBundle::from_section(
+            "",
+            TextStyle { font_size: 15.0, color: Color::srgb(1.0, 0.88, 0.4), ..default() }
+        )
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(115.0),
+            right: Val::Px(30.0),
+            ..default()
+        }),
+        crate::weapons::WeaponHudText,
     ));
 
     commands.spawn((NodeBundle {

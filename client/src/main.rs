@@ -11,6 +11,7 @@ mod terrain;
 mod ui;
 mod prediction;
 mod building; 
+mod weapons;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -23,6 +24,7 @@ use crate::camera::*;
 use crate::terrain::*;
 use crate::ui::*;
 use crate::building::*;
+use crate::weapons::*;
 
 // P2 Fix: SystemSets for explicit ordering and predictable behavior
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -83,6 +85,7 @@ fn main() {
         .insert_resource(SwingState { is_swinging: false, timer: Timer::from_seconds(0.3, TimerMode::Once) })
         .insert_resource(AmbientLight { color: Color::srgb(0.95, 0.98, 1.0), brightness: 550.0 })
         .insert_resource(TelemetryTracker { last_frame_time: 0.0, frame_drop_threshold: 0.1 })
+        .init_resource::<WeaponState>()
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))
@@ -141,6 +144,10 @@ fn main() {
             action_bar_interaction,       
             toggle_action_bar_visibility,
             update_floating_health_bars,
+            spawn_or_update_view_model_weapon,
+            animate_weapon_viewmodel,
+            weapon_reload_input_system,
+            update_weapon_hud,
         ).run_if(in_state(GameState::InGame)))    
 
         .add_systems(Update, fps_look.run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
