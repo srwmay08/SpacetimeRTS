@@ -137,10 +137,10 @@ pub struct BinaryOrbitConfig {
     /// Line Callout: Setting this to 2 saves ~33% of shadow rasterization passes on Star B.
     pub star_b_num_cascades: usize,
 
-    /// Maximum shadow distance for Star B in meters (default: 75.0m - tightened for performance).
+    /// Maximum shadow distance for Star B in meters (default: 112.5m - tightened for performance).
     pub star_b_maximum_shadow_distance: f32,
 
-    /// First cascade far bound for Star B in meters (default: 12.0m).
+    /// First cascade far bound for Star B in meters (default: 18.0m).
     pub star_b_first_cascade_far_bound: f32,
 }
 
@@ -170,8 +170,8 @@ impl Default for BinaryOrbitConfig {
             star_b_base_illuminance_lux: 35_000.0,
             star_b_shadows_enabled: true,
             star_b_num_cascades: 2,
-            star_b_maximum_shadow_distance: 75.0,
-            star_b_first_cascade_far_bound: 12.0,
+            star_b_maximum_shadow_distance: 112.5,
+            star_b_first_cascade_far_bound: 18.0,
         }
     }
 }
@@ -303,10 +303,10 @@ pub fn setup_binary_star_system(
     // 2. Secondary Companion Star B: Asymmetric Performance CSM Tier
     // ------------------------------------------------------------------------
     // Line Callout: Secondary Star cascade bounds configuration.
-    // 2 cascades covering up to 75m:
-    // - Cascade 0 (0.1m - 12.0m): Contact shadows for secondary silhouettes.
-    // - Cascade 1 (12.0m - 75.0m): Immediate surroundings.
-    // By restricting Star B to 2 cascades and 75m, we eliminate 1 entire shadow rasterization
+    // 2 cascades covering up to 112.5m:
+    // - Cascade 0 (0.1m - 18.0m): Contact shadows for secondary silhouettes.
+    // - Cascade 1 (18.0m - 112.5m): Immediate surroundings.
+    // By restricting Star B to 2 cascades and 112.5m, we eliminate 1 entire shadow rasterization
     // pass per frame and restrict vertex throughput, while retaining dual colored shadows
     // and double penumbras everywhere the player is looking!
     let cascade_config_b = CascadeShadowConfigBuilder {

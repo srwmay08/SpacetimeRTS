@@ -870,8 +870,8 @@ pub fn init_network_connection(
             FogSettings {
                 color: sky_fog_color,
                 falloff: FogFalloff::Linear {
-                    start: 55.0,
-                    end: 110.0,
+                    start: 82.5,
+                    end: 165.0,
                 },
                 ..default()
             },
@@ -941,8 +941,8 @@ pub fn init_network_connection(
             FogSettings {
                 color: sky_fog_color,
                 falloff: FogFalloff::Linear {
-                    start: 35.0,
-                    end: 65.0,
+                    start: 52.5,
+                    end: 97.5,
                 },
                 ..default()
             },
@@ -1065,8 +1065,8 @@ pub fn sync_transforms(
 
     let player_pos = player_body_query.get_single().map(|t| t.translation).unwrap_or(Vec3::ZERO);
 
-    const CREATURE_LOAD_RADIUS_SQ: f32 = 75.0 * 75.0;
-    const CREATURE_UNLOAD_RADIUS_SQ: f32 = 80.0 * 80.0;
+    const CREATURE_LOAD_RADIUS_SQ: f32 = 112.5 * 112.5;
+    const CREATURE_UNLOAD_RADIUS_SQ: f32 = 120.0 * 120.0;
 
     let cache = model_cache.get_or_insert_with(|| {
         CachedModelMeshes {
@@ -1284,8 +1284,8 @@ pub fn sync_resource_nodes(
         })
     }).clone();
 
-    const NODE_LOAD_RADIUS_SQ: f32 = 42.0 * 42.0;
-    const NODE_UNLOAD_RADIUS_SQ: f32 = 46.0 * 46.0;
+    const NODE_LOAD_RADIUS_SQ: f32 = 63.0 * 63.0;
+    const NODE_UNLOAD_RADIUS_SQ: f32 = 69.0 * 69.0;
 
     local_nodes.clear();
 

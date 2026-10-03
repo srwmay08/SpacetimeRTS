@@ -91,7 +91,7 @@ impl Default for NetworkCullingState {
     fn default() -> Self {
         Self {
             current_chunk: (0, 0),
-            radius: 1,
+            radius: 2,
             needs_rebuild: true,
             in_interior: false,
         }

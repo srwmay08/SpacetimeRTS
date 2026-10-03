@@ -71,9 +71,9 @@ pub fn toggle_perspective(
                 
                 let _ = conn.db.reducers.set_camera_mode(CameraModeType::Rts);
                 
-                culling_state.radius = 10;
+                culling_state.radius = 15;
                 culling_state.needs_rebuild = true;
-                info!("Camera Mode: RTS. Expanding network culling bounds to 10 chunks.");
+                info!("Camera Mode: RTS. Expanding network culling bounds to 15 chunks.");
             }
             CameraMode::RTS => {
                 next_state.set(CameraMode::FPS);
@@ -82,9 +82,9 @@ pub fn toggle_perspective(
                 
                 let _ = conn.db.reducers.set_camera_mode(CameraModeType::Fps);
                 
-                culling_state.radius = 1;
+                culling_state.radius = 2;
                 culling_state.needs_rebuild = true;
-                info!("Camera Mode: FPS. Contracting network culling bounds to 1 chunk.");
+                info!("Camera Mode: FPS. Contracting network culling bounds to 2 chunks.");
             }
         }
     }

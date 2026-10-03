@@ -851,12 +851,12 @@ pub fn setup_binary_sky_environment(
         Name::new("Host Star A (Primary)"),
     ));
 
-    // Spawn Secondary Dwarf Star B Directional Light (Asymmetric CSM Tier: 2 cascades, 75m)
+    // Spawn Secondary Dwarf Star B Directional Light (Asymmetric CSM Tier: 2 cascades, 112.5m)
     let cascade_config_b = CascadeShadowConfigBuilder {
         num_cascades: 2,
         minimum_distance: 0.1,
-        maximum_distance: 75.0,
-        first_cascade_far_bound: 12.0,
+        maximum_distance: 112.5,
+        first_cascade_far_bound: 18.0,
         overlap_proportion: 0.20,
     }
     .build();
@@ -1520,10 +1520,10 @@ pub fn update_atmospheric_cameras_and_fog(
     clear_color.0 = horizon_color;
 
     let fog_density = match weather.weather_type {
-        WeatherType::ClearSky => 0.0006,
-        WeatherType::AerosolHaze => 0.0025,
-        WeatherType::StellarWindAurora => 0.0008,
-        WeatherType::OvercastPrecipitation => 0.0035,
+        WeatherType::ClearSky => 0.0004,
+        WeatherType::AerosolHaze => 0.0017,
+        WeatherType::StellarWindAurora => 0.0005,
+        WeatherType::OvercastPrecipitation => 0.0023,
     };
 
     for entity in camera_query.iter() {

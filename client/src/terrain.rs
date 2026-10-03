@@ -6,8 +6,8 @@
 // ----------------------------------------------------------------------------
 // Architectural Note: Provides seamless, crack-free terrain meshing by anchoring
 // 2D horizontal column chunks at y = 0.0 with analytic central-difference normal
-// sampling. Decouples heavy Avian3D trimesh collision generation to a tight 16m
-// radius around the player avatar, while rendering visual-only meshes out to 48m.
+// sampling. Decouples heavy Avian3D trimesh collision generation to a tight 24m
+// radius around the player avatar, while rendering visual-only meshes out to 72m.
 
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
@@ -266,10 +266,10 @@ pub fn update_infinite_voxel_terrain(
     let p_cx = (p_pos.x / chunk_world_span).floor() as i32;
     let p_cz = (p_pos.z / chunk_world_span).floor() as i32;
 
-    const RADIUS_H: i32 = 12; // 48m radius
+    const RADIUS_H: i32 = 18; // 72m radius (50% increase from 12 / 48m)
     const RADIUS_H_SQ: f32 = (RADIUS_H * RADIUS_H) as f32;
-    const NEAR_COLLIDER_DIST_SQ: f32 = 16.0 * 16.0;
-    const FAR_COLLIDER_UNLOAD_SQ: f32 = 20.0 * 20.0;
+    const NEAR_COLLIDER_DIST_SQ: f32 = 24.0 * 24.0;
+    const FAR_COLLIDER_UNLOAD_SQ: f32 = 30.0 * 30.0;
 
     let player_moved_chunks = match *last_player_chunk {
         Some(c) => c != (p_cx, p_cz),
@@ -327,7 +327,7 @@ pub fn update_infinite_voxel_terrain(
         }
     }
 
-    let mut candidates: Vec<(i32, i32, f32, u64)> = Vec::with_capacity(192);
+    let mut candidates: Vec<(i32, i32, f32, u64)> = Vec::with_capacity(384);
 
     for cz in (p_cz - RADIUS_H)..=(p_cz + RADIUS_H) {
         let dz = (cz - p_cz) as f32;
@@ -347,7 +347,7 @@ pub fn update_infinite_voxel_terrain(
 
     candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
 
-    const MAX_CHUNKS_PER_FRAME: usize = 16;
+    const MAX_CHUNKS_PER_FRAME: usize = 24;
     for (cx, cz, dist_sq_chunks, key) in candidates.into_iter().take(MAX_CHUNKS_PER_FRAME) {
         let db_mod_tick = db_chunks.get(&key).map(|c| c.last_modified_tick).unwrap_or(0);
         if let Some(new_mesh) = mesh_voxel_chunk_surface_nets(&db_chunks, cx, cz) {
