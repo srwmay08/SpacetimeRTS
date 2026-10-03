@@ -129,6 +129,24 @@ impl WeaponType {
             Self::WoodenShield => "Reinforced Wooden Shield",
         }
     }
+
+    pub fn is_ranged(&self) -> bool {
+        matches!(
+            self,
+            Self::Bow
+                | Self::Crossbow
+                | Self::HandCrossbow
+                | Self::Revolver
+                | Self::Shotgun
+                | Self::SniperRifle
+                | Self::BouncyBombLauncher
+                | Self::Runestaff
+        )
+    }
+
+    pub fn is_melee(&self) -> bool {
+        !self.is_ranged()
+    }
 }
 
 #[derive(Resource)]
@@ -257,7 +275,7 @@ pub fn spawn_or_update_view_model_weapon(
 ) {
     let desired_weapon = WeaponType::from_item_name(active_item.0.as_deref());
 
-    if desired_weapon == weapon_state.current_weapon && !existing_weapon_q.is_empty() && weapon_state.last_hand == hand_side.0 {
+    if desired_weapon == weapon_state.current_weapon && (desired_weapon == WeaponType::None || !existing_weapon_q.is_empty()) && weapon_state.last_hand == hand_side.0 {
         return;
     }
 

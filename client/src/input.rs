@@ -194,10 +194,15 @@ pub fn input_router_system(
     }
 
     let cursor_pos = window_query.get_single().ok().and_then(|w| w.cursor_position());
+    let cursor_locked = window_query.get_single().map_or(false, |w| w.cursor.grab_mode == CursorGrabMode::Locked);
+
+    let mut is_over_ui = if cursor_locked {
+        false
+    } else {
+        interaction_query.iter().any(|i| *i != Interaction::None) || drag_drop.is_dragging
+    };
     
-    let mut is_over_ui = interaction_query.iter().any(|i| *i != Interaction::None) || drag_drop.is_dragging;
-    
-    if !is_over_ui {
+    if !cursor_locked && !is_over_ui {
         if let Some(pos) = cursor_pos {
             for (node, transform, vis, style) in node_query.iter() {
                 if *vis != Visibility::Hidden && style.display != Display::None {
@@ -293,13 +298,6 @@ pub fn context_aware_action_dispatcher(
                         let Ok((player_entity, _)) = queries.player.get_single() else { continue; };
                         let origin = cam_transform.translation();
                         let dir = cam_transform.forward().as_vec3();
-
-                        if weapons.weapon_state.current_weapon == WeaponType::None {
-                            if event.state == ActionState::JustPressed {
-                                warn!("No weapon equipped! Players must equip a weapon in their active hand or paperdoll to attack. Press [I] to open equipment.");
-                            }
-                            continue;
-                        }
 
                         match weapons.weapon_state.current_weapon {
                             WeaponType::Bow => {
@@ -518,26 +516,85 @@ pub fn context_aware_action_dispatcher(
                                     }
                                 }
                             }
+                            WeaponType::SniperRifle if event.state == ActionState::JustPressed => {
+                                weapons.weapon_state.recoil_offset += Vec3::new(0.0, 0.08, 0.16);
+                                weapons.weapon_state.recoil_rot *= Quat::from_rotation_x(-0.55);
+                                weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 20.0).min(40.0);
+
+                                let hit = spatial_query.cast_ray(
+                                    origin, cam_transform.forward(), 150.0, true,
+                                    SpatialQueryFilter::from_excluded_entities([player_entity]),
+                                );
+                                let distance = hit.map_or(150.0, |h| h.time_of_impact);
+                                let mid_point = origin + dir * (distance / 2.0);
+                                let mut tracer_transform = BevyTransform::from_translation(mid_point)
+                                    .looking_at(origin + dir * distance, Vec3::Y);
+                                tracer_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+
+                                commands.spawn((
+                                    PbrBundle {
+                                        mesh: weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.015, distance)),
+                                        material: weapons.materials.add(StandardMaterial {
+                                            base_color: Color::srgb(1.0, 1.0, 0.7), unlit: true, ..default()
+                                        }),
+                                        transform: tracer_transform, ..default()
+                                    },
+                                    Particle { timer: Timer::from_seconds(0.08, TimerMode::Once) },
+                                ));
+
+                                let _ = conn.db.reducers.fire_weapon(
+                                    tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                );
+                            }
                             _ if event.state == ActionState::JustPressed => {
                                 if !swing_state.is_swinging {
                                     swing_state.is_swinging = true;
+                                    swing_state.timer.reset();
+
                                     let hit = spatial_query.cast_ray(
                                         origin, cam_transform.forward(), 50.0, true,
                                         SpatialQueryFilter::from_excluded_entities([player_entity]),
                                     );
 
-                                    let is_tool_context = hit.map_or(false, |hit_data| {
-                                        hit_data.time_of_impact < 6.0 && 
-                                        (queries.node.contains(hit_data.entity) || 
-                                         queries.structure.contains(hit_data.entity) ||
-                                         queries.selectable.contains(hit_data.entity))
-                                    });
+                                    let is_melee = weapons.weapon_state.current_weapon.is_melee();
 
-                                    if is_tool_context {
+                                    if is_melee {
+                                        // Authoritative melee swing: bare fists (unarmed), tools, blades, bludgeons
                                         let _ = conn.db.reducers.swing_tool(
                                             origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
                                         );
+
+                                        // Dynamic bloom feedback on swing/punch
+                                        weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 2.5).min(20.0);
+
+                                        // Immediate visual feedback if hitting a surface/entity within melee reach (4.5m)
+                                        if let Some(hit_data) = hit.filter(|h| h.time_of_impact <= 4.5) {
+                                            let hit_pt = origin + dir * hit_data.time_of_impact;
+                                            let is_node = queries.node.contains(hit_data.entity);
+                                            let impact_color = if is_node {
+                                                Color::srgb(0.85, 0.75, 0.45)
+                                            } else if queries.structure.contains(hit_data.entity) {
+                                                Color::srgb(0.7, 0.65, 0.55)
+                                            } else {
+                                                Color::srgb(0.95, 0.2, 0.2)
+                                            };
+
+                                            commands.spawn((
+                                                PbrBundle {
+                                                    mesh: weapons.meshes.add(bevy::math::primitives::Sphere::new(0.06)),
+                                                    material: weapons.materials.add(StandardMaterial {
+                                                        base_color: impact_color,
+                                                        unlit: true,
+                                                        ..default()
+                                                    }),
+                                                    transform: BevyTransform::from_translation(hit_pt),
+                                                    ..default()
+                                                },
+                                                Particle { timer: Timer::from_seconds(0.12, TimerMode::Once) },
+                                            ));
+                                        }
                                     } else {
+                                        // Generic ranged weapon fallback
                                         let distance = hit.map_or(50.0, |h| h.time_of_impact);
                                         let mid_point = origin + dir * (distance / 2.0);
                                         let mut tracer_transform = BevyTransform::from_translation(mid_point)
