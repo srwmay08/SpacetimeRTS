@@ -114,6 +114,7 @@ fn main() {
             track_telemetry_metrics,
             toggle_console,
             handle_console_input,
+            toggle_celestial_hud_hotkey,
             update_console_ui,
             toggle_perspective,
             update_camera_transition,

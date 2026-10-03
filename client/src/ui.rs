@@ -143,6 +143,9 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "dusk",
     "dawn",
     "palette",
+    "hud",
+    "togglehud",
+    "skyhud",
     "help",
 ];
 
@@ -164,6 +167,7 @@ pub struct ClientEquippedBags {
 #[derive(Component, Clone, Copy, Debug)] pub struct PaperdollBagText(pub usize);
 #[derive(Component, Clone, Copy, Debug)] pub struct PaperdollBagTooltip(pub usize);
 #[derive(Component)] pub struct InventoryCapacityHeader;
+#[derive(Component)] pub struct CelestialHudRoot;
 #[derive(Component)] pub struct CelestialHudText;
 
 pub fn setup_ui(mut commands: Commands) {
@@ -287,22 +291,25 @@ pub fn setup_ui(mut commands: Commands) {
     // ------------------------------------------------------------------------
     // CELESTIAL CLOCK & ATMOSPHERIC WEATHER HUD PILL (Top-Right)
     // ------------------------------------------------------------------------
-    commands.spawn(NodeBundle {
-        style: Style {
-            position_type: PositionType::Absolute,
-            top: Val::Px(15.0),
-            right: Val::Px(15.0),
-            padding: UiRect::new(Val::Px(14.0), Val::Px(14.0), Val::Px(6.0), Val::Px(6.0)),
-            border: UiRect::all(Val::Px(1.5)),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
+    commands.spawn((
+        NodeBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                top: Val::Px(15.0),
+                right: Val::Px(15.0),
+                padding: UiRect::new(Val::Px(14.0), Val::Px(14.0), Val::Px(6.0), Val::Px(6.0)),
+                border: UiRect::all(Val::Px(1.5)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            background_color: Color::srgba(0.08, 0.08, 0.12, 0.85).into(),
+            border_color: Color::srgba(0.40, 0.50, 0.70, 0.60).into(),
+            z_index: ZIndex::Global(10),
             ..default()
         },
-        background_color: Color::srgba(0.08, 0.08, 0.12, 0.85).into(),
-        border_color: Color::srgba(0.40, 0.50, 0.70, 0.60).into(),
-        z_index: ZIndex::Global(10),
-        ..default()
-    }).with_children(|pill| {
+        CelestialHudRoot,
+    )).with_children(|pill| {
         pill.spawn((
             TextBundle::from_section(
                 "12:00 (High Noon) | Clear Sky [F8/F9]",
@@ -1304,6 +1311,7 @@ pub fn handle_console_input(
     mut ephemeris: Option<ResMut<crate::binary_sky::BinaryEphemerisState>>,
     mut sky_config: Option<ResMut<crate::binary_sky::BinarySkyConfig>>,
     mut sky_weather: Option<ResMut<crate::binary_sky::AtmosphericWeather>>,
+    mut hud_pill_query: Query<&mut Style, With<CelestialHudRoot>>,
 ) {
     if !console.is_open {
         return;
@@ -1586,6 +1594,36 @@ pub fn handle_console_input(
                     console.logs.push("[Weather] AerosolHaze activated! Golden horizon and dense Mie halo.".into());
                 }
             }
+            "hud" | "togglehud" | "skyhud" | "timehud" | "celestialhud" => {
+                let sub = tokens.get(1).map(|s| s.to_lowercase());
+                if let Ok(mut style) = hud_pill_query.get_single_mut() {
+                    match sub.as_deref() {
+                        Some("on") | Some("show") | Some("1") | Some("true") => {
+                            style.display = Display::Flex;
+                            console.logs.push("[HUD] Celestial HUD display (time, conjunction, weather [F8/F9]) toggled ON (visible).".into());
+                        }
+                        Some("off") | Some("hide") | Some("0") | Some("false") => {
+                            style.display = Display::None;
+                            console.logs.push("[HUD] Celestial HUD display (time, conjunction, weather [F8/F9]) toggled OFF (hidden).".into());
+                        }
+                        Some("status") => {
+                            let status_str = if style.display == Display::None { "hidden (OFF)" } else { "visible (ON)" };
+                            console.logs.push(format!("[HUD] Celestial HUD display is currently {}.", status_str));
+                        }
+                        Some("toggle") | None => {
+                            let new_state = style.display == Display::None;
+                            style.display = if new_state { Display::Flex } else { Display::None };
+                            let action_str = if new_state { "toggled ON (visible)" } else { "toggled OFF (hidden)" };
+                            console.logs.push(format!("[HUD] Celestial HUD display (time, conjunction, weather [F8/F9]) {}.", action_str));
+                        }
+                        _ => {
+                            console.logs.push("[Syntax Error] Usage: hud [on|off|toggle|status] (or simply 'hud') [F10]".into());
+                        }
+                    }
+                } else {
+                    console.logs.push("[HUD] Celestial HUD element not found.".into());
+                }
+            }
             "clearinv" | "clear" => {
                 if let Err(e) = conn.db.reducers.admin_clear_inventory() {
                     console.logs.push(format!("[Server Error] Failed to clear inventory: {:?}", e));
@@ -1838,6 +1876,7 @@ pub fn handle_console_input(
                 console.logs.push("starsize <scale>       : Scales celestial starfield points of light".into());
                 console.logs.push("weather <clear|aurora> : Sets atmospheric weather preset [F9]".into());
                 console.logs.push("aurora / rain / haze   : Direct weather command shortcuts".into());
+                console.logs.push("hud [on|off|toggle]    : Toggles celestial clock & weather HUD pill [F10]".into());
                 console.logs.push("timescale <speed>      : Sets cycle rate (e.g. 1.0, 60.0) [ - / = ]".into());
                 console.logs.push("spawn <mob> [amt]      : Spawns Deer, Boar, Goblin, Peasant".into());
                 console.logs.push("nuke [radius]          : Demolishes terrain with spherical blast".into());
@@ -2223,8 +2262,15 @@ pub fn update_hud_health_bar(
 pub fn update_celestial_hud_ui(
     ephemeris: Option<Res<crate::binary_sky::BinaryEphemerisState>>,
     weather: Option<Res<crate::binary_sky::AtmosphericWeather>>,
+    root_q: Query<&Style, With<CelestialHudRoot>>,
     mut text_q: Query<&mut Text, With<CelestialHudText>>,
 ) {
+    if let Ok(style) = root_q.get_single() {
+        if style.display == Display::None {
+            return;
+        }
+    }
+
     let (Some(eph), Some(wth)) = (ephemeris, weather) else { return; };
     let Ok(mut text) = text_q.get_single_mut() else { return; };
 
@@ -2251,6 +2297,23 @@ pub fn update_celestial_hud_ui(
     let formatted = format!("{:02}:{:02} ({}) | {} [F8/F9]", h, m, icon, weather_str);
     if text.sections[0].value != formatted {
         text.sections[0].value = formatted;
+    }
+}
+
+/// Allows toggling the celestial clock & weather HUD pill with [F10] when outside the console.
+pub fn toggle_celestial_hud_hotkey(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut hud_pill_query: Query<&mut Style, With<CelestialHudRoot>>,
+    console: Res<ConsoleState>,
+) {
+    if !console.is_open && keys.just_pressed(KeyCode::F10) {
+        if let Ok(mut style) = hud_pill_query.get_single_mut() {
+            style.display = if style.display == Display::None {
+                Display::Flex
+            } else {
+                Display::None
+            };
+        }
     }
 }
 
@@ -3018,5 +3081,56 @@ pub fn handle_crosshair_menu_interactions(
                 if settings.is_dynamic { "DYNAMIC (Spread Reactive)" } else { "STATIC (Competitive Lock)" },
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_celestial_hud_root_toggle_and_display() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Spawn HUD pill root and text matching setup_ui
+        app.world_mut().spawn((
+            NodeBundle {
+                style: Style {
+                    display: Display::Flex,
+                    ..default()
+                },
+                ..default()
+            },
+            CelestialHudRoot,
+        )).with_children(|pill| {
+            pill.spawn((
+                TextBundle::from_section(
+                    "12:00 (High Noon) | Clear Sky [F8/F9]",
+                    TextStyle::default(),
+                ),
+                CelestialHudText,
+            ));
+        });
+
+        // 1. Initial State: Display::Flex (visible)
+        let mut q = app.world_mut().query_filtered::<&mut Style, With<CelestialHudRoot>>();
+        let mut style = q.single_mut(app.world_mut());
+        assert_eq!(style.display, Display::Flex);
+
+        // 2. Toggle OFF -> Display::None
+        style.display = Display::None;
+        assert_eq!(style.display, Display::None);
+
+        // 3. Toggle ON -> Display::Flex
+        style.display = Display::Flex;
+        assert_eq!(style.display, Display::Flex);
+    }
+
+    #[test]
+    fn test_console_commands_contains_hud() {
+        assert!(CONSOLE_COMMANDS.contains(&"hud"), "CONSOLE_COMMANDS must contain 'hud'");
+        assert!(CONSOLE_COMMANDS.contains(&"togglehud"), "CONSOLE_COMMANDS must contain 'togglehud'");
+        assert!(CONSOLE_COMMANDS.contains(&"skyhud"), "CONSOLE_COMMANDS must contain 'skyhud'");
     }
 }
