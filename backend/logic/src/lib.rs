@@ -868,10 +868,67 @@ pub fn resolve_weapon_attack(
 
 pub fn create_weapon(name: &str) -> Option<WeaponDef> {
     match name {
+        // Unarmed Brawling
+        "Unarmed" | "None" => Some(WeaponDef {
+            id: "unarmed".into(),
+            name: "Unarmed".into(),
+            grip: WeaponGrip::OneHanded,
+            category: WeaponCategory::Brawling,
+            damage_type: DamageType::Bludgeoning,
+            base_damage: 10.0,
+            attack_speed: 2.5,
+            reach_meters: 0.5,
+            armor_penetration: 0.0,
+            durability: 1000,
+            max_durability: 1000,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: None,
+            knockback_force: 8.0,
+        }),
+
+        // 1H Tiger Claws
+        "1h Tiger Claws" | "Tiger Claws" => Some(WeaponDef {
+            id: "tiger_claws".into(),
+            name: "1h Tiger Claws".into(),
+            grip: WeaponGrip::OneHanded,
+            category: WeaponCategory::Brawling,
+            damage_type: DamageType::Slashing,
+            base_damage: 22.0,
+            attack_speed: 2.6,
+            reach_meters: 0.7,
+            armor_penetration: 0.25,
+            durability: 175,
+            max_durability: 175,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: None,
+            knockback_force: 16.0,
+        }),
+
+        // 1H Black Jack
+        "1h Black Jack" | "Black Jack" | "Blackjack" => Some(WeaponDef {
+            id: "black_jack".into(),
+            name: "1h Black Jack".into(),
+            grip: WeaponGrip::OneHanded,
+            category: WeaponCategory::Blunt,
+            damage_type: DamageType::Bludgeoning,
+            base_damage: 20.0,
+            attack_speed: 1.6,
+            reach_meters: 0.9,
+            armor_penetration: 0.20,
+            durability: 130,
+            max_durability: 130,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: None,
+            knockback_force: 32.0,
+        }),
+
         // One-Handed Edged Weapons
-        "Longsword" => Some(WeaponDef {
+        "1h Sword" | "Sword" | "Longsword" | "Knight's Longsword" => Some(WeaponDef {
             id: "longsword".into(),
-            name: "Longsword".into(),
+            name: "1h Sword".into(),
             grip: WeaponGrip::OneHanded,
             category: WeaponCategory::Edged,
             damage_type: DamageType::Slashing,
@@ -886,9 +943,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             projectile_profile: None,
             knockback_force: 25.0,
         }),
-        "Handaxe" => Some(WeaponDef {
+        "1h Axe" | "Handaxe" | "Axe" | "Bearded Handaxe" | "Stone Axe" => Some(WeaponDef {
             id: "handaxe".into(),
-            name: "Handaxe".into(),
+            name: "1h Axe".into(),
             grip: WeaponGrip::OneHanded,
             category: WeaponCategory::Edged,
             damage_type: DamageType::Slashing,
@@ -941,9 +998,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
         }),
 
         // One-Handed Blunt Weapons
-        "Warhammer" => Some(WeaponDef {
+        "1h Hammer" | "Warhammer" | "Hammer" | "Flanged Warhammer" => Some(WeaponDef {
             id: "warhammer".into(),
-            name: "Warhammer".into(),
+            name: "1h Hammer".into(),
             grip: WeaponGrip::OneHanded,
             category: WeaponCategory::Blunt,
             damage_type: DamageType::Bludgeoning,
@@ -977,9 +1034,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
         }),
 
         // Two-Handed Weapons
-        "Greatsword" => Some(WeaponDef {
+        "2h Sword" | "Greatsword" | "Two-Handed Sword" | "Zweihander Greatsword" => Some(WeaponDef {
             id: "greatsword".into(),
-            name: "Greatsword".into(),
+            name: "2h Sword".into(),
             grip: WeaponGrip::TwoHanded,
             category: WeaponCategory::TwoHanded,
             damage_type: DamageType::Slashing,
@@ -994,9 +1051,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             projectile_profile: None,
             knockback_force: 48.0,
         }),
-        "Maul" => Some(WeaponDef {
+        "2h Hammer" | "Maul" | "Two-Handed Hammer" | "Heavy Iron Maul" => Some(WeaponDef {
             id: "maul".into(),
-            name: "Maul".into(),
+            name: "2h Hammer".into(),
             grip: WeaponGrip::TwoHanded,
             category: WeaponCategory::TwoHanded,
             damage_type: DamageType::Bludgeoning,
@@ -1010,6 +1067,23 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             current_ammo: 0,
             projectile_profile: None,
             knockback_force: 60.0,
+        }),
+        "2h Axe" | "Battleaxe" | "Greataxe" | "Two-Handed Axe" => Some(WeaponDef {
+            id: "two_hand_axe".into(),
+            name: "2h Axe".into(),
+            grip: WeaponGrip::TwoHanded,
+            category: WeaponCategory::TwoHanded,
+            damage_type: DamageType::Slashing,
+            base_damage: 66.0,
+            attack_speed: 0.80,
+            reach_meters: 2.2,
+            armor_penetration: 0.35,
+            durability: 260,
+            max_durability: 260,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: None,
+            knockback_force: 52.0,
         }),
 
         // Polearms
@@ -1030,9 +1104,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             projectile_profile: None,
             knockback_force: 38.0,
         }),
-        "Spear" | "Flint Spear" => Some(WeaponDef {
+        "Polearm Spear" | "Spear" | "Flint Spear" | "Hunting Spear" => Some(WeaponDef {
             id: "spear".into(),
-            name: "Spear".into(),
+            name: "Polearm Spear".into(),
             grip: WeaponGrip::Polearm,
             category: WeaponCategory::Polearm,
             damage_type: DamageType::Piercing,
@@ -1046,6 +1120,49 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             current_ammo: 0,
             projectile_profile: None,
             knockback_force: 22.0,
+        }),
+        "Polearm Javelin - Thrown" | "Polearm Javelin" | "Javelin" | "Thrown Javelin" => Some(WeaponDef {
+            id: "javelin".into(),
+            name: "Polearm Javelin - Thrown".into(),
+            grip: WeaponGrip::Versatile,
+            category: WeaponCategory::Polearm,
+            damage_type: DamageType::Piercing,
+            base_damage: 40.0,
+            attack_speed: 1.15,
+            reach_meters: 3.0,
+            armor_penetration: 0.35,
+            durability: 140,
+            max_durability: 140,
+            magazine_capacity: Some(1),
+            current_ammo: 1,
+            projectile_profile: Some(ProjectileProfile {
+                kind: ProjectileKind::BallistaSpear,
+                muzzle_velocity: 45.0,
+                gravity: 4.5,
+                drag: 0.001,
+                spread_radians: 0.01,
+                pellet_count: 1,
+                blast_radius: 0.0,
+                is_slow_projectile: false,
+            }),
+            knockback_force: 28.0,
+        }),
+        "Polearm Trident" | "Trident" => Some(WeaponDef {
+            id: "trident".into(),
+            name: "Polearm Trident".into(),
+            grip: WeaponGrip::Polearm,
+            category: WeaponCategory::Polearm,
+            damage_type: DamageType::Piercing,
+            base_damage: 48.0,
+            attack_speed: 1.05,
+            reach_meters: 3.4,
+            armor_penetration: 0.40,
+            durability: 210,
+            max_durability: 210,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: None,
+            knockback_force: 30.0,
         }),
 
         // Brawling Weapons
@@ -1147,9 +1264,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
         }),
 
         // 1H Ranged (Dual-wieldable)
-        "Hand Crossbow" | "Crossbow" => Some(WeaponDef {
+        "1h Ranged Hand Crossbow" | "Hand Crossbow" | "Crossbow" => Some(WeaponDef {
             id: "hand_crossbow".into(),
-            name: "Hand Crossbow".into(),
+            name: "1h Ranged Hand Crossbow".into(),
             grip: WeaponGrip::OneHanded,
             category: WeaponCategory::Missile,
             damage_type: DamageType::Piercing,
@@ -1173,9 +1290,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             }),
             knockback_force: 15.0,
         }),
-        "Revolver" => Some(WeaponDef {
+        "1h Ranged Revolver" | "Revolver" => Some(WeaponDef {
             id: "revolver".into(),
-            name: "Revolver".into(),
+            name: "1h Ranged Revolver".into(),
             grip: WeaponGrip::OneHanded,
             category: WeaponCategory::Firearm,
             damage_type: DamageType::Ballistic,
@@ -1199,11 +1316,63 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             }),
             knockback_force: 28.0,
         }),
+        "1h Ranged Wand" | "Wand" | "Arcane Wand" => Some(WeaponDef {
+            id: "wand".into(),
+            name: "1h Ranged Wand".into(),
+            grip: WeaponGrip::OneHanded,
+            category: WeaponCategory::Runestaff,
+            damage_type: DamageType::ArcaneForce,
+            base_damage: 26.0,
+            attack_speed: 2.4,
+            reach_meters: 60.0,
+            armor_penetration: 0.30,
+            durability: 180,
+            max_durability: 180,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: Some(ProjectileProfile {
+                kind: ProjectileKind::MagicMissile,
+                muzzle_velocity: 65.0,
+                gravity: 0.0,
+                drag: 0.0,
+                spread_radians: 0.008,
+                pellet_count: 1,
+                blast_radius: 0.0,
+                is_slow_projectile: false,
+            }),
+            knockback_force: 18.0,
+        }),
+        "1h Ranged Orb" | "Orb" | "Mystic Orb" => Some(WeaponDef {
+            id: "orb".into(),
+            name: "1h Ranged Orb".into(),
+            grip: WeaponGrip::OneHanded,
+            category: WeaponCategory::Runestaff,
+            damage_type: DamageType::ArcaneForce,
+            base_damage: 38.0,
+            attack_speed: 1.4,
+            reach_meters: 45.0,
+            armor_penetration: 0.20,
+            durability: 200,
+            max_durability: 200,
+            magazine_capacity: None,
+            current_ammo: 0,
+            projectile_profile: Some(ProjectileProfile {
+                kind: ProjectileKind::FireballBall,
+                muzzle_velocity: 42.0,
+                gravity: 1.0,
+                drag: 0.001,
+                spread_radians: 0.015,
+                pellet_count: 1,
+                blast_radius: 2.5,
+                is_slow_projectile: false,
+            }),
+            knockback_force: 36.0,
+        }),
 
         // 2H Ranged Weapons (Heavy & Specialized)
-        "Longbow" | "Crude Bow" | "Bow" => Some(WeaponDef {
+        "2h Ranged Long Bow" | "Long Bow" | "Longbow" | "Crude Bow" | "Bow" => Some(WeaponDef {
             id: "longbow".into(),
-            name: "Longbow".into(),
+            name: "2h Ranged Long Bow".into(),
             grip: WeaponGrip::TwoHanded,
             category: WeaponCategory::Missile,
             damage_type: DamageType::Piercing,
@@ -1227,9 +1396,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             }),
             knockback_force: 20.0,
         }),
-        "Shotgun" => Some(WeaponDef {
+        "2h Ranged Shotgun" | "Shotgun" => Some(WeaponDef {
             id: "shotgun".into(),
-            name: "Shotgun".into(),
+            name: "2h Ranged Shotgun".into(),
             grip: WeaponGrip::TwoHanded,
             category: WeaponCategory::Firearm,
             damage_type: DamageType::PelletSpread,
@@ -1239,8 +1408,8 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             armor_penetration: 0.15,
             durability: 180,
             max_durability: 180,
-            magazine_capacity: Some(2),
-            current_ammo: 2,
+            magazine_capacity: Some(4),
+            current_ammo: 4,
             projectile_profile: Some(ProjectileProfile {
                 kind: ProjectileKind::ShotgunPellet,
                 muzzle_velocity: 120.0,
@@ -1253,9 +1422,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             }),
             knockback_force: 55.0,
         }),
-        "Sniper Rifle" => Some(WeaponDef {
+        "2h Ranged Sniper Rifle" | "Sniper Rifle" => Some(WeaponDef {
             id: "sniper_rifle".into(),
-            name: "Sniper Rifle".into(),
+            name: "2h Ranged Sniper Rifle".into(),
             grip: WeaponGrip::TwoHanded,
             category: WeaponCategory::Firearm,
             damage_type: DamageType::Ballistic,
@@ -1279,11 +1448,9 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
             }),
             knockback_force: 45.0,
         }),
-
-        // Runestaves & Magical Staves
-        "Runestaff" => Some(WeaponDef {
+        "2h Ranged Runestaff" | "Runestaff" => Some(WeaponDef {
             id: "runestaff".into(),
-            name: "Runestaff".into(),
+            name: "2h Ranged Runestaff".into(),
             grip: WeaponGrip::TwoHanded,
             category: WeaponCategory::Runestaff,
             damage_type: DamageType::Bludgeoning,

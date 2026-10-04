@@ -29,21 +29,31 @@ use crate::weapons::{WeaponState, WeaponType};
 // ----------------------------------------------------------------------------
 
 pub const TUNER_PRESETS: &[&str] = &[
+    "Unarmed",
+    "1h Tiger Claws",
+    "1h Black Jack",
+    "1h Sword",
+    "1h Hammer",
+    "1h Axe",
+    "2h Sword",
+    "2h Hammer",
+    "2h Axe",
+    "Polearm Spear",
+    "Polearm Javelin - Thrown",
+    "Polearm Trident",
+    "1h Ranged Hand Crossbow",
+    "1h Ranged Revolver",
+    "2h Ranged Long Bow",
+    "2h Ranged Shotgun",
+    "2h Ranged Sniper Rifle",
+    "1h Ranged Wand",
+    "1h Ranged Orb",
+    "2h Ranged Runestaff",
     "Frying Pan",
     "Holy Mackerel",
     "Bouncy Bomb Launcher",
-    "Revolver",
-    "Shotgun",
-    "Sniper Rifle",
-    "Longbow",
-    "Hand Crossbow",
-    "Longsword",
-    "Greatsword",
-    "Maul",
-    "Halberd",
-    "Runestaff",
-    "Club",
 ];
+
 
 // ----------------------------------------------------------------------------
 // TUNER RESOURCE & STATE
@@ -686,6 +696,7 @@ pub fn handle_tuner_interactions(
     mut tuner: ResMut<WeaponTunerState>,
     mut tuner_root_q: Query<&mut Style, With<TunerRoot>>,
     mut active_equipped: ResMut<ActiveEquippedItem>,
+    mut active_offhand: ResMut<ActiveOffHandItem>,
     mut weapon_state: ResMut<WeaponState>,
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
     camera_mode: Res<State<CameraMode>>,
@@ -747,13 +758,24 @@ pub fn handle_tuner_interactions(
             TunerAction::EquipMainHand => {
                 let weapon_name = tuner.weapon_name.clone();
                 info!("TUNER: Equipping '{}' to Main-Hand loadout.", weapon_name);
-                active_equipped.0 = Some(weapon_name.clone());
-                weapon_state.current_weapon = WeaponType::from_item_name(Some(&weapon_name));
+                if weapon_name == "Unarmed" {
+                    active_equipped.0 = None;
+                    weapon_state.current_weapon = WeaponType::None;
+                } else {
+                    active_equipped.0 = Some(weapon_name.clone());
+                    weapon_state.current_weapon = WeaponType::from_item_name(Some(&weapon_name));
+                }
             }
             TunerAction::EquipOffHand => {
                 let weapon_name = tuner.weapon_name.clone();
                 info!("TUNER: Equipping '{}' to Off-Hand loadout.", weapon_name);
-                // Can be inspected by dual-wield logic
+                if weapon_name == "Unarmed" {
+                    active_offhand.0 = None;
+                    weapon_state.offhand_weapon = WeaponType::None;
+                } else {
+                    active_offhand.0 = Some(weapon_name.clone());
+                    weapon_state.offhand_weapon = WeaponType::from_item_name(Some(&weapon_name));
+                }
             }
             TunerAction::ExportPreset => {
                 let code = tuner.export_rust_code();

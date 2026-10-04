@@ -62,6 +62,7 @@ impl SpellCategory {
 pub struct SpellDef {
     pub id: &'static str,
     pub name: &'static str,
+    pub rank: &'static str,
     pub category: SpellCategory,
     pub icon: &'static str,
     pub description: &'static str,
@@ -71,8 +72,59 @@ pub struct SpellDef {
 
 pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
+        id: "entangling_roots",
+        name: "Entangling Roots",
+        rank: "Rank 1",
+        category: SpellCategory::Restoration,
+        icon: "ROOT",
+        description: "Roots the target in place, inflicting nature damage over time.",
+        cooldown_seconds: 12.0,
+        color: Color::srgb(0.4, 0.85, 0.3),
+    },
+    SpellDef {
+        id: "moonfire",
+        name: "Moonfire",
+        rank: "Rank 2",
+        category: SpellCategory::Arcane,
+        icon: "MOON",
+        description: "Strikes the target with lunar radiance, inflicting direct and ongoing arcane burn.",
+        cooldown_seconds: 3.0,
+        color: Color::srgb(0.6, 0.8, 1.0),
+    },
+    SpellDef {
+        id: "teleport_moonglade",
+        name: "Teleport: Moonglade",
+        rank: "Rank 1",
+        category: SpellCategory::Arcane,
+        icon: "TELE",
+        description: "Transports the caster across the mystic ley lines to Moonglade.",
+        cooldown_seconds: 60.0,
+        color: Color::srgb(0.5, 0.9, 0.8),
+    },
+    SpellDef {
+        id: "thorns",
+        name: "Thorns",
+        rank: "Rank 1",
+        category: SpellCategory::Restoration,
+        icon: "THRN",
+        description: "Sprouts protective briars, dealing return nature damage to attackers.",
+        cooldown_seconds: 20.0,
+        color: Color::srgb(0.35, 0.75, 0.3),
+    },
+    SpellDef {
+        id: "wrath",
+        name: "Wrath",
+        rank: "Rank 2",
+        category: SpellCategory::Elemental,
+        icon: "WRTH",
+        description: "Hurls a bolt of solar fury at the target, striking with searing solar force.",
+        cooldown_seconds: 2.0,
+        color: Color::srgb(0.95, 0.85, 0.25),
+    },
+    SpellDef {
         id: "phase_dash",
         name: "Phase Dash",
+        rank: "Rank 1",
         category: SpellCategory::Tactical,
         icon: "DASH",
         description: "Surges 32m/s forward or strafe-direction with aerodynamic slipstream.",
@@ -82,6 +134,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "smoke_veil",
         name: "Smoke Veil",
+        rank: "Rank 1",
         category: SpellCategory::Tactical,
         icon: "SMOK",
         description: "Deploys a dense volumetric smoke cloud obscuring lines of sight for 8s.",
@@ -91,6 +144,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "intel_dart",
         name: "Intel Dart",
+        rank: "Rank 1",
         category: SpellCategory::Tactical,
         icon: "INTL",
         description: "Fires a high-velocity sonar ping dart revealing hidden entities.",
@@ -100,6 +154,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "grav_lift",
         name: "Grav-Lift",
+        rank: "Rank 1",
         category: SpellCategory::Tactical,
         icon: "LIFT",
         description: "Projects an anti-gravity vertical repulsion column propelling player upward.",
@@ -109,6 +164,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "fireball",
         name: "Fireball",
+        rank: "Rank 3",
         category: SpellCategory::Elemental,
         icon: "FIRE",
         description: "Launches a slow, heavy incendiary sphere detonating with 4.5m blast radius.",
@@ -118,6 +174,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "magic_missile",
         name: "Magic Missile",
+        rank: "Rank 2",
         category: SpellCategory::Arcane,
         icon: "MISS",
         description: "Discharges a rapid 55m/s zero-gravity arcane projectile.",
@@ -127,6 +184,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "frost_nova",
         name: "Frost Nova",
+        rank: "Rank 1",
         category: SpellCategory::Elemental,
         icon: "NOVA",
         description: "Radial freezing explosion chilling all nearby hostile creatures.",
@@ -135,7 +193,8 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     },
     SpellDef {
         id: "minor_healing",
-        name: "Minor Healing",
+        name: "Rejuvenation",
+        rank: "Rank 2",
         category: SpellCategory::Restoration,
         icon: "HEAL",
         description: "Restores vital health with a rejuvenating surge of golden radiance.",
@@ -145,6 +204,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "blink",
         name: "Blink",
+        rank: "Rank 1",
         category: SpellCategory::Arcane,
         icon: "BLNK",
         description: "Instantly teleports 12m forward across the physical plane.",
@@ -154,6 +214,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "chain_lightning",
         name: "Chain Lightning",
+        rank: "Rank 1",
         category: SpellCategory::Elemental,
         icon: "LGHT",
         description: "Discharges crackling high-voltage lightning arcing through targets.",
@@ -162,9 +223,10 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     },
     SpellDef {
         id: "stoneskin",
-        name: "Stoneskin",
+        name: "Barkskin",
+        rank: "Rank 1",
         category: SpellCategory::Restoration,
-        icon: "SHLD",
+        icon: "BARK",
         description: "Hardens flesh into earthen armor, absorbing incoming impact damage.",
         cooldown_seconds: 25.0,
         color: Color::srgb(0.75, 0.6, 0.4),
@@ -172,6 +234,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
         id: "starfall",
         name: "Starfall",
+        rank: "Rank 1",
         category: SpellCategory::Arcane,
         icon: "STAR",
         description: "Calls down celestial radiant sparks from the binary star system.",
@@ -180,16 +243,18 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     },
     SpellDef {
         id: "spirit_familiar",
-        name: "Spirit Familiar",
-        category: SpellCategory::Restoration,
-        icon: "WOLF",
-        description: "Summons a loyal spectral spirit pet companion to accompany player.",
+        name: "Bear Form",
+        rank: "Rank 1",
+        category: SpellCategory::Tactical,
+        icon: "BEAR",
+        description: "Transforms into a fierce beast, increasing health and melee durability.",
         cooldown_seconds: 40.0,
         color: Color::srgb(0.4, 0.9, 0.85),
     },
     SpellDef {
         id: "war_cry",
-        name: "War Cry",
+        name: "Demoralizing Roar",
+        rank: "Rank 1",
         category: SpellCategory::Tactical,
         icon: "ROAR",
         description: "Thunderous acoustic roar delivering kinetic knockback to nearby foes.",
@@ -198,18 +263,20 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     },
     SpellDef {
         id: "shadow_cloak",
-        name: "Shadow Cloak",
+        name: "Prowl",
+        rank: "Rank 1",
         category: SpellCategory::Tactical,
-        icon: "CLOK",
+        icon: "PROW",
         description: "Envelops the player in shadows, reducing visual aggro profile.",
         cooldown_seconds: 35.0,
         color: Color::srgb(0.45, 0.4, 0.55),
     },
     SpellDef {
         id: "solar_flare",
-        name: "Solar Flare",
+        name: "Sunfire",
+        rank: "Rank 1",
         category: SpellCategory::Elemental,
-        icon: "SOLR",
+        icon: "SUNF",
         description: "Emits a blistering beam of concentrated stellar radiation.",
         cooldown_seconds: 16.0,
         color: Color::srgb(1.0, 0.6, 0.15),
@@ -323,46 +390,59 @@ pub struct PreparedHotbarState {
 
 impl Default for PreparedHotbarState {
     fn default() -> Self {
-        let mut slots = [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None];
-        // Populate standard default prepared spells
-        slots[0] = Some("phase_dash".into());
-        slots[1] = Some("smoke_veil".into());
-        slots[2] = Some("intel_dart".into());
-        slots[3] = Some("grav_lift".into());
-        slots[4] = Some("fireball".into());
-        slots[5] = Some("magic_missile".into());
-        slots[6] = Some("frost_nova".into());
-        slots[7] = Some("minor_healing".into());
-        slots[8] = Some("blink".into());
-        slots[9] = Some("chain_lightning".into());
-        slots[10] = Some("stoneskin".into());
-        slots[11] = Some("starfall".into());
-        slots[12] = Some("spirit_familiar".into());
-        slots[13] = Some("war_cry".into());
-        slots[14] = Some("shadow_cloak".into());
-        slots[15] = Some("solar_flare".into());
-
         Self {
-            slots,
+            slots: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
             cooldowns: [0.0; 16],
             max_cooldowns: [1.0; 16],
         }
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct SpellbookWindowState {
     pub is_open: bool,
     pub selected_spell_for_slotting: Option<String>,
     pub category_filter: Option<SpellCategory>,
+    pub current_page: usize,
+    pub rank_filter: bool,
+    pub auto_uprank: bool,
+}
+
+impl Default for SpellbookWindowState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            selected_spell_for_slotting: None,
+            category_filter: None,
+            current_page: 0,
+            rank_filter: false,
+            auto_uprank: true,
+        }
+    }
+}
+
+pub fn get_filtered_spells(category: Option<SpellCategory>, rank_filter: bool) -> Vec<&'static SpellDef> {
+    SPELL_CATALOG.iter().filter(|s| {
+        if let Some(cat) = category {
+            if s.category != cat {
+                return false;
+            }
+        }
+        if rank_filter {
+            s.rank.contains('1')
+        } else {
+            true
+        }
+    }).collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum OptionsTab {
     #[default]
-    Reticle,
-    Performance,
+    Graphics,
+    Advanced,
     Keybinds,
+    Network,
 }
 
 #[derive(Resource)]
@@ -376,7 +456,7 @@ impl Default for OptionsPanelState {
     fn default() -> Self {
         Self {
             is_open: false,
-            active_tab: OptionsTab::Reticle,
+            active_tab: OptionsTab::Graphics,
             rebinding_slot: None,
         }
     }
@@ -405,6 +485,17 @@ impl Default for TerrainRenderSettings {
 // 3. UI MARKER COMPONENTS
 // ----------------------------------------------------------------------------
 
+#[derive(Resource, Default, Debug)]
+pub struct SpellDragState {
+    pub is_dragging: bool,
+    pub source_slot: Option<usize>,
+    pub spell_id: Option<String>,
+    pub current_pos: Vec2,
+}
+
+#[derive(Component)] pub struct SpellDragGhostUi;
+#[derive(Component)] pub struct SpellDragGhostText;
+
 #[derive(Component)] pub struct PreparedHotbarRoot;
 #[derive(Component)] pub struct HotbarSlotButton(pub usize);
 #[derive(Component)] pub struct HotbarSlotKeyText(pub usize);
@@ -413,20 +504,42 @@ impl Default for TerrainRenderSettings {
 #[derive(Component)] pub struct HotbarOpenSpellbookButton;
 
 #[derive(Component)] pub struct SpellbookModalRoot;
+#[derive(Component)] pub struct SpellbookCloseBtn;
 #[derive(Component)] pub struct SpellbookTabButton(pub Option<SpellCategory>);
-#[derive(Component)] pub struct SpellbookCardSelectButton(pub String);
+#[derive(Component)] pub struct SpellbookSlotCard(pub usize);
+#[derive(Component)] pub struct SpellbookSlotIconBox(pub usize);
+#[derive(Component)] pub struct SpellbookSlotIconText(pub usize);
+#[derive(Component)] pub struct SpellbookSlotNameText(pub usize);
+#[derive(Component)] pub struct SpellbookSlotRankText(pub usize);
+#[derive(Component)] pub struct SpellbookSlotCooldownText(pub usize);
+#[derive(Component)] pub struct SpellbookPrevPageBtn;
+#[derive(Component)] pub struct SpellbookNextPageBtn;
+#[derive(Component)] pub struct SpellbookPageIndicatorText;
+#[derive(Component)] pub struct SpellbookRankFilterToggle;
+#[derive(Component)] pub struct SpellbookAutoUpRankToggle;
+#[derive(Component)] pub struct SpellbookRankFilterText;
+#[derive(Component)] pub struct SpellbookAutoUpRankText;
 #[derive(Component)] pub struct SpellbookStatusText;
+#[derive(Component)] pub struct SpellbookCardSelectButton(pub String);
 
 #[derive(Component)] pub struct OptionsPanelModalRoot;
 #[derive(Component)] pub struct OptionsTabButton(pub OptionsTab);
+#[derive(Component)] pub struct OptionsTabButtonText(pub OptionsTab);
+#[derive(Component)] pub struct OptionsTabContent(pub OptionsTab);
 #[derive(Component)] pub struct OptionsReticleToggleBtn;
 #[derive(Component)] pub struct OptionsReticleStatusText;
 #[derive(Component)] pub struct OptionsRangePresetButton(pub i32);
 #[derive(Component)] pub struct OptionsSpawnWholeZoneBtn;
 #[derive(Component)] pub struct OptionsPerfMetricsText;
 #[derive(Component)] pub struct OptionsKeybindRebindBtn(pub usize);
+#[derive(Component)] pub struct OptionsKeybindRebindText(pub usize);
 #[derive(Component)] pub struct OptionsKeybindResetBtn;
 #[derive(Component)] pub struct OptionsCloseBtn;
+#[derive(Component)] pub struct OptionsOkayBtn;
+#[derive(Component)] pub struct OptionsCancelBtn;
+#[derive(Component)] pub struct OptionsRecommendedBtn;
+#[derive(Component)] pub struct OptionsClassicBtn;
+#[derive(Component)] pub struct OptionsApplyBtn;
 
 // ----------------------------------------------------------------------------
 // 4. UI SETUP SYSTEMS
@@ -451,7 +564,7 @@ pub fn setup_prepared_hotbar_ui(
                 column_gap: Val::Px(8.0),
                 ..default()
             },
-            z_index: ZIndex::Global(100),
+            z_index: ZIndex::Global(200),
             ..default()
         },
         PreparedHotbarRoot,
@@ -573,6 +686,35 @@ pub fn setup_prepared_hotbar_ui(
             ));
         });
     });
+
+    // Floating Drag Ghost UI for Dragged Spells
+    commands.spawn((
+        NodeBundle {
+            style: Style {
+                position_type: PositionType::Absolute,
+                width: Val::Px(72.0),
+                height: Val::Px(36.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(1.5)),
+                display: Display::None,
+                ..default()
+            },
+            border_color: Color::srgba(1.0, 0.85, 0.3, 0.95).into(),
+            background_color: Color::srgba(0.12, 0.10, 0.15, 0.92).into(),
+            z_index: ZIndex::Global(999),
+            ..default()
+        },
+        SpellDragGhostUi,
+    )).with_children(|ghost| {
+        ghost.spawn((
+            TextBundle::from_section(
+                "",
+                TextStyle { font_size: 11.0, color: Color::srgb(1.0, 0.9, 0.5), ..default() }
+            ),
+            SpellDragGhostText,
+        ));
+    });
 }
 
 pub fn setup_spellbook_modal_ui(
@@ -582,8 +724,11 @@ pub fn setup_spellbook_modal_ui(
         NodeBundle {
             style: Style {
                 position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
+                top: Val::Px(20.0),
+                left: Val::Percent(50.0),
+                margin: UiRect::left(Val::Px(-410.0)),
+                width: Val::Auto,
+                height: Val::Auto,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 display: Display::None,
@@ -594,164 +739,428 @@ pub fn setup_spellbook_modal_ui(
         },
         SpellbookModalRoot,
     )).with_children(|overlay| {
-        // Parchment tome window
+        // Horizontal container: Open Book + Right-side vertical tabs
         overlay.spawn(NodeBundle {
             style: Style {
-                width: Val::Px(740.0),
-                height: Val::Px(560.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(16.0)),
-                border: UiRect::all(Val::Px(3.0)),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::FlexStart,
                 ..default()
             },
-            border_color: BorderColor(Color::srgb(0.65, 0.50, 0.25)),
-            background_color: BackgroundColor(Color::srgba(0.12, 0.10, 0.08, 0.98)),
             ..default()
-        }).with_children(|book| {
-            // Header
-            book.spawn(NodeBundle {
+        }).with_children(|wrapper| {
+            // Main Open Parchment Book Frame
+            wrapper.spawn(NodeBundle {
                 style: Style {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    margin: UiRect::bottom(Val::Px(10.0)),
+                    width: Val::Px(780.0),
+                    height: Val::Px(570.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(16.0)),
+                    border: UiRect::all(Val::Px(4.0)),
                     ..default()
                 },
+                border_color: BorderColor(Color::srgb(0.24, 0.16, 0.10)),
+                background_color: BackgroundColor(Color::srgba(0.88, 0.81, 0.68, 0.98)),
                 ..default()
-            }).with_children(|header| {
-                header.spawn(TextBundle::from_section(
-                    "SPELLBOOK & ABILITY GRIMOIRE",
-                    TextStyle { font_size: 16.0, color: Color::srgb(0.95, 0.85, 0.55), ..default() }
-                ));
-
-                header.spawn(TextBundle::from_section(
-                    "Press [K] to Close | Click any Spell to Prepare into Hotbar (Slots 1-16)",
-                    TextStyle { font_size: 11.0, color: Color::srgb(0.75, 0.70, 0.60), ..default() }
-                ));
-            });
-
-            // Category filter tabs
-            book.spawn(NodeBundle {
-                style: Style {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(6.0),
-                    margin: UiRect::bottom(Val::Px(12.0)),
+            }).with_children(|book| {
+                // Header: Title + Checkboxes + Red Close Button
+                book.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::bottom(Val::Px(8.0)),
+                        ..default()
+                    },
                     ..default()
-                },
-                ..default()
-            }).with_children(|tabs| {
-                let tab_list = [
-                    (None, "ALL (16)"),
-                    (Some(SpellCategory::Tactical), "TACTICAL"),
-                    (Some(SpellCategory::Elemental), "ELEMENTAL"),
-                    (Some(SpellCategory::Arcane), "ARCANE"),
-                    (Some(SpellCategory::Restoration), "RESTORATION"),
-                ];
+                }).with_children(|header| {
+                    header.spawn(TextBundle::from_section(
+                        "📖 Spellbook & Abilities",
+                        TextStyle { font_size: 17.0, color: Color::srgb(0.24, 0.15, 0.08), ..default() }
+                    ));
 
-                for (cat, label) in tab_list {
-                    tabs.spawn((
-                        ButtonBundle {
-                            style: Style {
-                                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                                border: UiRect::all(Val::Px(1.0)),
+                    header.spawn(NodeBundle {
+                        style: Style {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(10.0),
+                            ..default()
+                        },
+                        ..default()
+                    }).with_children(|ctrls| {
+                        // Rank Filter Checkbox Toggle
+                        ctrls.spawn((
+                            ButtonBundle {
+                                style: Style {
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                border_color: BorderColor(Color::srgb(0.40, 0.30, 0.20)),
+                                background_color: BackgroundColor(Color::srgb(0.80, 0.73, 0.60)),
                                 ..default()
                             },
-                            border_color: BorderColor(Color::srgb(0.5, 0.4, 0.2)),
-                            background_color: BackgroundColor(Color::srgb(0.20, 0.16, 0.12)),
+                            SpellbookRankFilterToggle,
+                        )).with_children(|b| {
+                            b.spawn((
+                                TextBundle::from_section(
+                                    "[ ] Rank Filter",
+                                    TextStyle { font_size: 11.0, color: Color::srgb(0.22, 0.14, 0.08), ..default() }
+                                ),
+                                SpellbookRankFilterText,
+                            ));
+                        });
+
+                        // Auto UpRank Checkbox Toggle
+                        ctrls.spawn((
+                            ButtonBundle {
+                                style: Style {
+                                    padding: UiRect::axes(Val::Px(8.0), Val::Px(3.0)),
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                border_color: BorderColor(Color::srgb(0.40, 0.30, 0.20)),
+                                background_color: BackgroundColor(Color::srgb(0.80, 0.73, 0.60)),
+                                ..default()
+                            },
+                            SpellbookAutoUpRankToggle,
+                        )).with_children(|b| {
+                            b.spawn((
+                                TextBundle::from_section(
+                                    "[X] Auto UpRank",
+                                    TextStyle { font_size: 11.0, color: Color::srgb(0.22, 0.14, 0.08), ..default() }
+                                ),
+                                SpellbookAutoUpRankText,
+                            ));
+                        });
+
+                        // Red [X] Close Button
+                        ctrls.spawn((
+                            ButtonBundle {
+                                style: Style {
+                                    width: Val::Px(24.0),
+                                    height: Val::Px(24.0),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                border_color: BorderColor(Color::srgb(0.45, 0.10, 0.10)),
+                                background_color: BackgroundColor(Color::srgb(0.72, 0.15, 0.15)),
+                                ..default()
+                            },
+                            SpellbookCloseBtn,
+                        )).with_children(|b| {
+                            b.spawn(TextBundle::from_section(
+                                "X",
+                                TextStyle { font_size: 12.0, color: Color::WHITE, ..default() }
+                            ));
+                        });
+                    });
+                });
+
+                // Two-Column Pages Body: 6 slots on Left page, 6 slots on Right page (12 total per page)
+                book.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        flex_grow: 1.0,
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(14.0),
+                        ..default()
+                    },
+                    ..default()
+                }).with_children(|pages_row| {
+                    // Left Page (Slots 0..6)
+                    pages_row.spawn(NodeBundle {
+                        style: Style {
+                            width: Val::Percent(50.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(6.0),
+                            padding: UiRect::right(Val::Px(8.0)),
+                            border: UiRect::right(Val::Px(1.5)),
+                            ..default()
+                        },
+                        border_color: BorderColor(Color::srgb(0.74, 0.66, 0.52)),
+                        ..default()
+                    }).with_children(|left_col| {
+                        for slot_idx in 0..6 {
+                            spawn_spellbook_slot(left_col, slot_idx);
+                        }
+                    });
+
+                    // Right Page (Slots 6..12)
+                    pages_row.spawn(NodeBundle {
+                        style: Style {
+                            width: Val::Percent(50.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(6.0),
+                            padding: UiRect::left(Val::Px(8.0)),
+                            ..default()
+                        },
+                        ..default()
+                    }).with_children(|right_col| {
+                        for slot_idx in 6..12 {
+                            spawn_spellbook_slot(right_col, slot_idx);
+                        }
+                    });
+                });
+
+                // Bottom Bar: Hint Status + Pagination (< Page X of Y >)
+                book.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        margin: UiRect::top(Val::Px(8.0)),
+                        padding: UiRect::top(Val::Px(6.0)),
+                        border: UiRect::top(Val::Px(1.5)),
+                        ..default()
+                    },
+                    border_color: BorderColor(Color::srgb(0.74, 0.66, 0.52)),
+                    ..default()
+                }).with_children(|bottom| {
+                    // Left: status / prompt text
+                    bottom.spawn((
+                        TextBundle::from_section(
+                            "Click any spell to select, then click Hotbar Slot (1-16) to prepare | [K to Close]",
+                            TextStyle { font_size: 10.5, color: Color::srgb(0.32, 0.22, 0.14), ..default() }
+                        ),
+                        SpellbookStatusText,
+                    ));
+
+                    // Right: Pagination Controls
+                    bottom.spawn(NodeBundle {
+                        style: Style {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(8.0),
+                            ..default()
+                        },
+                        ..default()
+                    }).with_children(|paging| {
+                        paging.spawn((
+                            ButtonBundle {
+                                style: Style {
+                                    padding: UiRect::axes(Val::Px(9.0), Val::Px(3.0)),
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                border_color: BorderColor(Color::srgb(0.40, 0.28, 0.18)),
+                                background_color: BackgroundColor(Color::srgb(0.78, 0.70, 0.58)),
+                                ..default()
+                            },
+                            SpellbookPrevPageBtn,
+                        )).with_children(|b| {
+                            b.spawn(TextBundle::from_section(
+                                "<",
+                                TextStyle { font_size: 12.0, color: Color::srgb(0.22, 0.14, 0.08), ..default() }
+                            ));
+                        });
+
+                        paging.spawn((
+                            TextBundle::from_section(
+                                "Page 1 of 2",
+                                TextStyle { font_size: 11.5, color: Color::srgb(0.22, 0.14, 0.08), ..default() }
+                            ),
+                            SpellbookPageIndicatorText,
+                        ));
+
+                        paging.spawn((
+                            ButtonBundle {
+                                style: Style {
+                                    padding: UiRect::axes(Val::Px(9.0), Val::Px(3.0)),
+                                    border: UiRect::all(Val::Px(1.5)),
+                                    ..default()
+                                },
+                                border_color: BorderColor(Color::srgb(0.40, 0.28, 0.18)),
+                                background_color: BackgroundColor(Color::srgb(0.78, 0.70, 0.58)),
+                                ..default()
+                            },
+                            SpellbookNextPageBtn,
+                        )).with_children(|b| {
+                            b.spawn(TextBundle::from_section(
+                                ">",
+                                TextStyle { font_size: 12.0, color: Color::srgb(0.22, 0.14, 0.08), ..default() }
+                            ));
+                        });
+                    });
+                });
+            });
+
+            // Right-side school / category tabs (attached to right book frame)
+            wrapper.spawn(NodeBundle {
+                style: Style {
+                    width: Val::Px(82.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    margin: UiRect::top(Val::Px(36.0)),
+                    ..default()
+                },
+                ..default()
+            }).with_children(|tabs_col| {
+                let tabs_def = [
+                    (None, "ALL", 21),
+                    (Some(SpellCategory::Arcane), "ARCANE", 5),
+                    (Some(SpellCategory::Elemental), "ELEMENT", 5),
+                    (Some(SpellCategory::Restoration), "RESTORE", 5),
+                    (Some(SpellCategory::Tactical), "TACTICS", 6),
+                ];
+
+                for (cat, label, count) in tabs_def {
+                    tabs_col.spawn((
+                        ButtonBundle {
+                            style: Style {
+                                width: Val::Px(82.0),
+                                height: Val::Px(44.0),
+                                flex_direction: FlexDirection::Column,
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                padding: UiRect::all(Val::Px(3.0)),
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            border_color: BorderColor(Color::srgb(0.40, 0.30, 0.20)),
+                            background_color: BackgroundColor(Color::srgb(0.24, 0.17, 0.12)),
                             ..default()
                         },
                         SpellbookTabButton(cat),
                     )).with_children(|b| {
                         b.spawn(TextBundle::from_section(
                             label,
-                            TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }
+                            TextStyle { font_size: 10.5, color: Color::srgb(0.92, 0.85, 0.70), ..default() }
+                        ));
+                        b.spawn(TextBundle::from_section(
+                            format!("({})", count),
+                            TextStyle { font_size: 9.0, color: Color::srgb(0.72, 0.65, 0.50), ..default() }
                         ));
                     });
                 }
             });
+        });
+    });
+}
 
-            // Grid of spell cards
-            book.spawn(NodeBundle {
+fn spawn_spellbook_slot(builder: &mut ChildBuilder, slot_idx: usize) {
+    builder.spawn((
+        ButtonBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Px(60.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(Val::Px(4.0)),
+                border: UiRect::all(Val::Px(1.5)),
+                column_gap: Val::Px(8.0),
+                ..default()
+            },
+            border_color: BorderColor(Color::srgb(0.70, 0.62, 0.48)),
+            background_color: BackgroundColor(Color::srgba(0.84, 0.77, 0.64, 0.40)),
+            ..default()
+        },
+        SpellbookSlotCard(slot_idx),
+    )).with_children(|card| {
+        // Square Icon Box
+        card.spawn((
+            NodeBundle {
                 style: Style {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
+                    width: Val::Px(44.0),
+                    height: Val::Px(44.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(2.0)),
+                    ..default()
+                },
+                border_color: BorderColor(Color::srgb(0.32, 0.22, 0.14)),
+                background_color: BackgroundColor(Color::srgb(0.18, 0.14, 0.10)),
+                ..default()
+            },
+            SpellbookSlotIconBox(slot_idx),
+        )).with_children(|ibox| {
+            ibox.spawn((
+                TextBundle::from_section(
+                    "---",
+                    TextStyle { font_size: 11.0, color: Color::srgb(0.5, 0.5, 0.5), ..default() }
+                ),
+                SpellbookSlotIconText(slot_idx),
+            ));
+        });
+
+        // Details Column
+        card.spawn(NodeBundle {
+            style: Style {
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::SpaceEvenly,
+                ..default()
+            },
+            ..default()
+        }).with_children(|info| {
+            info.spawn((
+                TextBundle::from_section(
+                    "(Empty Slot)",
+                    TextStyle { font_size: 12.0, color: Color::srgb(0.20, 0.12, 0.06), ..default() }
+                ),
+                SpellbookSlotNameText(slot_idx),
+            ));
+
+            info.spawn(NodeBundle {
+                style: Style {
                     flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(8.0),
-                    row_gap: Val::Px(8.0),
-                    overflow: Overflow::clip_y(),
+                    justify_content: JustifyContent::SpaceBetween,
                     ..default()
                 },
                 ..default()
-            }).with_children(|grid| {
-                for spell in SPELL_CATALOG {
-                    grid.spawn((
-                        ButtonBundle {
-                            style: Style {
-                                width: Val::Px(168.0),
-                                height: Val::Px(95.0),
-                                flex_direction: FlexDirection::Column,
-                                justify_content: JustifyContent::SpaceBetween,
-                                padding: UiRect::all(Val::Px(6.0)),
-                                border: UiRect::all(Val::Px(1.0)),
-                                ..default()
-                            },
-                            border_color: BorderColor(Color::srgb(0.4, 0.35, 0.25)),
-                            background_color: BackgroundColor(Color::srgb(0.16, 0.14, 0.12)),
-                            ..default()
-                        },
-                        SpellbookCardSelectButton(spell.id.to_string()),
-                    )).with_children(|card| {
-                        // Title + CD
-                        card.spawn(NodeBundle {
-                            style: Style {
-                                width: Val::Percent(100.0),
-                                flex_direction: FlexDirection::Row,
-                                justify_content: JustifyContent::SpaceBetween,
-                                ..default()
-                            },
-                            ..default()
-                        }).with_children(|top| {
-                            top.spawn(TextBundle::from_section(
-                                spell.name,
-                                TextStyle { font_size: 12.0, color: spell.color, ..default() }
-                            ));
-                            top.spawn(TextBundle::from_section(
-                                format!("{:.0}s", spell.cooldown_seconds),
-                                TextStyle { font_size: 10.0, color: Color::srgb(0.7, 0.7, 0.7), ..default() }
-                            ));
-                        });
+            }).with_children(|sub| {
+                sub.spawn((
+                    TextBundle::from_section(
+                        "",
+                        TextStyle { font_size: 10.0, color: Color::srgb(0.48, 0.38, 0.26), ..default() }
+                    ),
+                    SpellbookSlotRankText(slot_idx),
+                ));
 
-                        // Description
-                        card.spawn(TextBundle::from_section(
-                            spell.description,
-                            TextStyle { font_size: 9.5, color: Color::srgb(0.8, 0.75, 0.70), ..default() }
-                        ));
-
-                        // Action label
-                        card.spawn(TextBundle::from_section(
-                            "CLICK TO PREPARE ->",
-                            TextStyle { font_size: 9.0, color: Color::srgb(1.0, 0.85, 0.3), ..default() }
-                        ));
-                    });
-                }
+                sub.spawn((
+                    TextBundle::from_section(
+                        "",
+                        TextStyle { font_size: 9.5, color: Color::srgb(0.55, 0.40, 0.25), ..default() }
+                    ),
+                    SpellbookSlotCooldownText(slot_idx),
+                ));
             });
-
-            // Bottom Status / Instructions
-            book.spawn((
-                TextBundle::from_section(
-                    "Click a spell above, then click any of the 16 Hotbar Slots below to prepare it into your spellbook.",
-                    TextStyle { font_size: 11.0, color: Color::srgb(0.9, 0.85, 0.5), ..default() }
-                ).with_style(Style { margin: UiRect::top(Val::Px(8.0)), ..default() }),
-                SpellbookStatusText,
-            ));
         });
+    });
+}
+
+fn spawn_framed_section<F>(parent: &mut ChildBuilder, title: &'static str, build_content: F)
+where
+    F: FnOnce(&mut ChildBuilder),
+{
+    parent.spawn(NodeBundle {
+        style: Style {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            margin: UiRect::bottom(Val::Px(4.0)),
+            ..default()
+        },
+        border_color: BorderColor(Color::srgb(0.20, 0.22, 0.25)),
+        background_color: BackgroundColor(Color::srgba(0.06, 0.07, 0.09, 0.7)),
+        ..default()
+    }).with_children(|sec| {
+        sec.spawn(TextBundle::from_section(
+            title,
+            TextStyle { font_size: 12.0, color: Color::srgb(1.0, 0.85, 0.35), ..default() }
+        ).with_style(Style { margin: UiRect::bottom(Val::Px(6.0)), ..default() }));
+
+        build_content(sec);
     });
 }
 
 pub fn setup_options_panel_modal_ui(
     mut commands: Commands,
+    keybinds: Res<HotbarKeybinds>,
 ) {
     commands.spawn((
         NodeBundle {
@@ -769,271 +1178,565 @@ pub fn setup_options_panel_modal_ui(
         },
         OptionsPanelModalRoot,
     )).with_children(|overlay| {
+        // Main WoW Dialog Window Frame
         overlay.spawn(NodeBundle {
             style: Style {
-                width: Val::Px(640.0),
-                height: Val::Px(500.0),
+                width: Val::Px(840.0),
+                height: Val::Px(580.0),
                 flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(16.0)),
-                border: UiRect::all(Val::Px(2.5)),
+                padding: UiRect::all(Val::Px(12.0)),
+                border: UiRect::all(Val::Px(3.0)),
                 ..default()
             },
-            border_color: BorderColor(Color::srgb(0.35, 0.45, 0.60)),
-            background_color: BackgroundColor(Color::srgba(0.08, 0.09, 0.12, 0.98)),
+            border_color: BorderColor(Color::srgb(0.35, 0.38, 0.42)),
+            background_color: BackgroundColor(Color::srgba(0.04, 0.05, 0.07, 0.98)),
             ..default()
         }).with_children(|window| {
-            // Header
+            // 1. Top Header Plate ("System") + Close [X] Button
             window.spawn(NodeBundle {
                 style: Style {
                     width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Row,
                     justify_content: JustifyContent::SpaceBetween,
                     align_items: AlignItems::Center,
-                    margin: UiRect::bottom(Val::Px(12.0)),
+                    margin: UiRect::bottom(Val::Px(10.0)),
                     ..default()
                 },
                 ..default()
             }).with_children(|head| {
-                head.spawn(TextBundle::from_section(
-                    "SYSTEM & GAMEPLAY OPTIONS [O]",
-                    TextStyle { font_size: 16.0, color: Color::srgb(0.4, 0.8, 1.0), ..default() }
-                ));
+                head.spawn(NodeBundle {
+                    style: Style { width: Val::Px(24.0), height: Val::Px(24.0), ..default() },
+                    ..default()
+                });
 
+                // WoW Centered Title Badge
+                head.spawn(NodeBundle {
+                    style: Style {
+                        padding: UiRect::axes(Val::Px(28.0), Val::Px(4.0)),
+                        border: UiRect::all(Val::Px(1.5)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    border_color: BorderColor(Color::srgb(0.55, 0.46, 0.24)),
+                    background_color: BackgroundColor(Color::srgb(0.12, 0.11, 0.10)),
+                    ..default()
+                }).with_children(|b| {
+                    b.spawn(TextBundle::from_section(
+                        "System",
+                        TextStyle { font_size: 15.0, color: Color::srgb(1.0, 0.85, 0.30), ..default() }
+                    ));
+                });
+
+                // Close Button [X]
                 head.spawn((
                     ButtonBundle {
                         style: Style {
-                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                            width: Val::Px(24.0),
+                            height: Val::Px(24.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.0)),
                             ..default()
                         },
-                        border_color: BorderColor(Color::srgb(0.6, 0.3, 0.3)),
-                        background_color: BackgroundColor(Color::srgb(0.35, 0.15, 0.15)),
+                        border_color: BorderColor(Color::srgb(0.5, 0.2, 0.2)),
+                        background_color: BackgroundColor(Color::srgb(0.35, 0.12, 0.12)),
                         ..default()
                     },
                     OptionsCloseBtn,
                 )).with_children(|b| {
-                    b.spawn(TextBundle::from_section("CLOSE [O]", TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }));
+                    b.spawn(TextBundle::from_section("X", TextStyle { font_size: 12.0, color: Color::WHITE, ..default() }));
                 });
             });
 
-            // Tabs bar
-            window.spawn(NodeBundle {
-                style: Style {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(8.0),
-                    margin: UiRect::bottom(Val::Px(14.0)),
-                    ..default()
-                },
-                ..default()
-            }).with_children(|tabs| {
-                let tabs_def = [
-                    (OptionsTab::Reticle, "1. RETICLE & HUD"),
-                    (OptionsTab::Performance, "2. VISIBLE RANGE & PERFORMANCE"),
-                    (OptionsTab::Keybinds, "3. HOTBAR KEYBINDS"),
-                ];
-                for (tab, label) in tabs_def {
-                    tabs.spawn((
-                        ButtonBundle {
-                            style: Style {
-                                padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
-                                border: UiRect::all(Val::Px(1.0)),
-                                ..default()
-                            },
-                            border_color: BorderColor(Color::srgb(0.3, 0.5, 0.7)),
-                            background_color: BackgroundColor(Color::srgb(0.15, 0.20, 0.28)),
-                            ..default()
-                        },
-                        OptionsTabButton(tab),
-                    )).with_children(|b| {
-                        b.spawn(TextBundle::from_section(label, TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }));
-                    });
-                }
-            });
-
-            // Body Content Panel
+            // 2. Middle Area: Two-Column Layout (Sidebar + Content Panel)
             window.spawn(NodeBundle {
                 style: Style {
                     width: Val::Percent(100.0),
                     flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(10.0)),
-                    border: UiRect::all(Val::Px(1.0)),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(12.0),
+                    margin: UiRect::bottom(Val::Px(10.0)),
                     ..default()
                 },
-                border_color: BorderColor(Color::srgb(0.2, 0.3, 0.4)),
-                background_color: BackgroundColor(Color::srgba(0.04, 0.05, 0.07, 0.8)),
                 ..default()
-            }).with_children(|body| {
-                // Section 1: Reticle Toggle
-                body.spawn(NodeBundle {
+            }).with_children(|columns| {
+                // Left Column: Navigation Sidebar (160px)
+                columns.spawn(NodeBundle {
                     style: Style {
-                        width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::SpaceBetween,
-                        align_items: AlignItems::Center,
-                        margin: UiRect::bottom(Val::Px(12.0)),
-                        ..default()
-                    },
-                    ..default()
-                }).with_children(|row| {
-                    row.spawn(TextBundle::from_section(
-                        "Center Reticle / Crosshair System:",
-                        TextStyle { font_size: 13.0, color: Color::WHITE, ..default() }
-                    ));
-
-                    row.spawn((
-                        ButtonBundle {
-                            style: Style {
-                                padding: UiRect::axes(Val::Px(16.0), Val::Px(6.0)),
-                                border: UiRect::all(Val::Px(1.5)),
-                                ..default()
-                            },
-                            border_color: BorderColor(Color::srgb(0.2, 0.8, 0.4)),
-                            background_color: BackgroundColor(Color::srgb(0.1, 0.4, 0.2)),
-                            ..default()
-                        },
-                        OptionsReticleToggleBtn,
-                    )).with_children(|b| {
-                        b.spawn((
-                            TextBundle::from_section("RETICLE: ON", TextStyle { font_size: 12.0, color: Color::WHITE, ..default() }),
-                            OptionsReticleStatusText,
-                        ));
-                    });
-                });
-
-                // Section 2: Visible Range & Testing
-                body.spawn(TextBundle::from_section(
-                    "TERRAIN VISIBLE RANGE & DRAW BENCHMARK (TEST FPS):",
-                    TextStyle { font_size: 12.0, color: Color::srgb(0.4, 0.8, 1.0), ..default() }
-                ).with_style(Style { margin: UiRect::bottom(Val::Px(6.0)), ..default() }));
-
-                body.spawn(NodeBundle {
-                    style: Style {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(6.0),
-                        margin: UiRect::bottom(Val::Px(8.0)),
-                        ..default()
-                    },
-                    ..default()
-                }).with_children(|range_row| {
-                    let presets = [
-                        (10, "10 Chunks (160m)"),
-                        (16, "16 Chunks (256m)"),
-                        (24, "24 Chunks (384m)"),
-                        (32, "32 Chunks (512m)"),
-                        (48, "48 Chunks (768m)"),
-                        (64, "64 Chunks (1024m)"),
-                    ];
-                    for (chunks, lbl) in presets {
-                        range_row.spawn((
-                            ButtonBundle {
-                                style: Style {
-                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(4.0)),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    ..default()
-                                },
-                                border_color: BorderColor(Color::srgb(0.3, 0.5, 0.6)),
-                                background_color: BackgroundColor(Color::srgb(0.12, 0.22, 0.28)),
-                                ..default()
-                            },
-                            OptionsRangePresetButton(chunks),
-                        )).with_children(|b| {
-                            b.spawn(TextBundle::from_section(lbl, TextStyle { font_size: 10.0, color: Color::WHITE, ..default() }));
-                        });
-                    }
-                });
-
-                // Spawn Whole Zone Button
-                body.spawn((
-                    ButtonBundle {
-                        style: Style {
-                            width: Val::Percent(100.0),
-                            padding: UiRect::all(Val::Px(8.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            margin: UiRect::bottom(Val::Px(10.0)),
-                            border: UiRect::all(Val::Px(1.5)),
-                            ..default()
-                        },
-                        border_color: BorderColor(Color::srgb(0.8, 0.6, 0.2)),
-                        background_color: BackgroundColor(Color::srgb(0.35, 0.25, 0.10)),
-                        ..default()
-                    },
-                    OptionsSpawnWholeZoneBtn,
-                )).with_children(|b| {
-                    b.spawn(TextBundle::from_section(
-                        "⚡ SPAWN ENTIRE ZONE (LOAD FULL 1KM RADIUS & BENCHMARK FPS)",
-                        TextStyle { font_size: 12.0, color: Color::srgb(1.0, 0.85, 0.3), ..default() }
-                    ));
-                });
-
-                // Live Performance Readout
-                body.spawn((
-                    TextBundle::from_section(
-                        "Visible Range: 160m (10 chunks) | Camera Far: 1000m | FPS: 60",
-                        TextStyle { font_size: 11.0, color: Color::srgb(0.7, 0.9, 0.7), ..default() }
-                    ).with_style(Style { margin: UiRect::bottom(Val::Px(12.0)), ..default() }),
-                    OptionsPerfMetricsText,
-                ));
-
-                // Section 3: Hotbar Keybinds Rebinding
-                body.spawn(TextBundle::from_section(
-                    "HOTBAR KEYBINDINGS (16 SLOTS) - CLICK TO REBIND:",
-                    TextStyle { font_size: 12.0, color: Color::srgb(0.9, 0.8, 0.4), ..default() }
-                ).with_style(Style { margin: UiRect::bottom(Val::Px(4.0)), ..default() }));
-
-                body.spawn(NodeBundle {
-                    style: Style {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(6.0),
+                        width: Val::Px(160.0),
+                        height: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(4.0),
-                        margin: UiRect::bottom(Val::Px(8.0)),
+                        padding: UiRect::all(Val::Px(6.0)),
+                        border: UiRect::all(Val::Px(1.5)),
                         ..default()
                     },
+                    border_color: BorderColor(Color::srgb(0.24, 0.26, 0.30)),
+                    background_color: BackgroundColor(Color::srgba(0.03, 0.04, 0.05, 0.9)),
                     ..default()
-                }).with_children(|rebind_grid| {
-                    for slot in 0..16 {
-                        rebind_grid.spawn((
+                }).with_children(|sidebar| {
+                    let nav_tabs = [
+                        (OptionsTab::Graphics, "Graphics"),
+                        (OptionsTab::Advanced, "Advanced"),
+                        (OptionsTab::Keybinds, "Keybindings"),
+                        (OptionsTab::Network, "Network"),
+                    ];
+                    for (tab, label) in nav_tabs {
+                        let is_active = tab == OptionsTab::Graphics;
+                        let bg_col = if is_active { Color::srgba(0.85, 0.70, 0.15, 0.45) } else { Color::NONE };
+                        let border_col = if is_active { Color::srgb(1.0, 0.85, 0.25) } else { Color::NONE };
+                        let text_col = if is_active { Color::srgb(1.0, 0.90, 0.35) } else { Color::srgb(0.80, 0.80, 0.80) };
+
+                        sidebar.spawn((
                             ButtonBundle {
                                 style: Style {
-                                    width: Val::Px(72.0),
-                                    height: Val::Px(24.0),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
+                                    width: Val::Percent(100.0),
+                                    padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
                                     border: UiRect::all(Val::Px(1.0)),
+                                    justify_content: JustifyContent::FlexStart,
+                                    align_items: AlignItems::Center,
                                     ..default()
                                 },
-                                border_color: BorderColor(Color::srgb(0.4, 0.4, 0.4)),
-                                background_color: BackgroundColor(Color::srgb(0.18, 0.18, 0.22)),
+                                border_color: BorderColor(border_col),
+                                background_color: BackgroundColor(bg_col),
                                 ..default()
                             },
-                            OptionsKeybindRebindBtn(slot),
+                            OptionsTabButton(tab),
                         )).with_children(|b| {
-                            b.spawn(TextBundle::from_section(
-                                format!("S{}: ?", slot + 1),
-                                TextStyle { font_size: 10.0, color: Color::WHITE, ..default() }
+                            b.spawn((
+                                TextBundle::from_section(
+                                    label,
+                                    TextStyle { font_size: 13.0, color: text_col, ..default() }
+                                ),
+                                OptionsTabButtonText(tab),
                             ));
                         });
                     }
                 });
 
-                // Reset keybinds button
-                body.spawn((
-                    ButtonBundle {
-                        style: Style {
-                            align_self: AlignSelf::FlexStart,
-                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            ..default()
-                        },
-                        border_color: BorderColor(Color::srgb(0.5, 0.3, 0.3)),
-                        background_color: BackgroundColor(Color::srgb(0.25, 0.15, 0.15)),
+                // Right Column: Main Content Area
+                columns.spawn(NodeBundle {
+                    style: Style {
+                        flex_grow: 1.0,
+                        height: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::SpaceBetween,
+                        padding: UiRect::all(Val::Px(12.0)),
+                        border: UiRect::all(Val::Px(1.5)),
                         ..default()
                     },
-                    OptionsKeybindResetBtn,
-                )).with_children(|b| {
-                    b.spawn(TextBundle::from_section("Reset Default Keybindings", TextStyle { font_size: 10.0, color: Color::WHITE, ..default() }));
+                    border_color: BorderColor(Color::srgb(0.24, 0.26, 0.30)),
+                    background_color: BackgroundColor(Color::srgba(0.03, 0.04, 0.05, 0.9)),
+                    ..default()
+                }).with_children(|content_box| {
+                    // ---- TAB 1: GRAPHICS ----
+                    content_box.spawn((
+                        NodeBundle {
+                            style: Style {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(8.0),
+                                display: Display::Flex,
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        OptionsTabContent(OptionsTab::Graphics),
+                    )).with_children(|tab| {
+                        // Display Box
+                        spawn_framed_section(tab, "Display", |sec| {
+                            sec.spawn(NodeBundle {
+                                style: Style {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Row,
+                                    justify_content: JustifyContent::SpaceBetween,
+                                    align_items: AlignItems::Center,
+                                    margin: UiRect::bottom(Val::Px(4.0)),
+                                    ..default()
+                                },
+                                ..default()
+                            }).with_children(|row| {
+                                row.spawn(TextBundle::from_section(
+                                    "Center Reticle / Crosshair:",
+                                    TextStyle { font_size: 12.0, color: Color::srgb(0.85, 0.85, 0.85), ..default() }
+                                ));
+
+                                row.spawn((
+                                    ButtonBundle {
+                                        style: Style {
+                                            padding: UiRect::axes(Val::Px(14.0), Val::Px(4.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        border_color: BorderColor(Color::srgb(0.2, 0.7, 0.3)),
+                                        background_color: BackgroundColor(Color::srgb(0.1, 0.35, 0.15)),
+                                        ..default()
+                                    },
+                                    OptionsReticleToggleBtn,
+                                )).with_children(|b| {
+                                    b.spawn((
+                                        TextBundle::from_section("RETICLE: ON", TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }),
+                                        OptionsReticleStatusText,
+                                    ));
+                                });
+                            });
+                        });
+
+                        // Environment & Visible Range Box
+                        spawn_framed_section(tab, "Environment & Visible Range", |sec| {
+                            sec.spawn(TextBundle::from_section(
+                                "Chunk View Distance:",
+                                TextStyle { font_size: 11.5, color: Color::srgb(0.8, 0.8, 0.8), ..default() }
+                            ).with_style(Style { margin: UiRect::bottom(Val::Px(4.0)), ..default() }));
+
+                            sec.spawn(NodeBundle {
+                                style: Style {
+                                    flex_direction: FlexDirection::Row,
+                                    column_gap: Val::Px(5.0),
+                                    margin: UiRect::bottom(Val::Px(8.0)),
+                                    ..default()
+                                },
+                                ..default()
+                            }).with_children(|presets_row| {
+                                let presets = [
+                                    (10, "160m (10c)"),
+                                    (16, "256m (16c)"),
+                                    (24, "384m (24c)"),
+                                    (32, "512m (32c)"),
+                                    (48, "768m (48c)"),
+                                    (64, "1024m (64c)"),
+                                ];
+                                for (chunks, lbl) in presets {
+                                    presets_row.spawn((
+                                        ButtonBundle {
+                                            style: Style {
+                                                padding: UiRect::axes(Val::Px(7.0), Val::Px(4.0)),
+                                                border: UiRect::all(Val::Px(1.0)),
+                                                ..default()
+                                            },
+                                            border_color: BorderColor(Color::srgb(0.3, 0.4, 0.5)),
+                                            background_color: BackgroundColor(Color::srgb(0.12, 0.18, 0.25)),
+                                            ..default()
+                                        },
+                                        OptionsRangePresetButton(chunks),
+                                    )).with_children(|b| {
+                                        b.spawn(TextBundle::from_section(lbl, TextStyle { font_size: 10.0, color: Color::WHITE, ..default() }));
+                                    });
+                                }
+                            });
+
+                            // Spawn entire zone button
+                            sec.spawn((
+                                ButtonBundle {
+                                    style: Style {
+                                        width: Val::Percent(100.0),
+                                        padding: UiRect::all(Val::Px(6.0)),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        border: UiRect::all(Val::Px(1.5)),
+                                        ..default()
+                                    },
+                                    border_color: BorderColor(Color::srgb(0.8, 0.65, 0.2)),
+                                    background_color: BackgroundColor(Color::srgb(0.30, 0.22, 0.08)),
+                                    ..default()
+                                },
+                                OptionsSpawnWholeZoneBtn,
+                            )).with_children(|b| {
+                                b.spawn(TextBundle::from_section(
+                                    "⚡ SPAWN ENTIRE ZONE (LOAD FULL 1KM RADIUS & BENCHMARK FPS)",
+                                    TextStyle { font_size: 11.0, color: Color::srgb(1.0, 0.85, 0.3), ..default() }
+                                ));
+                            });
+                        });
+
+                        // Performance Box
+                        spawn_framed_section(tab, "Display Performance", |sec| {
+                            sec.spawn((
+                                TextBundle::from_section(
+                                    "Visible Range: 160m (10 chunks) | Camera Far: 1000m | FPS: 60",
+                                    TextStyle { font_size: 11.0, color: Color::srgb(0.65, 0.9, 0.65), ..default() }
+                                ),
+                                OptionsPerfMetricsText,
+                            ));
+                        });
+                    });
+
+                    // ---- TAB 2: ADVANCED ----
+                    content_box.spawn((
+                        NodeBundle {
+                            style: Style {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(8.0),
+                                display: Display::None,
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        OptionsTabContent(OptionsTab::Advanced),
+                    )).with_children(|tab| {
+                        spawn_framed_section(tab, "Advanced Graphics & Terrain Caching", |sec| {
+                            sec.spawn(TextBundle::from_section(
+                                "• Chunk Caching Buffer: Auto-allocated (View Distance + 3 chunks)\n\
+                                 • Atmospheric Fog Falloff: Linear depth attenuation synchronized with horizon\n\
+                                 • Camera Projection Far Plane: Scaled dynamically up to 2048m\n\
+                                 • Dynamic Weapon Bloom: Real-time recoil spread recovery\n\
+                                 • Voxel Render Layer: Layer 1 Viewmodel Culling Isolation",
+                                TextStyle { font_size: 11.5, color: Color::srgb(0.8, 0.85, 0.9), ..default() }
+                            ));
+                        });
+
+                        spawn_framed_section(tab, "In-Game Diagnostics & Tools", |sec| {
+                            sec.spawn(TextBundle::from_section(
+                                "• Press [F3] to toggle live FPS and engine memory diagnostics overlay\n\
+                                 • Press [F8 / F9] to advance or reverse binary astronomical solar time\n\
+                                 • Press [F10] to toggle celestial ephemeris & atmospheric weather pill\n\
+                                 • Press [Enter] to open in-game developer admin & cheat console",
+                                TextStyle { font_size: 11.5, color: Color::srgb(0.85, 0.85, 0.75), ..default() }
+                            ));
+                        });
+                    });
+
+                    // ---- TAB 3: KEYBINDS ----
+                    content_box.spawn((
+                        NodeBundle {
+                            style: Style {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(6.0),
+                                display: Display::None,
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        OptionsTabContent(OptionsTab::Keybinds),
+                    )).with_children(|tab| {
+                        spawn_framed_section(tab, "16-Key Prepared Hotbar Keybindings (Click to Rebind)", |sec| {
+                            sec.spawn(NodeBundle {
+                                style: Style {
+                                    flex_direction: FlexDirection::Row,
+                                    flex_wrap: FlexWrap::Wrap,
+                                    column_gap: Val::Px(6.0),
+                                    row_gap: Val::Px(5.0),
+                                    margin: UiRect::bottom(Val::Px(8.0)),
+                                    ..default()
+                                },
+                                ..default()
+                            }).with_children(|rebind_grid| {
+                                for slot in 0..16 {
+                                    let key_label = keycode_display_name(keybinds.keybinds[slot]);
+                                    rebind_grid.spawn((
+                                        ButtonBundle {
+                                            style: Style {
+                                                width: Val::Px(68.0),
+                                                height: Val::Px(28.0),
+                                                justify_content: JustifyContent::Center,
+                                                align_items: AlignItems::Center,
+                                                border: UiRect::all(Val::Px(1.0)),
+                                                ..default()
+                                            },
+                                            border_color: BorderColor(Color::srgb(0.4, 0.4, 0.4)),
+                                            background_color: BackgroundColor(Color::srgb(0.16, 0.17, 0.20)),
+                                            ..default()
+                                        },
+                                        OptionsKeybindRebindBtn(slot),
+                                    )).with_children(|b| {
+                                        b.spawn((
+                                            TextBundle::from_section(
+                                                format!("S{}: [{}]", slot + 1, key_label),
+                                                TextStyle { font_size: 10.0, color: Color::WHITE, ..default() }
+                                            ),
+                                            OptionsKeybindRebindText(slot),
+                                        ));
+                                    });
+                                }
+                            });
+
+                            sec.spawn((
+                                ButtonBundle {
+                                    style: Style {
+                                        align_self: AlignSelf::FlexStart,
+                                        padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        ..default()
+                                    },
+                                    border_color: BorderColor(Color::srgb(0.5, 0.3, 0.3)),
+                                    background_color: BackgroundColor(Color::srgb(0.25, 0.14, 0.14)),
+                                    ..default()
+                                },
+                                OptionsKeybindResetBtn,
+                            )).with_children(|b| {
+                                b.spawn(TextBundle::from_section("Reset Default Keybindings", TextStyle { font_size: 10.5, color: Color::WHITE, ..default() }));
+                            });
+                        });
+                    });
+
+                    // ---- TAB 4: NETWORK ----
+                    content_box.spawn((
+                        NodeBundle {
+                            style: Style {
+                                width: Val::Percent(100.0),
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(8.0),
+                                display: Display::None,
+                                ..default()
+                            },
+                            ..default()
+                        },
+                        OptionsTabContent(OptionsTab::Network),
+                    )).with_children(|tab| {
+                        spawn_framed_section(tab, "SpacetimeDB Networking & Multiplayer Sync", |sec| {
+                            sec.spawn(TextBundle::from_section(
+                                "• SpacetimeDB Server Engine: Authoritative WebAssembly Module\n\
+                                 • Realtime Replication: High-Frequency 60Hz Physics & Transform Loop\n\
+                                 • Deterministic Tick Sync: Active\n\
+                                 • Low-Frequency Background Loop: 1.0s Economy & Resource Node Regeneration\n\
+                                 • High-Frequency Loop: 16ms Combat Event & Active Projectile Trajectory\n\
+                                 • Optimize Network for Speed: Enabled",
+                                TextStyle { font_size: 11.5, color: Color::srgb(0.75, 0.85, 0.95), ..default() }
+                            ));
+                        });
+                    });
+
+                    // Bottom right Apply button inside content area
+                    content_box.spawn(NodeBundle {
+                        style: Style {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::FlexEnd,
+                            ..default()
+                        },
+                        ..default()
+                    }).with_children(|row| {
+                        row.spawn((
+                            ButtonBundle {
+                                style: Style {
+                                    padding: UiRect::axes(Val::Px(24.0), Val::Px(5.0)),
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    ..default()
+                                },
+                                border_color: BorderColor(Color::srgb(0.4, 0.42, 0.45)),
+                                background_color: BackgroundColor(Color::srgb(0.18, 0.20, 0.22)),
+                                ..default()
+                            },
+                            OptionsApplyBtn,
+                        )).with_children(|b| {
+                            b.spawn(TextBundle::from_section(
+                                "Apply",
+                                TextStyle { font_size: 11.5, color: Color::srgb(0.8, 0.8, 0.8), ..default() }
+                            ));
+                        });
+                    });
+                });
+            });
+
+            // 3. Bottom Action Bar: [Recommended] [Classic] ... [Okay] [Cancel]
+            window.spawn(NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::top(Val::Px(4.0)),
+                    ..default()
+                },
+                ..default()
+            }).with_children(|bottom| {
+                // Left presets buttons: [Recommended] [Classic]
+                bottom.spawn(NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    },
+                    ..default()
+                }).with_children(|left_btns| {
+                    left_btns.spawn((
+                        ButtonBundle {
+                            style: Style {
+                                padding: UiRect::axes(Val::Px(18.0), Val::Px(6.0)),
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            border_color: BorderColor(Color::srgb(0.68, 0.22, 0.22)),
+                            background_color: BackgroundColor(Color::srgb(0.42, 0.12, 0.12)),
+                            ..default()
+                        },
+                        OptionsRecommendedBtn,
+                    )).with_children(|b| {
+                        b.spawn(TextBundle::from_section(
+                            "Recommended",
+                            TextStyle { font_size: 12.0, color: Color::srgb(1.0, 0.9, 0.7), ..default() }
+                        ));
+                    });
+
+                    left_btns.spawn((
+                        ButtonBundle {
+                            style: Style {
+                                padding: UiRect::axes(Val::Px(18.0), Val::Px(6.0)),
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            border_color: BorderColor(Color::srgb(0.68, 0.22, 0.22)),
+                            background_color: BackgroundColor(Color::srgb(0.42, 0.12, 0.12)),
+                            ..default()
+                        },
+                        OptionsClassicBtn,
+                    )).with_children(|b| {
+                        b.spawn(TextBundle::from_section(
+                            "Classic",
+                            TextStyle { font_size: 12.0, color: Color::srgb(1.0, 0.9, 0.7), ..default() }
+                        ));
+                    });
+                });
+
+                // Right confirm buttons: [Okay] [Cancel]
+                bottom.spawn(NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    },
+                    ..default()
+                }).with_children(|right_btns| {
+                    right_btns.spawn((
+                        ButtonBundle {
+                            style: Style {
+                                padding: UiRect::axes(Val::Px(24.0), Val::Px(6.0)),
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            border_color: BorderColor(Color::srgb(0.68, 0.22, 0.22)),
+                            background_color: BackgroundColor(Color::srgb(0.42, 0.12, 0.12)),
+                            ..default()
+                        },
+                        OptionsOkayBtn,
+                    )).with_children(|b| {
+                        b.spawn(TextBundle::from_section(
+                            "Okay",
+                            TextStyle { font_size: 12.0, color: Color::srgb(1.0, 0.9, 0.7), ..default() }
+                        ));
+                    });
+
+                    right_btns.spawn((
+                        ButtonBundle {
+                            style: Style {
+                                padding: UiRect::axes(Val::Px(24.0), Val::Px(6.0)),
+                                border: UiRect::all(Val::Px(1.5)),
+                                ..default()
+                            },
+                            border_color: BorderColor(Color::srgb(0.68, 0.22, 0.22)),
+                            background_color: BackgroundColor(Color::srgb(0.42, 0.12, 0.12)),
+                            ..default()
+                        },
+                        OptionsCancelBtn,
+                    )).with_children(|b| {
+                        b.spawn(TextBundle::from_section(
+                            "Cancel",
+                            TextStyle { font_size: 12.0, color: Color::srgb(1.0, 0.9, 0.7), ..default() }
+                        ));
+                    });
                 });
             });
         });
@@ -1154,6 +1857,7 @@ pub fn handle_hotbar_casting_system(
     (keys, keybinds): (Res<ButtonInput<KeyCode>>, Res<HotbarKeybinds>),
     (mut hotbar, mut spellbook_state): (ResMut<PreparedHotbarState>, ResMut<SpellbookWindowState>),
     (options_state, console): (Res<OptionsPanelState>, Res<ConsoleState>),
+    spell_drag: Res<SpellDragState>,
     slot_click_q: Query<(&Interaction, &HotbarSlotButton), Changed<Interaction>>,
     open_book_q: Query<&Interaction, (Changed<Interaction>, With<HotbarOpenSpellbookButton>)>,
     styles: (
@@ -1185,25 +1889,27 @@ pub fn handle_hotbar_casting_system(
     }
 
     // Check if slot was clicked (either to cast or to slot selected spell)
-    for (interaction, slot_btn) in slot_click_q.iter() {
-        if *interaction == Interaction::Pressed {
-            let slot = slot_btn.0;
-            if let Some(selected_spell) = spellbook_state.selected_spell_for_slotting.take() {
-                hotbar.slots[slot] = Some(selected_spell);
-                info!("Prepared spell into Hotbar Slot {}", slot + 1);
-            } else {
-                // Cast from slot
-                cast_slot(
-                    slot,
-                    &mut commands,
-                    &mut hotbar,
-                    &mut player_q,
-                    &camera_q,
-                    &mut meshes,
-                    &mut materials,
-                    tactical_state.as_deref_mut(),
-                    audio_handles.as_deref(),
-                );
+    if !spell_drag.is_dragging {
+        for (interaction, slot_btn) in slot_click_q.iter() {
+            if *interaction == Interaction::Pressed {
+                let slot = slot_btn.0;
+                if let Some(selected_spell) = spellbook_state.selected_spell_for_slotting.take() {
+                    hotbar.slots[slot] = Some(selected_spell);
+                    info!("Prepared spell into Hotbar Slot {}", slot + 1);
+                } else {
+                    // Cast from slot
+                    cast_slot(
+                        slot,
+                        &mut commands,
+                        &mut hotbar,
+                        &mut player_q,
+                        &camera_q,
+                        &mut meshes,
+                        &mut materials,
+                        tactical_state.as_deref_mut(),
+                        audio_handles.as_deref(),
+                    );
+                }
             }
         }
     }
@@ -1412,28 +2118,412 @@ fn cast_slot(
     info!("Cast {} from Slot {}", def.name, slot + 1);
 }
 
-pub fn handle_spellbook_interactions(
-    mut spellbook_state: ResMut<SpellbookWindowState>,
-    mut tab_clicks: Query<(&Interaction, &SpellbookTabButton), Changed<Interaction>>,
-    mut card_clicks: Query<(&Interaction, &SpellbookCardSelectButton), Changed<Interaction>>,
-    mut status_text_q: Query<&mut Text, With<SpellbookStatusText>>,
+pub fn update_spellbook_display_system(
+    spellbook_state: Res<SpellbookWindowState>,
+    mut text_q: Query<&mut Text>,
+    page_indicator_entities: Query<Entity, With<SpellbookPageIndicatorText>>,
+    rank_filter_entities: Query<Entity, With<SpellbookRankFilterText>>,
+    auto_uprank_entities: Query<Entity, With<SpellbookAutoUpRankText>>,
+    icon_text_entities: Query<(Entity, &SpellbookSlotIconText)>,
+    name_text_entities: Query<(Entity, &SpellbookSlotNameText)>,
+    rank_text_entities: Query<(Entity, &SpellbookSlotRankText)>,
+    cd_text_entities: Query<(Entity, &SpellbookSlotCooldownText)>,
+    mut color_q: Query<(&mut BackgroundColor, &mut BorderColor)>,
+    card_entities: Query<(Entity, &SpellbookSlotCard)>,
+    icon_box_entities: Query<(Entity, &SpellbookSlotIconBox)>,
+    tab_button_entities: Query<(Entity, &SpellbookTabButton)>,
 ) {
-    for (interaction, tab_btn) in tab_clicks.iter_mut() {
-        if *interaction == Interaction::Pressed {
-            spellbook_state.category_filter = tab_btn.0;
+    if !spellbook_state.is_open {
+        return;
+    }
+
+    let filtered = get_filtered_spells(spellbook_state.category_filter, spellbook_state.rank_filter);
+    let total_pages = ((filtered.len() + 11) / 12).max(1);
+    let current_page = spellbook_state.current_page.min(total_pages - 1);
+
+    // 1. Page Indicator Text
+    if let Ok(entity) = page_indicator_entities.get_single() {
+        if let Ok(mut text) = text_q.get_mut(entity) {
+            text.sections[0].value = format!("Page {} of {}", current_page + 1, total_pages);
         }
     }
 
-    for (interaction, card_btn) in card_clicks.iter_mut() {
+    // 2. Rank Filter Checkbox Text
+    if let Ok(entity) = rank_filter_entities.get_single() {
+        if let Ok(mut text) = text_q.get_mut(entity) {
+            text.sections[0].value = if spellbook_state.rank_filter {
+                "[X] Rank Filter".to_string()
+            } else {
+                "[ ] Rank Filter".to_string()
+            };
+        }
+    }
+
+    // 3. Auto UpRank Checkbox Text
+    if let Ok(entity) = auto_uprank_entities.get_single() {
+        if let Ok(mut text) = text_q.get_mut(entity) {
+            text.sections[0].value = if spellbook_state.auto_uprank {
+                "[X] Auto UpRank".to_string()
+            } else {
+                "[ ] Auto UpRank".to_string()
+            };
+        }
+    }
+
+    // 4. Tab Buttons Styling
+    for (entity, tab_marker) in tab_button_entities.iter() {
+        if let Ok((mut bg, mut border)) = color_q.get_mut(entity) {
+            if tab_marker.0 == spellbook_state.category_filter {
+                *bg = Color::srgb(0.48, 0.35, 0.22).into();
+                *border = Color::srgb(0.92, 0.78, 0.42).into();
+            } else {
+                *bg = Color::srgb(0.24, 0.17, 0.12).into();
+                *border = Color::srgb(0.40, 0.30, 0.20).into();
+            }
+        }
+    }
+
+    // 5. Slot Cards Styling
+    for (entity, slot_card) in card_entities.iter() {
+        if let Ok((mut bg, mut border)) = color_q.get_mut(entity) {
+            let slot_idx = slot_card.0;
+            let spell_idx = current_page * 12 + slot_idx;
+            if spell_idx < filtered.len() {
+                let def = filtered[spell_idx];
+                let is_selected = spellbook_state.selected_spell_for_slotting.as_deref() == Some(def.id);
+                if is_selected {
+                    *bg = Color::srgba(0.95, 0.88, 0.65, 0.85).into();
+                    *border = Color::srgb(0.85, 0.60, 0.15).into();
+                } else {
+                    *bg = Color::srgba(0.84, 0.77, 0.64, 0.45).into();
+                    *border = Color::srgb(0.70, 0.62, 0.48).into();
+                }
+            } else {
+                *bg = Color::srgba(0.82, 0.75, 0.62, 0.15).into();
+                *border = Color::srgb(0.76, 0.70, 0.60).into();
+            }
+        }
+    }
+
+    // 6. Slot Icon Boxes Styling
+    for (entity, icon_box) in icon_box_entities.iter() {
+        if let Ok((mut bg, mut border)) = color_q.get_mut(entity) {
+            let slot_idx = icon_box.0;
+            let spell_idx = current_page * 12 + slot_idx;
+            if spell_idx < filtered.len() {
+                let def = filtered[spell_idx];
+                *bg = Color::srgb(0.14, 0.11, 0.08).into();
+                *border = def.color.into();
+            } else {
+                *bg = Color::srgb(0.25, 0.20, 0.15).into();
+                *border = Color::srgb(0.42, 0.35, 0.28).into();
+            }
+        }
+    }
+
+    // 7. Icon Text
+    for (entity, icon_marker) in icon_text_entities.iter() {
+        if let Ok(mut text) = text_q.get_mut(entity) {
+            let slot_idx = icon_marker.0;
+            let spell_idx = current_page * 12 + slot_idx;
+            if spell_idx < filtered.len() {
+                let def = filtered[spell_idx];
+                text.sections[0].value = def.icon.to_string();
+                text.sections[0].style.color = def.color;
+            } else {
+                text.sections[0].value = "".to_string();
+            }
+        }
+    }
+
+    // 8. Name Text
+    for (entity, name_marker) in name_text_entities.iter() {
+        if let Ok(mut text) = text_q.get_mut(entity) {
+            let slot_idx = name_marker.0;
+            let spell_idx = current_page * 12 + slot_idx;
+            if spell_idx < filtered.len() {
+                let def = filtered[spell_idx];
+                text.sections[0].value = def.name.to_string();
+                text.sections[0].style.color = Color::srgb(0.18, 0.10, 0.05);
+            } else {
+                text.sections[0].value = "(Empty Slot)".to_string();
+                text.sections[0].style.color = Color::srgb(0.55, 0.48, 0.40);
+            }
+        }
+    }
+
+    // 9. Rank Text
+    for (entity, rank_marker) in rank_text_entities.iter() {
+        if let Ok(mut text) = text_q.get_mut(entity) {
+            let slot_idx = rank_marker.0;
+            let spell_idx = current_page * 12 + slot_idx;
+            if spell_idx < filtered.len() {
+                let def = filtered[spell_idx];
+                text.sections[0].value = def.rank.to_string();
+                text.sections[0].style.color = Color::srgb(0.48, 0.38, 0.26);
+            } else {
+                text.sections[0].value = "".to_string();
+            }
+        }
+    }
+
+    // 10. Cooldown Text
+    for (entity, cd_marker) in cd_text_entities.iter() {
+        if let Ok(mut text) = text_q.get_mut(entity) {
+            let slot_idx = cd_marker.0;
+            let spell_idx = current_page * 12 + slot_idx;
+            if spell_idx < filtered.len() {
+                let def = filtered[spell_idx];
+                text.sections[0].value = format!("{:.1}s CD", def.cooldown_seconds);
+                text.sections[0].style.color = Color::srgb(0.55, 0.40, 0.25);
+            } else {
+                text.sections[0].value = "".to_string();
+            }
+        }
+    }
+}
+
+pub fn handle_spellbook_interactions(
+    mut spellbook_state: ResMut<SpellbookWindowState>,
+    mut status_text_q: Query<&mut Text, With<SpellbookStatusText>>,
+    mut spellbook_q: Query<&mut Style, With<SpellbookModalRoot>>,
+    mut window_q: Query<&mut Window, With<PrimaryWindow>>,
+    camera_mode: Res<State<CameraMode>>,
+    tab_clicks: Query<(&Interaction, &SpellbookTabButton), Changed<Interaction>>,
+    close_clicks: Query<&Interaction, (Changed<Interaction>, With<SpellbookCloseBtn>)>,
+    prev_clicks: Query<&Interaction, (Changed<Interaction>, With<SpellbookPrevPageBtn>)>,
+    next_clicks: Query<&Interaction, (Changed<Interaction>, With<SpellbookNextPageBtn>)>,
+    rank_toggle_clicks: Query<&Interaction, (Changed<Interaction>, With<SpellbookRankFilterToggle>)>,
+    auto_uprank_clicks: Query<&Interaction, (Changed<Interaction>, With<SpellbookAutoUpRankToggle>)>,
+    slot_clicks: Query<(&Interaction, &SpellbookSlotCard), Changed<Interaction>>,
+) {
+    if !spellbook_state.is_open {
+        return;
+    }
+
+    // Close button
+    for interaction in close_clicks.iter() {
         if *interaction == Interaction::Pressed {
-            spellbook_state.selected_spell_for_slotting = Some(card_btn.0.clone());
-            if let Ok(mut text) = status_text_q.get_single_mut() {
-                if let Some(def) = get_spell_by_id(&card_btn.0) {
-                    text.sections[0].value = format!("SELECTED: '{}' -> Now CLICK a Hotbar Slot (1-16) to prepare it!", def.name);
-                    text.sections[0].style.color = Color::srgb(1.0, 0.9, 0.3);
+            spellbook_state.is_open = false;
+            if let Ok(mut style) = spellbook_q.get_single_mut() {
+                style.display = Display::None;
+            }
+            if let Ok(mut window) = window_q.get_single_mut() {
+                if *camera_mode.get() == CameraMode::FPS {
+                    window.cursor.grab_mode = CursorGrabMode::Locked;
+                    window.cursor.visible = false;
+                }
+            }
+            return;
+        }
+    }
+
+    // Category Tabs
+    for (interaction, tab_btn) in tab_clicks.iter() {
+        if *interaction == Interaction::Pressed {
+            spellbook_state.category_filter = tab_btn.0;
+            spellbook_state.current_page = 0;
+        }
+    }
+
+    let filtered = get_filtered_spells(spellbook_state.category_filter, spellbook_state.rank_filter);
+    let total_pages = ((filtered.len() + 11) / 12).max(1);
+
+    // Prev Page Button
+    for interaction in prev_clicks.iter() {
+        if *interaction == Interaction::Pressed {
+            if spellbook_state.current_page > 0 {
+                spellbook_state.current_page -= 1;
+            }
+        }
+    }
+
+    // Next Page Button
+    for interaction in next_clicks.iter() {
+        if *interaction == Interaction::Pressed {
+            if spellbook_state.current_page + 1 < total_pages {
+                spellbook_state.current_page += 1;
+            }
+        }
+    }
+
+    // Rank Filter Toggle
+    for interaction in rank_toggle_clicks.iter() {
+        if *interaction == Interaction::Pressed {
+            spellbook_state.rank_filter = !spellbook_state.rank_filter;
+            spellbook_state.current_page = 0;
+        }
+    }
+
+    // Auto UpRank Toggle
+    for interaction in auto_uprank_clicks.iter() {
+        if *interaction == Interaction::Pressed {
+            spellbook_state.auto_uprank = !spellbook_state.auto_uprank;
+        }
+    }
+
+    // Spell Slot Selection
+    for (interaction, slot_btn) in slot_clicks.iter() {
+        if *interaction == Interaction::Pressed {
+            let spell_idx = spellbook_state.current_page * 12 + slot_btn.0;
+            if spell_idx < filtered.len() {
+                let def = filtered[spell_idx];
+                spellbook_state.selected_spell_for_slotting = Some(def.id.to_string());
+                if let Ok(mut text) = status_text_q.get_single_mut() {
+                    text.sections[0].value = format!(
+                        "SELECTED: '{}' ({}) -> Click Hotbar Slot (1-16) to prepare!",
+                        def.name, def.rank
+                    );
+                    text.sections[0].style.color = Color::srgb(0.65, 0.22, 0.08);
                 }
             }
         }
+    }
+}
+
+fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, window: &Window) -> Rect {
+    let screen_center = Vec2::new(
+        transform.translation().x + window.width() * 0.5,
+        -transform.translation().y + window.height() * 0.5,
+    );
+    Rect::from_center_size(screen_center, node.size())
+}
+
+pub fn handle_spell_drag_and_drop(
+    mouse: Res<ButtonInput<MouseButton>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    card_query: Query<(&SpellbookSlotCard, &GlobalTransform, &Node)>,
+    hotbar_slot_q: Query<(&HotbarSlotButton, &GlobalTransform, &Node)>,
+    mut spell_drag: ResMut<SpellDragState>,
+    mut hotbar: ResMut<PreparedHotbarState>,
+    mut spellbook_state: ResMut<SpellbookWindowState>,
+) {
+    let Ok(window) = window_query.get_single() else { return; };
+    let Some(cursor_pos) = window.cursor_position() else { return; };
+
+    let filtered = get_filtered_spells(spellbook_state.category_filter, spellbook_state.rank_filter);
+
+    // Right-Click on Hotbar Slot: Clear / Unprepare slot!
+    if mouse.just_pressed(MouseButton::Right) {
+        for (slot_btn, transform, node) in hotbar_slot_q.iter() {
+            let rect = ui_node_screen_rect(transform, node, window);
+            if rect.contains(cursor_pos) {
+                if hotbar.slots[slot_btn.0].is_some() {
+                    info!("Unprepared spell from Hotbar Slot {}", slot_btn.0 + 1);
+                    hotbar.slots[slot_btn.0] = None;
+                    hotbar.cooldowns[slot_btn.0] = 0.0;
+                }
+                return;
+            }
+        }
+    }
+
+    // Left-Click: Begin Drag from Spellbook Card OR Hotbar Slot
+    if mouse.just_pressed(MouseButton::Left) {
+        // Check spellbook cards if spellbook is open
+        if spellbook_state.is_open {
+            for (card, transform, node) in card_query.iter() {
+                let rect = ui_node_screen_rect(transform, node, window);
+                if rect.contains(cursor_pos) {
+                    let spell_idx = spellbook_state.current_page * 12 + card.0;
+                    if spell_idx < filtered.len() {
+                        let def = filtered[spell_idx];
+                        spell_drag.is_dragging = true;
+                        spell_drag.source_slot = None;
+                        spell_drag.spell_id = Some(def.id.to_string());
+                        spell_drag.current_pos = cursor_pos;
+                        spellbook_state.selected_spell_for_slotting = Some(def.id.to_string());
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Check hotbar slots to drag/reorder prepared spells
+        for (slot_btn, transform, node) in hotbar_slot_q.iter() {
+            let rect = ui_node_screen_rect(transform, node, window);
+            if rect.contains(cursor_pos) {
+                if let Some(spell_id) = &hotbar.slots[slot_btn.0] {
+                    spell_drag.is_dragging = true;
+                    spell_drag.source_slot = Some(slot_btn.0);
+                    spell_drag.spell_id = Some(spell_id.clone());
+                    spell_drag.current_pos = cursor_pos;
+                    return;
+                }
+            }
+        }
+    }
+
+    if mouse.pressed(MouseButton::Left) && spell_drag.is_dragging {
+        spell_drag.current_pos = cursor_pos;
+    }
+
+    if mouse.just_released(MouseButton::Left) && spell_drag.is_dragging {
+        let mut target_slot = None;
+        for (slot_btn, transform, node) in hotbar_slot_q.iter() {
+            let rect = ui_node_screen_rect(transform, node, window);
+            if rect.contains(cursor_pos) {
+                target_slot = Some(slot_btn.0);
+                break;
+            }
+        }
+
+        if let Some(target) = target_slot {
+            if let Some(source) = spell_drag.source_slot {
+                if source != target {
+                    // Swap hotbar slots
+                    let temp = hotbar.slots[target].take();
+                    hotbar.slots[target] = spell_drag.spell_id.take();
+                    hotbar.slots[source] = temp;
+                    let temp_cd = hotbar.cooldowns[target];
+                    hotbar.cooldowns[target] = hotbar.cooldowns[source];
+                    hotbar.cooldowns[source] = temp_cd;
+                    info!("Swapped Hotbar Slot {} with Slot {}", source + 1, target + 1);
+                }
+            } else if let Some(spell_id) = spell_drag.spell_id.take() {
+                // Dragged from spellbook into hotbar slot
+                info!("Prepared spell '{}' into Hotbar Slot {}", spell_id, target + 1);
+                hotbar.slots[target] = Some(spell_id);
+                hotbar.cooldowns[target] = 0.0;
+                spellbook_state.selected_spell_for_slotting = None;
+            }
+        } else if let Some(source) = spell_drag.source_slot {
+            // Dragged hotbar spell off into empty space: clear the slot
+            info!("Dragged spell off hotbar: Cleared Hotbar Slot {}", source + 1);
+            hotbar.slots[source] = None;
+            hotbar.cooldowns[source] = 0.0;
+        }
+
+        spell_drag.is_dragging = false;
+        spell_drag.source_slot = None;
+        spell_drag.spell_id = None;
+    }
+}
+
+pub fn update_spell_drag_ghost_ui(
+    spell_drag: Res<SpellDragState>,
+    mut ghost_query: Query<&mut Style, With<SpellDragGhostUi>>,
+    mut text_query: Query<&mut Text, With<SpellDragGhostText>>,
+) {
+    let Ok(mut style) = ghost_query.get_single_mut() else { return; };
+    let Ok(mut text) = text_query.get_single_mut() else { return; };
+
+    if spell_drag.is_dragging {
+        style.display = Display::Flex;
+        style.left = Val::Px(spell_drag.current_pos.x - 36.0);
+        style.top = Val::Px(spell_drag.current_pos.y - 18.0);
+        let label = if let Some(spell_id) = &spell_drag.spell_id {
+            if let Some(def) = get_spell_by_id(spell_id) {
+                def.name
+            } else {
+                spell_id.as_str()
+            }
+        } else {
+            "Spell"
+        };
+        text.sections[0].value = label.to_string();
+    } else {
+        style.display = Display::None;
     }
 }
 
@@ -1454,6 +2544,10 @@ pub fn handle_options_panel_interactions(
         Query<&mut Window, With<PrimaryWindow>>,
         Query<&mut Text, (With<OptionsReticleStatusText>, Without<OptionsPerfMetricsText>)>,
         Query<&mut Text, (With<OptionsPerfMetricsText>, Without<OptionsReticleStatusText>)>,
+        Query<(&OptionsTabContent, &mut Style), (Without<OptionsPanelModalRoot>, Without<PrimaryWindow>)>,
+        Query<(&OptionsTabButton, &mut BackgroundColor, &mut BorderColor)>,
+        Query<(&OptionsTabButtonText, &mut Text), (Without<OptionsReticleStatusText>, Without<OptionsPerfMetricsText>, Without<OptionsKeybindRebindText>)>,
+        Query<(&OptionsKeybindRebindText, &mut Text), (Without<OptionsReticleStatusText>, Without<OptionsPerfMetricsText>, Without<OptionsTabButtonText>)>,
     ),
     buttons: (
         Query<&Interaction, (Changed<Interaction>, With<OptionsReticleToggleBtn>)>,
@@ -1463,30 +2557,120 @@ pub fn handle_options_panel_interactions(
         Query<&Interaction, (Changed<Interaction>, With<OptionsKeybindResetBtn>)>,
         Query<&Interaction, (Changed<Interaction>, With<OptionsCloseBtn>)>,
     ),
+    wow_buttons: (
+        Query<(&Interaction, &OptionsTabButton), Changed<Interaction>>,
+        Query<&Interaction, (Changed<Interaction>, With<OptionsOkayBtn>)>,
+        Query<&Interaction, (Changed<Interaction>, With<OptionsCancelBtn>)>,
+        Query<&Interaction, (Changed<Interaction>, With<OptionsRecommendedBtn>)>,
+        Query<&Interaction, (Changed<Interaction>, With<OptionsClassicBtn>)>,
+        Query<&Interaction, (Changed<Interaction>, With<OptionsApplyBtn>)>,
+    ),
 ) {
-    let (mut options_q, mut window_q, mut reticle_status_q, mut perf_text_q) = ui_queries;
+    let (mut options_q, mut window_q, mut reticle_status_q, mut perf_text_q, mut tab_content_q, mut tab_btn_style_q, mut tab_btn_text_q, mut rebind_text_q) = ui_queries;
     let (reticle_btn_q, range_btn_q, spawn_zone_q, rebind_btn_q, reset_btn_q, close_btn_q) = buttons;
+    let (tab_clicks_q, okay_btn_q, cancel_btn_q, recommended_btn_q, classic_btn_q, apply_btn_q) = wow_buttons;
     if !options_state.is_open {
         return;
     }
 
-    // Close button
-    for interaction in close_btn_q.iter() {
+    // 1. Tab Switching
+    for (interaction, tab_btn) in tab_clicks_q.iter() {
         if *interaction == Interaction::Pressed {
-            options_state.is_open = false;
-            if let Ok(mut style) = options_q.get_single_mut() {
-                style.display = Display::None;
+            options_state.active_tab = tab_btn.0;
+            for (content, mut style) in tab_content_q.iter_mut() {
+                style.display = if content.0 == options_state.active_tab {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
             }
-            if let Ok(mut window) = window_q.get_single_mut() {
-                if *camera_mode.get() == CameraMode::FPS {
-                    window.cursor.grab_mode = CursorGrabMode::Locked;
-                    window.cursor.visible = false;
+            for (btn, mut bg, mut bc) in tab_btn_style_q.iter_mut() {
+                if btn.0 == options_state.active_tab {
+                    *bg = Color::srgba(0.85, 0.70, 0.15, 0.45).into();
+                    *bc = Color::srgb(1.0, 0.85, 0.25).into();
+                } else {
+                    *bg = Color::NONE.into();
+                    *bc = Color::NONE.into();
+                }
+            }
+            for (text_marker, mut text) in tab_btn_text_q.iter_mut() {
+                if text_marker.0 == options_state.active_tab {
+                    text.sections[0].style.color = Color::srgb(1.0, 0.90, 0.35);
+                } else {
+                    text.sections[0].style.color = Color::srgb(0.80, 0.80, 0.80);
                 }
             }
         }
     }
 
-    // Reticle ON/OFF Toggle
+    // 2. Close / Okay / Cancel buttons
+    let mut should_close = false;
+    for interaction in close_btn_q.iter() {
+        if *interaction == Interaction::Pressed {
+            should_close = true;
+        }
+    }
+    for interaction in okay_btn_q.iter() {
+        if *interaction == Interaction::Pressed {
+            should_close = true;
+        }
+    }
+    for interaction in cancel_btn_q.iter() {
+        if *interaction == Interaction::Pressed {
+            should_close = true;
+        }
+    }
+    if should_close {
+        options_state.is_open = false;
+        if let Ok(mut style) = options_q.get_single_mut() {
+            style.display = Display::None;
+        }
+        if let Ok(mut window) = window_q.get_single_mut() {
+            if *camera_mode.get() == CameraMode::FPS {
+                window.cursor.grab_mode = CursorGrabMode::Locked;
+                window.cursor.visible = false;
+            }
+        }
+    }
+
+    // 3. Recommended & Classic presets buttons
+    for interaction in recommended_btn_q.iter() {
+        if *interaction == Interaction::Pressed {
+            render_settings.view_distance_chunks = 16;
+            render_settings.unload_distance_chunks = 19;
+            render_settings.spawn_full_zone = false;
+            render_settings.visible_range_meters = 256.0;
+            crosshair_settings.enabled = true;
+            if let Ok(mut text) = reticle_status_q.get_single_mut() {
+                text.sections[0].value = "RETICLE: ON".into();
+                text.sections[0].style.color = Color::srgb(0.2, 1.0, 0.4);
+            }
+            info!("Applied Recommended Graphics profile: 256m (16 chunks), Reticle ON.");
+        }
+    }
+
+    for interaction in classic_btn_q.iter() {
+        if *interaction == Interaction::Pressed {
+            render_settings.view_distance_chunks = 10;
+            render_settings.unload_distance_chunks = 13;
+            render_settings.spawn_full_zone = false;
+            render_settings.visible_range_meters = 160.0;
+            crosshair_settings.enabled = true;
+            if let Ok(mut text) = reticle_status_q.get_single_mut() {
+                text.sections[0].value = "RETICLE: ON".into();
+                text.sections[0].style.color = Color::srgb(0.2, 1.0, 0.4);
+            }
+            info!("Applied Classic Graphics profile: 160m (10 chunks), Reticle ON.");
+        }
+    }
+
+    for interaction in apply_btn_q.iter() {
+        if *interaction == Interaction::Pressed {
+            info!("Settings applied.");
+        }
+    }
+
+    // 4. Reticle ON/OFF Toggle
     for interaction in reticle_btn_q.iter() {
         if *interaction == Interaction::Pressed {
             crosshair_settings.enabled = !crosshair_settings.enabled;
@@ -1502,7 +2686,7 @@ pub fn handle_options_panel_interactions(
         }
     }
 
-    // Visible range preset buttons
+    // 5. Visible range preset buttons
     for (interaction, preset_btn) in range_btn_q.iter() {
         if *interaction == Interaction::Pressed {
             render_settings.view_distance_chunks = preset_btn.0;
@@ -1513,7 +2697,7 @@ pub fn handle_options_panel_interactions(
         }
     }
 
-    // Spawn entire zone button
+    // 6. Spawn entire zone button
     for interaction in spawn_zone_q.iter() {
         if *interaction == Interaction::Pressed {
             render_settings.view_distance_chunks = 64;
@@ -1524,35 +2708,52 @@ pub fn handle_options_panel_interactions(
         }
     }
 
-    // Hotbar keybind rebinding button click
+    // 7. Hotbar keybind rebinding
     for (interaction, rebind_btn) in rebind_btn_q.iter() {
         if *interaction == Interaction::Pressed {
             options_state.rebinding_slot = Some(rebind_btn.0);
+            for (marker, mut text) in rebind_text_q.iter_mut() {
+                if marker.0 == rebind_btn.0 {
+                    text.sections[0].value = format!("S{}: [...]", marker.0 + 1);
+                    text.sections[0].style.color = Color::srgb(1.0, 0.85, 0.2);
+                }
+            }
             info!("Listening for new keybind for Hotbar Slot {}", rebind_btn.0 + 1);
         }
     }
 
-    // Capture next key press if rebinding
     if let Some(slot) = options_state.rebinding_slot {
         for key in keys.get_just_pressed() {
             if *key != KeyCode::Escape && *key != KeyCode::KeyO {
                 keybinds.keybinds[slot] = *key;
                 info!("Rebound Hotbar Slot {} to {:?}", slot + 1, key);
+                for (marker, mut text) in rebind_text_q.iter_mut() {
+                    if marker.0 == slot {
+                        text.sections[0].value = format!("S{}: [{}]", slot + 1, keycode_display_name(*key));
+                        text.sections[0].style.color = Color::WHITE;
+                    }
+                }
                 options_state.rebinding_slot = None;
                 break;
             }
         }
     }
 
-    // Reset keybinds
     for interaction in reset_btn_q.iter() {
         if *interaction == Interaction::Pressed {
             *keybinds = HotbarKeybinds::default();
+            for (marker, mut text) in rebind_text_q.iter_mut() {
+                if marker.0 < 16 {
+                    let k = keybinds.keybinds[marker.0];
+                    text.sections[0].value = format!("S{}: [{}]", marker.0 + 1, keycode_display_name(k));
+                    text.sections[0].style.color = Color::WHITE;
+                }
+            }
             info!("Reset all 16 hotbar keybinds to defaults.");
         }
     }
 
-    // Update live performance metrics text
+    // 8. Update live performance metrics text
     if let Ok(mut text) = perf_text_q.get_single_mut() {
         let fps = diagnostics
             .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS)
@@ -1608,6 +2809,7 @@ impl Plugin for SpellbookPlugin {
             .init_resource::<SpellbookWindowState>()
             .init_resource::<OptionsPanelState>()
             .init_resource::<TerrainRenderSettings>()
+            .init_resource::<SpellDragState>()
             .add_systems(OnEnter(GameState::InGame), (
                 setup_prepared_hotbar_ui,
                 setup_spellbook_modal_ui,
@@ -1617,6 +2819,9 @@ impl Plugin for SpellbookPlugin {
                 toggle_options_and_spellbook_system,
                 update_hotbar_ui_system,
                 handle_hotbar_casting_system,
+                handle_spell_drag_and_drop,
+                update_spell_drag_ghost_ui,
+                update_spellbook_display_system,
                 handle_spellbook_interactions,
                 handle_options_panel_interactions,
                 sync_terrain_render_and_fog_system,
@@ -1634,7 +2839,7 @@ mod tests {
 
     #[test]
     fn test_spell_catalog_integrity() {
-        assert_eq!(SPELL_CATALOG.len(), 16, "Spell catalog must contain 16 spells");
+        assert!(SPELL_CATALOG.len() >= 16, "Spell catalog must contain at least 16 spells");
         let mut ids = std::collections::BTreeSet::new();
         for spell in SPELL_CATALOG {
             assert!(!spell.name.is_empty(), "Spell must have a name");
@@ -1644,6 +2849,19 @@ mod tests {
             assert!(ids.insert(spell.id), "Duplicate spell ID: {}", spell.id);
             assert!(get_spell_by_id(spell.id).is_some());
         }
+    }
+
+    #[test]
+    fn test_spellbook_pagination_and_filtering() {
+        let all_spells = get_filtered_spells(None, false);
+        assert_eq!(all_spells.len(), 21);
+        let arcane_spells = get_filtered_spells(Some(SpellCategory::Arcane), false);
+        assert_eq!(arcane_spells.len(), 5);
+        for s in &arcane_spells {
+            assert_eq!(s.category, SpellCategory::Arcane);
+        }
+        let elemental_spells = get_filtered_spells(Some(SpellCategory::Elemental), false);
+        assert_eq!(elemental_spells.len(), 5);
     }
 
     #[test]
@@ -1665,11 +2883,13 @@ mod tests {
     fn test_prepared_hotbar_slotting_and_cooldowns() {
         let mut hotbar = PreparedHotbarState::default();
         assert_eq!(hotbar.slots.len(), 16);
-        assert_eq!(hotbar.slots[0].as_deref(), Some("phase_dash"));
-        assert_eq!(hotbar.slots[4].as_deref(), Some("fireball"));
+        assert_eq!(hotbar.slots[0].as_deref(), None);
+        assert_eq!(hotbar.slots[4].as_deref(), None);
 
         // Slot custom spell
+        hotbar.slots[0] = Some("phase_dash".into());
         hotbar.slots[15] = Some("solar_flare".into());
+        assert_eq!(hotbar.slots[0].as_deref(), Some("phase_dash"));
         assert_eq!(hotbar.slots[15].as_deref(), Some("solar_flare"));
 
         // Cooldown timer progression
@@ -1709,5 +2929,16 @@ mod tests {
         // Toggle ON
         settings.enabled = !settings.enabled;
         assert!(settings.enabled, "Reticle should be toggled ON");
+    }
+
+    #[test]
+    fn test_spellbook_systems_ecs_schedule_initialization() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<SpellbookWindowState>();
+        app.add_systems(Update, update_spellbook_display_system);
+        // Validates that Bevy ECS initializes and runs update_spellbook_display_system
+        // with zero B0001 query conflicts
+        app.update();
     }
 }

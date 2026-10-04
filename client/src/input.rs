@@ -107,6 +107,7 @@ pub fn hotbar_input_system(
     console: Res<ConsoleState>,
     mut active_slot: ResMut<ActiveItemSlot>,
     mut active_item: ResMut<ActiveEquippedItem>,
+    mut active_offhand: ResMut<ActiveOffHandItem>,
     hand_side: Res<EquippedHandSide>,
     conn: Res<SpacetimeConnection>,
 ) {
@@ -129,16 +130,21 @@ pub fn hotbar_input_system(
     let Some(player) = conn.db.db.player().identity().find(identity) else { return; };
     let inv = conn.db.db.inventory().entity_id().find(&player.entity_id);
 
+    let equip_to_offhand = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) || hand_side.0 == HandSide::Left;
+
+    let alt_held = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+
     for (key, slot_idx) in digit_keys {
-        if keys.just_pressed(key) {
+        if alt_held && keys.just_pressed(key) {
             active_slot.0 = slot_idx;
-            info!("Hotbar Slot {} Selected", slot_idx + 1);
+            info!("Inventory Quick-Slot {} Selected (Alt+{})", slot_idx + 1, slot_idx + 1);
             if let Some(ref inventory) = inv {
                 if let Some(slot) = inventory.slots.get(slot_idx) {
                     if slot.count > 0 && !slot.item_type.is_empty() {
-                        let hand_str = match hand_side.0 {
-                            HandSide::Right => "MainHand".to_string(),
-                            HandSide::Left => "OffHand".to_string(),
+                        let hand_str = if equip_to_offhand {
+                            "OffHand".to_string()
+                        } else {
+                            "MainHand".to_string()
                         };
                         info!("Equipping '{}' to {}", slot.item_type, hand_str);
                         let _ = conn.db.reducers.equip_weapon(hand_str, slot.item_type.clone());
@@ -151,27 +157,19 @@ pub fn hotbar_input_system(
     // Read authoritative equipped weapon from SpacetimeDB EquipmentLoadout
     let loadout = conn.db.db.equipment_loadout().entity_id().find(&player.entity_id);
     if let Some(l) = loadout {
-        let equipped = match hand_side.0 {
-            HandSide::Right => {
-                if l.main_hand != "None" && !l.main_hand.is_empty() {
-                    Some(l.main_hand)
-                } else {
-                    None
-                }
-            }
-            HandSide::Left => {
-                if l.off_hand != "None" && !l.off_hand.is_empty() {
-                    Some(l.off_hand)
-                } else if l.main_hand != "None" && !l.main_hand.is_empty() {
-                    Some(l.main_hand)
-                } else {
-                    None
-                }
-            }
+        active_item.0 = if l.main_hand != "None" && !l.main_hand.is_empty() {
+            Some(l.main_hand.clone())
+        } else {
+            None
         };
-        active_item.0 = equipped;
+        active_offhand.0 = if l.off_hand != "None" && !l.off_hand.is_empty() {
+            Some(l.off_hand.clone())
+        } else {
+            None
+        };
     } else {
         active_item.0 = None;
+        active_offhand.0 = None;
     }
 }
 
@@ -251,6 +249,7 @@ pub fn context_aware_action_dispatcher(
     keys: Res<ButtonInput<KeyCode>>,
     mut swing_state: ResMut<SwingState>,
     active_item: Res<ActiveEquippedItem>,
+    hand_side: Res<EquippedHandSide>,
     queries: ActionContextQueries,
     spatial_query: SpatialQuery,
     mut selection_state: ResMut<SelectionState>,
@@ -275,23 +274,243 @@ pub fn context_aware_action_dispatcher(
     for event in action_events.read() {
         match camera_mode.get() {
             CameraMode::FPS => {
-                match event.action {
-                    VirtualAction::Secondary if event.state == ActionState::JustPressed => {
-                        if weapons.weapon_state.current_weapon == WeaponType::Bow && weapons.weapon_state.bow_drawing {
-                            weapons.weapon_state.bow_drawing = false;
-                            weapons.weapon_state.bow_charge = 0.0;
-                        } else if is_holding_hammer && !event.is_over_ui {
-                            if let Ok(mut style) = ui_queries.build_menu.get_single_mut() {
-                                let opening = style.display == Display::None;
-                                style.display = if opening { Display::Flex } else { Display::None };
-                                if let Ok(mut window) = ui_queries.window.get_single_mut() {
-                                    window.cursor.grab_mode = if opening { CursorGrabMode::None } else { CursorGrabMode::Locked };
-                                    window.cursor.visible = opening;
+                let is_left_primary = hand_side.0 == HandSide::Left;
+                let trigger_offhand = (!is_left_primary && event.action == VirtualAction::Secondary)
+                    || (is_left_primary && event.action == VirtualAction::Primary);
+                let trigger_mainhand = (!is_left_primary && event.action == VirtualAction::Primary)
+                    || (is_left_primary && event.action == VirtualAction::Secondary);
+
+                if trigger_offhand && event.state == ActionState::JustPressed {
+                    if weapons.weapon_state.current_weapon == WeaponType::Bow && weapons.weapon_state.bow_drawing {
+                        weapons.weapon_state.bow_drawing = false;
+                        weapons.weapon_state.bow_charge = 0.0;
+                    } else if is_holding_hammer && weapons.weapon_state.offhand_weapon == WeaponType::None && !event.is_over_ui {
+                        if let Ok(mut style) = ui_queries.build_menu.get_single_mut() {
+                            let opening = style.display == Display::None;
+                            style.display = if opening { Display::Flex } else { Display::None };
+                            if let Ok(mut window) = ui_queries.window.get_single_mut() {
+                                window.cursor.grab_mode = if opening { CursorGrabMode::None } else { CursorGrabMode::Locked };
+                                window.cursor.visible = opening;
+                            }
+                        }
+                    } else if !event.is_over_ui && !build_state.is_active {
+                        // Off-Hand attack execution (dual-wielding / unarmed left-jab)
+                        if let Ok(cam_transform) = queries.fps_camera.get_single() {
+                            if let Ok((player_entity, _)) = queries.player.get_single() {
+                                let origin = cam_transform.translation();
+                                let dir = cam_transform.forward().as_vec3();
+
+                                match weapons.weapon_state.offhand_weapon {
+                                    WeaponType::Revolver => {
+                                        if weapons.weapon_state.revolver_ammo > 0 && weapons.weapon_state.revolver_cooldown.finished() && !weapons.weapon_state.revolver_is_reloading {
+                                            weapons.weapon_state.revolver_ammo -= 1;
+                                            weapons.weapon_state.revolver_cooldown.reset();
+
+                                            weapons.weapon_state.offhand_recoil_offset += Vec3::new(0.0, 0.065, 0.11);
+                                            weapons.weapon_state.offhand_recoil_rot *= Quat::from_rotation_x(-0.48);
+                                            weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 8.0).min(30.0);
+
+                                            let hit = spatial_query.cast_ray(
+                                                origin, cam_transform.forward(), 80.0, true,
+                                                SpatialQueryFilter::from_excluded_entities([player_entity]),
+                                            );
+                                            let distance = hit.map_or(80.0, |h| h.time_of_impact);
+                                            let mid_point = origin + dir * (distance / 2.0);
+                                            let mut tracer_transform = BevyTransform::from_translation(mid_point)
+                                                .looking_at(origin + dir * distance, Vec3::Y);
+                                            tracer_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+
+                                            commands.spawn((
+                                                PbrBundle {
+                                                    mesh: weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.018, distance)),
+                                                    material: weapons.materials.add(StandardMaterial {
+                                                        base_color: Color::srgb(1.0, 0.92, 0.6), unlit: true, ..default()
+                                                    }),
+                                                    transform: tracer_transform, ..default()
+                                                },
+                                                Particle { timer: Timer::from_seconds(0.06, TimerMode::Once) },
+                                            ));
+
+                                            let _ = conn.db.reducers.fire_weapon(
+                                                tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                            );
+
+                                            if weapons.weapon_state.revolver_ammo == 0 {
+                                                weapons.weapon_state.revolver_is_reloading = true;
+                                                weapons.weapon_state.revolver_reload_timer.reset();
+                                            }
+                                        }
+                                    }
+                                    WeaponType::HandCrossbow => {
+                                        if weapons.weapon_state.hand_crossbow_loaded {
+                                            weapons.weapon_state.hand_crossbow_loaded = false;
+                                            weapons.weapon_state.hand_crossbow_reload_timer.reset();
+
+                                            weapons.weapon_state.offhand_recoil_offset += Vec3::new(0.0, 0.025, 0.04);
+                                            weapons.weapon_state.offhand_recoil_rot *= Quat::from_rotation_x(-0.20);
+
+                                            let dart_speed = 52.0;
+                                            let tracer_mesh = weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.015, 0.4));
+                                            let tracer_mat = weapons.materials.add(StandardMaterial {
+                                                base_color: Color::srgb(0.7, 0.75, 0.8),
+                                                unlit: true,
+                                                ..default()
+                                            });
+
+                                            let mut dart_transform = BevyTransform::from_translation(origin + dir * 0.7)
+                                                .looking_at(origin + dir * 5.0, Vec3::Y);
+                                            dart_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+
+                                            commands.spawn((
+                                                PbrBundle {
+                                                    mesh: tracer_mesh,
+                                                    material: tracer_mat,
+                                                    transform: dart_transform,
+                                                    ..default()
+                                                },
+                                                RigidBody::Dynamic,
+                                                LinearVelocity(dir * dart_speed),
+                                                Particle { timer: Timer::from_seconds(1.0, TimerMode::Once) },
+                                            ));
+
+                                            let _ = conn.db.reducers.fire_bow(
+                                                tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                            );
+                                        }
+                                    }
+                                    WeaponType::Wand => {
+                                        weapons.weapon_state.offhand_recoil_offset += Vec3::new(0.0, 0.02, 0.05);
+                                        weapons.weapon_state.offhand_recoil_rot *= Quat::from_rotation_x(-0.22);
+                                        weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 3.0).min(25.0);
+
+                                        let hit = spatial_query.cast_ray(
+                                            origin, cam_transform.forward(), 60.0, true,
+                                            SpatialQueryFilter::from_excluded_entities([player_entity]),
+                                        );
+                                        let distance = hit.map_or(60.0, |h| h.time_of_impact);
+                                        let mid_point = origin + dir * (distance / 2.0);
+                                        let mut tracer_transform = BevyTransform::from_translation(mid_point)
+                                            .looking_at(origin + dir * distance, Vec3::Y);
+                                        tracer_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+
+                                        commands.spawn((
+                                            PbrBundle {
+                                                mesh: weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.025, distance)),
+                                                material: weapons.materials.add(StandardMaterial {
+                                                    base_color: Color::srgb(0.2, 0.85, 1.0),
+                                                    unlit: true,
+                                                    ..default()
+                                                }),
+                                                transform: tracer_transform, ..default()
+                                            },
+                                            Particle { timer: Timer::from_seconds(0.06, TimerMode::Once) },
+                                        ));
+
+                                        let _ = conn.db.reducers.fire_weapon(
+                                            tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                        );
+                                    }
+                                    WeaponType::Orb => {
+                                        weapons.weapon_state.offhand_recoil_offset += Vec3::new(0.0, 0.035, 0.08);
+                                        weapons.weapon_state.offhand_recoil_rot *= Quat::from_rotation_x(-0.35);
+                                        weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 6.0).min(30.0);
+
+                                        commands.spawn((
+                                            PbrBundle {
+                                                mesh: weapons.meshes.add(bevy::math::primitives::Sphere::new(0.16)),
+                                                material: weapons.materials.add(StandardMaterial {
+                                                    base_color: Color::srgb(0.9, 0.4, 1.0),
+                                                    unlit: true,
+                                                    ..default()
+                                                }),
+                                                transform: BevyTransform::from_translation(origin + dir * 0.8),
+                                                ..default()
+                                            },
+                                            RigidBody::Dynamic,
+                                            LinearVelocity(dir * 42.0),
+                                            Particle { timer: Timer::from_seconds(1.0, TimerMode::Once) },
+                                        ));
+
+                                        let _ = conn.db.reducers.fire_weapon(
+                                            tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                        );
+                                    }
+                                    WeaponType::Javelin => {
+                                        weapons.weapon_state.offhand_recoil_offset += Vec3::new(0.0, 0.03, -0.06);
+                                        weapons.weapon_state.offhand_recoil_rot *= Quat::from_rotation_x(-0.25);
+
+                                        let javelin_speed = 45.0;
+                                        let tracer_mesh = weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.022, 1.0));
+                                        let tracer_mat = weapons.materials.add(StandardMaterial {
+                                            base_color: Color::srgb(0.75, 0.65, 0.45),
+                                            unlit: true,
+                                            ..default()
+                                        });
+
+                                        let mut javelin_transform = BevyTransform::from_translation(origin + dir * 0.9)
+                                            .looking_at(origin + dir * 5.0, Vec3::Y);
+                                        javelin_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+
+                                        commands.spawn((
+                                            PbrBundle {
+                                                mesh: tracer_mesh,
+                                                material: tracer_mat,
+                                                transform: javelin_transform,
+                                                ..default()
+                                            },
+                                            RigidBody::Dynamic,
+                                            LinearVelocity(dir * javelin_speed),
+                                            Particle { timer: Timer::from_seconds(1.5, TimerMode::Once) },
+                                        ));
+
+                                        let _ = conn.db.reducers.fire_bow(
+                                            tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                        );
+                                    }
+                                    _ => {
+                                        // Melee & Unarmed
+                                        if !swing_state.offhand_is_swinging {
+                                            swing_state.offhand_is_swinging = true;
+                                            swing_state.offhand_timer.reset();
+
+                                            weapons.weapon_state.offhand_recoil_offset += Vec3::new(0.0, 0.03, -0.08);
+                                            weapons.weapon_state.offhand_recoil_rot *= Quat::from_rotation_y(-0.2);
+                                            weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 2.5).min(20.0);
+
+                                            let hit = spatial_query.cast_ray(
+                                                origin, cam_transform.forward(), 4.5, true,
+                                                SpatialQueryFilter::from_excluded_entities([player_entity]),
+                                            );
+
+                                            let _ = conn.db.reducers.swing_tool(
+                                                origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                            );
+
+                                            if let Some(hit_data) = hit {
+                                                let hit_pt = origin + dir * hit_data.time_of_impact;
+                                                commands.spawn((
+                                                    PbrBundle {
+                                                        mesh: weapons.meshes.add(bevy::math::primitives::Sphere::new(0.06)),
+                                                        material: weapons.materials.add(StandardMaterial {
+                                                            base_color: Color::srgb(0.95, 0.3, 0.2),
+                                                            unlit: true,
+                                                            ..default()
+                                                        }),
+                                                        transform: BevyTransform::from_translation(hit_pt),
+                                                        ..default()
+                                                    },
+                                                    Particle { timer: Timer::from_seconds(0.12, TimerMode::Once) },
+                                                ));
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                    VirtualAction::Primary => {
+                }
+
+                if trigger_mainhand {
                         if event.is_over_ui || build_state.is_active { continue; }
 
                         let Ok(cam_transform) = queries.fps_camera.get_single() else { continue; };
@@ -546,6 +765,95 @@ pub fn context_aware_action_dispatcher(
                                     tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
                                 );
                             }
+                            WeaponType::Wand if event.state == ActionState::JustPressed => {
+                                weapons.weapon_state.recoil_offset += Vec3::new(0.0, 0.02, 0.05);
+                                weapons.weapon_state.recoil_rot *= Quat::from_rotation_x(-0.22);
+                                weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 3.0).min(25.0);
+
+                                let hit = spatial_query.cast_ray(
+                                    origin, cam_transform.forward(), 60.0, true,
+                                    SpatialQueryFilter::from_excluded_entities([player_entity]),
+                                );
+                                let distance = hit.map_or(60.0, |h| h.time_of_impact);
+                                let mid_point = origin + dir * (distance / 2.0);
+                                let mut tracer_transform = BevyTransform::from_translation(mid_point)
+                                    .looking_at(origin + dir * distance, Vec3::Y);
+                                tracer_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+
+                                commands.spawn((
+                                    PbrBundle {
+                                        mesh: weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.025, distance)),
+                                        material: weapons.materials.add(StandardMaterial {
+                                            base_color: Color::srgb(0.2, 0.85, 1.0),
+                                            unlit: true,
+                                            ..default()
+                                        }),
+                                        transform: tracer_transform, ..default()
+                                    },
+                                    Particle { timer: Timer::from_seconds(0.06, TimerMode::Once) },
+                                ));
+
+                                let _ = conn.db.reducers.fire_weapon(
+                                    tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                );
+                            }
+                            WeaponType::Orb if event.state == ActionState::JustPressed => {
+                                weapons.weapon_state.recoil_offset += Vec3::new(0.0, 0.035, 0.08);
+                                weapons.weapon_state.recoil_rot *= Quat::from_rotation_x(-0.35);
+                                weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 6.0).min(30.0);
+
+                                commands.spawn((
+                                    PbrBundle {
+                                        mesh: weapons.meshes.add(bevy::math::primitives::Sphere::new(0.16)),
+                                        material: weapons.materials.add(StandardMaterial {
+                                            base_color: Color::srgb(0.9, 0.4, 1.0),
+                                            unlit: true,
+                                            ..default()
+                                        }),
+                                        transform: BevyTransform::from_translation(origin + dir * 0.8),
+                                        ..default()
+                                    },
+                                    RigidBody::Dynamic,
+                                    LinearVelocity(dir * 42.0),
+                                    Particle { timer: Timer::from_seconds(1.0, TimerMode::Once) },
+                                ));
+
+                                let _ = conn.db.reducers.fire_weapon(
+                                    tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                );
+                            }
+                            WeaponType::Javelin if event.state == ActionState::JustPressed => {
+                                weapons.weapon_state.recoil_offset += Vec3::new(0.0, 0.03, -0.06);
+                                weapons.weapon_state.recoil_rot *= Quat::from_rotation_x(-0.25);
+
+                                let javelin_speed = 45.0;
+                                let tracer_mesh = weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.022, 1.0));
+                                let tracer_mat = weapons.materials.add(StandardMaterial {
+                                    base_color: Color::srgb(0.75, 0.65, 0.45),
+                                    unlit: true,
+                                    ..default()
+                                });
+
+                                let mut javelin_transform = BevyTransform::from_translation(origin + dir * 0.9)
+                                    .looking_at(origin + dir * 5.0, Vec3::Y);
+                                javelin_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+
+                                commands.spawn((
+                                    PbrBundle {
+                                        mesh: tracer_mesh,
+                                        material: tracer_mat,
+                                        transform: javelin_transform,
+                                        ..default()
+                                    },
+                                    RigidBody::Dynamic,
+                                    LinearVelocity(dir * javelin_speed),
+                                    Particle { timer: Timer::from_seconds(1.5, TimerMode::Once) },
+                                ));
+
+                                let _ = conn.db.reducers.fire_bow(
+                                    tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
+                                );
+                            }
                             _ if event.state == ActionState::JustPressed => {
                                 if !swing_state.is_swinging {
                                     swing_state.is_swinging = true;
@@ -620,10 +928,8 @@ pub fn context_aware_action_dispatcher(
                             }
                             _ => {}
                         }
-                    }
-                    VirtualAction::Interact if event.state == ActionState::JustPressed => {
-                        if event.is_over_ui || build_state.is_active { continue; }
-
+                } else if event.action == VirtualAction::Interact && event.state == ActionState::JustPressed {
+                    if !event.is_over_ui && !build_state.is_active {
                         if let Ok(cam_transform) = queries.fps_camera.get_single() {
                             if let Ok((player_entity, _)) = queries.player.get_single() {
                                 let origin = cam_transform.translation();
@@ -664,7 +970,6 @@ pub fn context_aware_action_dispatcher(
                             }
                         }
                     }
-                    _ => {}
                 }
             }
             CameraMode::RTS => {

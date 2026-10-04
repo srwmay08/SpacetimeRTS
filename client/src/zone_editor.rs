@@ -683,7 +683,7 @@ pub fn handle_editor_brush_painting(
 }
 
 // ----------------------------------------------------------------------------
-// 6. TOGGLE SYSTEMS FOR MAP PAINTER (F7) & EVERQUEST WORLD MAP (M)
+// 6. TOGGLE SYSTEMS FOR MAP PAINTER (F4) & EVERQUEST WORLD MAP (M)
 // ----------------------------------------------------------------------------
 
 pub fn toggle_zone_editor_and_world_map(
@@ -696,8 +696,8 @@ pub fn toggle_zone_editor_and_world_map(
 ) {
     let Ok(mut window) = window_q.get_single_mut() else { return; };
 
-    // Toggle Warcraft 3 Zone Editor with F7
-    if keys.just_pressed(KeyCode::F7) {
+    // Toggle Warcraft 3 Zone Editor with F4
+    if keys.just_pressed(KeyCode::F4) {
         editor.is_editor_active = !editor.is_editor_active;
         if editor.is_editor_active {
             next_camera.set(CameraMode::RTS);
@@ -952,7 +952,7 @@ pub fn setup_zone_editor_visuals_and_ui(
             ..default()
         }).with_children(|title_bar| {
             title_bar.spawn(TextBundle::from_section(
-                "TOOL PALETTE - ZONE PAINTER [F7]",
+                "TOOL PALETTE - ZONE PAINTER [F4]",
                 TextStyle { font_size: 13.0, color: Color::srgb(1.0, 0.92, 0.65), ..default() },
             ));
         });
@@ -1086,7 +1086,7 @@ pub fn setup_zone_editor_visuals_and_ui(
 
         // Instructions Footer
         palette.spawn(TextBundle::from_section(
-            "LMB: Paint/Stamp | [ / ]: Size\nM: World Map | F7: Exit",
+            "LMB: Paint/Stamp | [ / ]: Size\nM: World Map | F4: Exit",
             TextStyle { font_size: 10.0, color: Color::srgb(0.7, 0.75, 0.65), ..default() },
         ));
     });
@@ -1300,7 +1300,7 @@ pub fn setup_zone_editor_visuals_and_ui(
                     WorldMapEditButton,
                 )).with_children(|b| {
                     b.spawn(TextBundle::from_section(
-                        "Edit in Zone Painter (F7)",
+                        "Edit in Zone Painter (F4)",
                         TextStyle { font_size: 12.0, color: Color::WHITE, ..default() },
                     ));
                 });

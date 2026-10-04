@@ -158,7 +158,29 @@ pub fn get_standing(a: &Faction, b: &Faction) -> FactionStanding {
 pub fn is_weapon_two_handed(weapon_name: &str) -> bool {
     matches!(
         weapon_name,
-        "Greatsword" | "Maul" | "Halberd" | "Spear" | "Longbow" | "Shotgun" | "Sniper Rifle" | "Runestaff"
+        "Greatsword"
+            | "2h Sword"
+            | "Maul"
+            | "2h Hammer"
+            | "2h Axe"
+            | "Greataxe"
+            | "Battleaxe"
+            | "Halberd"
+            | "Spear"
+            | "Polearm Spear"
+            | "Flint Spear"
+            | "Polearm Trident"
+            | "Trident"
+            | "Longbow"
+            | "Long Bow"
+            | "2h Ranged Long Bow"
+            | "Shotgun"
+            | "2h Ranged Shotgun"
+            | "Sniper Rifle"
+            | "2h Ranged Sniper Rifle"
+            | "Runestaff"
+            | "2h Ranged Runestaff"
+            | "Bouncy Bomb Launcher"
     )
 }
 
@@ -453,7 +475,7 @@ pub fn fire_ranged_weapon(
     let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
 
     match weapon_name.as_str() {
-        "Revolver" => {
+        "Revolver" | "1h Ranged Revolver" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
                 projectile_id: 0,
                 shooter_id: session.entity_id,
@@ -473,7 +495,7 @@ pub fn fire_ranged_weapon(
             });
             award_combat_xp(ctx, session.entity_id, "Firearm", 25);
         }
-        "Hand Crossbow" => {
+        "Hand Crossbow" | "1h Ranged Hand Crossbow" | "Crossbow" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
                 projectile_id: 0,
                 shooter_id: session.entity_id,
@@ -493,7 +515,7 @@ pub fn fire_ranged_weapon(
             });
             award_combat_xp(ctx, session.entity_id, "Missile", 20);
         }
-        "Shotgun" => {
+        "Shotgun" | "2h Ranged Shotgun" => {
             let pellet_spread = [
                 (0.0, 0.0), (-0.03, 0.02), (0.03, 0.02), (-0.02, -0.03), (0.02, -0.03),
                 (0.05, 0.0), (-0.05, 0.0), (0.0, 0.04), (0.0, -0.04), (0.04, 0.04),
@@ -524,7 +546,7 @@ pub fn fire_ranged_weapon(
             }
             award_combat_xp(ctx, session.entity_id, "Firearm", 30);
         }
-        "Sniper Rifle" => {
+        "Sniper Rifle" | "2h Ranged Sniper Rifle" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
                 projectile_id: 0,
                 shooter_id: session.entity_id,
@@ -544,7 +566,7 @@ pub fn fire_ranged_weapon(
             });
             award_combat_xp(ctx, session.entity_id, "Firearm", 45);
         }
-        "Runestaff" => {
+        "Runestaff" | "2h Ranged Runestaff" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
                 projectile_id: 0,
                 shooter_id: session.entity_id,
@@ -564,7 +586,7 @@ pub fn fire_ranged_weapon(
             });
             award_combat_xp(ctx, session.entity_id, "Runestaff", 25);
         }
-        "Crude Bow" | "Longbow" => {
+        "Crude Bow" | "Longbow" | "Long Bow" | "2h Ranged Long Bow" | "Bow" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
                 projectile_id: 0,
                 shooter_id: session.entity_id,
@@ -583,6 +605,66 @@ pub fn fire_ranged_weapon(
                 lifetime: 5.0,
             });
             award_combat_xp(ctx, session.entity_id, "Missile", 20);
+        }
+        "Wand" | "1h Ranged Wand" | "Arcane Wand" => {
+            ctx.db.active_projectile().insert(ActiveProjectile {
+                projectile_id: 0,
+                shooter_id: session.entity_id,
+                kind: ProjectileKind::MagicMissile,
+                pos_x: origin_x + ndx * 0.7,
+                pos_y: origin_y + ndy * 0.7,
+                pos_z: origin_z + ndz * 0.7,
+                vel_x: ndx * 65.0,
+                vel_y: ndy * 65.0,
+                vel_z: ndz * 65.0,
+                gravity: 0.0,
+                drag: 0.0,
+                damage: 26.0,
+                blast_radius: 0.0,
+                start_tick: client_tick,
+                lifetime: 3.5,
+            });
+            award_combat_xp(ctx, session.entity_id, "Runestaff", 20);
+        }
+        "Orb" | "1h Ranged Orb" | "Mystic Orb" => {
+            ctx.db.active_projectile().insert(ActiveProjectile {
+                projectile_id: 0,
+                shooter_id: session.entity_id,
+                kind: ProjectileKind::FireballBall,
+                pos_x: origin_x + ndx * 0.7,
+                pos_y: origin_y + ndy * 0.7,
+                pos_z: origin_z + ndz * 0.7,
+                vel_x: ndx * 42.0,
+                vel_y: ndy * 42.0,
+                vel_z: ndz * 42.0,
+                gravity: 1.0,
+                drag: 0.001,
+                damage: 38.0,
+                blast_radius: 2.5,
+                start_tick: client_tick,
+                lifetime: 4.0,
+            });
+            award_combat_xp(ctx, session.entity_id, "Runestaff", 25);
+        }
+        "Polearm Javelin - Thrown" | "Polearm Javelin" | "Javelin" | "Thrown Javelin" => {
+            ctx.db.active_projectile().insert(ActiveProjectile {
+                projectile_id: 0,
+                shooter_id: session.entity_id,
+                kind: ProjectileKind::BallistaSpear,
+                pos_x: origin_x + ndx * 0.9,
+                pos_y: origin_y + ndy * 0.9,
+                pos_z: origin_z + ndz * 0.9,
+                vel_x: ndx * 45.0,
+                vel_y: ndy * 45.0,
+                vel_z: ndz * 45.0,
+                gravity: 4.5,
+                drag: 0.001,
+                damage: 45.0,
+                blast_radius: 0.0,
+                start_tick: client_tick,
+                lifetime: 4.0,
+            });
+            award_combat_xp(ctx, session.entity_id, "Missile", 25);
         }
         _ => return Err(format!("Weapon '{}' in {} cannot fire ranged projectiles.", weapon_name, slot)),
     }

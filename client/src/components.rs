@@ -154,6 +154,9 @@ pub struct ActiveItemSlot(pub usize);
 #[derive(Resource, Component, Clone, Debug, Default)] 
 pub struct ActiveEquippedItem(pub Option<String>);
 
+#[derive(Resource, Component, Clone, Debug, Default)] 
+pub struct ActiveOffHandItem(pub Option<String>);
+
 #[derive(Resource, Default)]
 pub struct CachedPlayerEntity(pub Option<u64>);
 

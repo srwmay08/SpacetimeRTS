@@ -51,6 +51,19 @@ pub enum GameLayer {
 pub struct SwingState {
     pub is_swinging: bool,
     pub timer: Timer,
+    pub offhand_is_swinging: bool,
+    pub offhand_timer: Timer,
+}
+
+impl Default for SwingState {
+    fn default() -> Self {
+        Self {
+            is_swinging: false,
+            timer: Timer::from_seconds(0.25, TimerMode::Once),
+            offhand_is_swinging: false,
+            offhand_timer: Timer::from_seconds(0.25, TimerMode::Once),
+        }
+    }
 }
 
 #[derive(Resource, Default)]

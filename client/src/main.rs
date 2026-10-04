@@ -20,6 +20,7 @@ pub mod binary_stars;
 pub mod tree_colors;
 pub mod zone_editor;
 pub mod spellbook;
+pub mod skills_ui;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -67,6 +68,7 @@ fn main() {
         .add_plugins(terrain::TerrainPlugin)
         .add_plugins(zone_editor::ZoneEditorPlugin)
         .add_plugins(spellbook::SpellbookPlugin)
+        .add_plugins(skills_ui::SkillsSheetPlugin)
         .insert_resource(Msaa::Off)
         
         // Architectural Note: Luminous Sky Clear Color.
@@ -97,8 +99,9 @@ fn main() {
         .insert_resource(ActiveItemSlot(0))
         .insert_resource(CachedPlayerEntity::default())
         .insert_resource(ActiveEquippedItem(None))
+        .insert_resource(ActiveOffHandItem(None))
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
-        .insert_resource(SwingState { is_swinging: false, timer: Timer::from_seconds(0.3, TimerMode::Once) })
+        .insert_resource(SwingState::default())
         .insert_resource(AmbientLight { color: Color::srgb(0.95, 0.98, 1.0), brightness: 550.0 })
         .insert_resource(TelemetryTracker { last_frame_time: 0.0, frame_drop_threshold: 0.1 })
         .init_resource::<WeaponState>()
@@ -170,7 +173,6 @@ fn main() {
             update_hud_health_bar,
             update_celestial_hud_ui,
             update_interaction_prompt,
-            animate_view_model, 
             update_inventory_ui, 
             toggle_inventory_ui,
             process_combat_events, 

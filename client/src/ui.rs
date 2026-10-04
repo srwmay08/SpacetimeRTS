@@ -37,10 +37,27 @@ use spacetimedb_sdk::Table;
 // Architectural Note: Canonical item catalogue used for autocomplete and format verification.
 // Guarantees only properly capitalized and valid items can be auto-filled or submitted.
 pub const CANONICAL_ITEMS: &[&str] = &[
+    "1h Axe",
+    "1h Black Jack",
+    "1h Hammer",
+    "1h Ranged Hand Crossbow",
+    "1h Ranged Orb",
+    "1h Ranged Revolver",
+    "1h Ranged Wand",
+    "1h Sword",
+    "1h Tiger Claws",
+    "2h Axe",
+    "2h Hammer",
+    "2h Ranged Long Bow",
+    "2h Ranged Runestaff",
+    "2h Ranged Shotgun",
+    "2h Ranged Sniper Rifle",
+    "2h Sword",
     "Bag of Sewn Evil-Eye",
     "Ballista",
     "Battering Ram",
     "Berry",
+    "Black Jack",
     "Bouncy Bomb Ammo",
     "Bouncy Bomb Launcher",
     "Bow",
@@ -59,6 +76,7 @@ pub const CANONICAL_ITEMS: &[&str] = &[
     "Flint Arrow",
     "Flint Spear",
     "Frying Pan",
+    "Greataxe",
     "Greatsword",
     "Halberd",
     "Hammer",
@@ -71,14 +89,20 @@ pub const CANONICAL_ITEMS: &[&str] = &[
     "Iron Greaves",
     "Iron Helmet",
     "Iron Ingot",
+    "Javelin",
     "Knuckle-Duster",
     "Leather Bag",
     "Leather Scraps",
+    "Long Bow",
     "Longbow",
     "Longsword",
     "LooseStone",
     "Maul",
+    "Orb",
     "Pickaxe",
+    "Polearm Javelin - Thrown",
+    "Polearm Spear",
+    "Polearm Trident",
     "Rapier",
     "Resin",
     "Revolver",
@@ -93,9 +117,13 @@ pub const CANONICAL_ITEMS: &[&str] = &[
     "Spear",
     "Stone",
     "Stone Axe",
+    "Tiger Claws",
     "Torch",
     "Traveler's Backpack",
     "Trebuchet",
+    "Trident",
+    "Unarmed",
+    "Wand",
     "Warhammer",
     "Wood",
     "Wood Arrow",
@@ -149,6 +177,10 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "f3",
     "fps",
     "diag",
+    "dual",
+    "equip",
+    "skills",
+    "spellbook",
     "help",
 ];
 
@@ -160,6 +192,8 @@ pub struct ClientEquippedBags {
     pub bags: [Option<BagContainerDef>; 4],
 }
 
+#[derive(Component)] pub struct PaperdollMainHandSlot;
+#[derive(Component)] pub struct PaperdollOffHandSlot;
 #[derive(Component)] pub struct PaperdollMainHandText;
 #[derive(Component)] pub struct PaperdollOffHandText;
 #[derive(Component)] pub struct PaperdollPrimaryHandText;
@@ -446,21 +480,24 @@ pub fn setup_ui(mut commands: Commands) {
             });
 
             // MainHand Slot
-            paperdoll.spawn(NodeBundle {
-                style: Style {
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    width: Val::Percent(100.0),
-                    height: Val::Px(32.0),
-                    padding: UiRect::horizontal(Val::Px(6.0)),
-                    border: UiRect::all(Val::Px(1.0)),
+            paperdoll.spawn((
+                NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        width: Val::Percent(100.0),
+                        height: Val::Px(32.0),
+                        padding: UiRect::horizontal(Val::Px(6.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    background_color: Color::srgba(0.12, 0.12, 0.14, 0.9).into(),
+                    border_color: Color::srgb(0.4, 0.4, 0.45).into(),
                     ..default()
                 },
-                background_color: Color::srgba(0.12, 0.12, 0.14, 0.9).into(),
-                border_color: Color::srgb(0.4, 0.4, 0.45).into(),
-                ..default()
-            }).with_children(|row| {
+                PaperdollMainHandSlot,
+            )).with_children(|row| {
                 row.spawn((
                     TextBundle::from_section(
                         "MainHand: [Unarmed]",
@@ -489,21 +526,24 @@ pub fn setup_ui(mut commands: Commands) {
             });
 
             // OffHand Slot
-            paperdoll.spawn(NodeBundle {
-                style: Style {
-                    flex_direction: FlexDirection::Row,
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    width: Val::Percent(100.0),
-                    height: Val::Px(32.0),
-                    padding: UiRect::horizontal(Val::Px(6.0)),
-                    border: UiRect::all(Val::Px(1.0)),
+            paperdoll.spawn((
+                NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        width: Val::Percent(100.0),
+                        height: Val::Px(32.0),
+                        padding: UiRect::horizontal(Val::Px(6.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    background_color: Color::srgba(0.12, 0.12, 0.14, 0.9).into(),
+                    border_color: Color::srgb(0.4, 0.4, 0.45).into(),
                     ..default()
                 },
-                background_color: Color::srgba(0.12, 0.12, 0.14, 0.9).into(),
-                border_color: Color::srgb(0.4, 0.4, 0.45).into(),
-                ..default()
-            }).with_children(|row| {
+                PaperdollOffHandSlot,
+            )).with_children(|row| {
                 row.spawn((
                     TextBundle::from_section(
                         "OffHand: [Empty]",
@@ -1700,6 +1740,37 @@ pub fn handle_console_input(
             "tuner" | "weapontool" => {
                 console.logs.push("[Admin] Weapon & Spell Tuner Workbench available via [F6] hotkey.".into());
             }
+            "dual" => {
+                if tokens.len() < 3 {
+                    console.logs.push("[Syntax Error] Usage: dual <main_weapon> <off_weapon> (e.g. 'dual Sword Axe', 'dual Revolver Revolver')".into());
+                } else {
+                    let main_w = tokens[1].to_string();
+                    let off_w = tokens[2].to_string();
+                    let _ = conn.db.reducers.equip_weapon("MainHand".to_string(), main_w.clone());
+                    let _ = conn.db.reducers.equip_weapon("OffHand".to_string(), off_w.clone());
+                    console.logs.push(format!("[Combat] Dual-wield loadout equipped: Main='{}', Off='{}'", main_w, off_w));
+                }
+            }
+            "equip" => {
+                if tokens.len() < 2 {
+                    console.logs.push("[Syntax Error] Usage: equip [main|off] <weapon_name> (defaults to main)".into());
+                } else if tokens.len() == 2 {
+                    let w = tokens[1].to_string();
+                    let _ = conn.db.reducers.equip_weapon("MainHand".to_string(), w.clone());
+                    console.logs.push(format!("[Combat] Equipped '{}' to Main-Hand", w));
+                } else {
+                    let slot = if tokens[1].eq_ignore_ascii_case("off") { "OffHand" } else { "MainHand" };
+                    let w = tokens[2..].join(" ");
+                    let _ = conn.db.reducers.equip_weapon(slot.to_string(), w.clone());
+                    console.logs.push(format!("[Combat] Equipped '{}' to {}", w, slot));
+                }
+            }
+            "skills" | "skill" => {
+                console.logs.push("[Skills] Character Skills Sheet (Valheim style) toggleable with [L] hotkey.".into());
+            }
+            "spellbook" | "spells" => {
+                console.logs.push("[Spellbook] Spellbook & Ability Grimoire (WoW style) toggleable with [K] hotkey.".into());
+            }
             "crosshair" => {
                 console.logs.push("[Settings] Press [F7] to open the interactive Crosshair Tuner GUI.".into());
                 console.logs.push("[Settings] Supports custom colors, thickness, length, gap, dot, outline, and Dynamic/Static lock.".into());
@@ -1994,14 +2065,27 @@ pub fn update_console_ui(
     }
 }
 
+pub fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, window: &Window) -> Rect {
+    let screen_center = Vec2::new(
+        transform.translation().x + window.width() * 0.5,
+        -transform.translation().y + window.height() * 0.5,
+    );
+    Rect::from_center_size(screen_center, node.size())
+}
+
 // ----------------------------------------------------------------------------
 // INVENTORY DRAG-AND-DROP & WORLD DROP SYSTEMS
 // ----------------------------------------------------------------------------
 
 pub fn handle_inventory_drag_and_drop(
     mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     slot_query: Query<(&InventorySlotIndex, &GlobalTransform, &Node)>,
+    main_hand_slot_q: Query<(&GlobalTransform, &Node), With<PaperdollMainHandSlot>>,
+    off_hand_slot_q: Query<(&GlobalTransform, &Node), With<PaperdollOffHandSlot>>,
+    bag_slot_query: Query<(&PaperdollBagSlotIndex, &GlobalTransform, &Node)>,
+    inv_root_query: Query<(&GlobalTransform, &Node), With<InventoryUiRoot>>,
     mut drag_drop: ResMut<DragDropState>,
     conn: Res<SpacetimeConnection>,
     cached_player: Res<CachedPlayerEntity>,
@@ -2017,7 +2101,7 @@ pub fn handle_inventory_drag_and_drop(
     // Right-Click to Quick-Equip Weapon or Bag
     if mouse.just_pressed(MouseButton::Right) {
         for (slot_idx, transform, node) in slot_query.iter() {
-            let rect = Rect::from_center_size(transform.translation().truncate(), node.size());
+            let rect = ui_node_screen_rect(transform, node, window);
             if rect.contains(cursor_pos) {
                 if let Some(slot) = inv.slots.get(slot_idx.0) {
                     if slot.count > 0 && !slot.item_type.is_empty() {
@@ -2031,12 +2115,24 @@ pub fn handle_inventory_drag_and_drop(
                                 }
                             }
                         } else {
-                            let hand_str = match hand_side.0 {
-                                HandSide::Right => "MainHand".to_string(),
-                                HandSide::Left => "OffHand".to_string(),
+                            let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+                            let is_two_handed = crate::weapons::WeaponType::from_item_name(Some(&item_name)).is_two_handed();
+                            let loadout = conn.db.db.equipment_loadout().entity_id().find(&player_id);
+                            let main_equipped = loadout.as_ref().map(|l| l.main_hand.as_str()).unwrap_or("None");
+                            let off_equipped = loadout.as_ref().map(|l| l.off_hand.as_str()).unwrap_or("None");
+
+                            let target_hand = if is_two_handed {
+                                "MainHand"
+                            } else if shift_held || hand_side.0 == HandSide::Left {
+                                "OffHand"
+                            } else if main_equipped != "None" && !main_equipped.is_empty() && (off_equipped == "None" || off_equipped.is_empty()) {
+                                "OffHand"
+                            } else {
+                                "MainHand"
                             };
-                            info!("Equipping '{}' to {}", item_name, hand_str);
-                            let _ = conn.db.reducers.equip_weapon(hand_str, item_name);
+
+                            info!("Quick-Equipping '{}' to {}", item_name, target_hand);
+                            let _ = conn.db.reducers.equip_weapon(target_hand.to_string(), item_name);
                         }
                         return;
                     }
@@ -2047,7 +2143,7 @@ pub fn handle_inventory_drag_and_drop(
 
     if mouse.just_pressed(MouseButton::Left) {
         for (slot_idx, transform, node) in slot_query.iter() {
-            let rect = Rect::from_center_size(transform.translation().truncate(), node.size());
+            let rect = ui_node_screen_rect(transform, node, window);
             if rect.contains(cursor_pos) {
                 if let Some(slot) = inv.slots.get(slot_idx.0) {
                     if slot.count > 0 && !slot.item_type.is_empty() {
@@ -2070,11 +2166,52 @@ pub fn handle_inventory_drag_and_drop(
     if mouse.just_released(MouseButton::Left) && drag_drop.is_dragging {
         let source = drag_drop.source_slot.unwrap();
 
+        // 1. Check if released on another inventory bag slot
         let mut target_slot = None;
         for (slot_idx, transform, node) in slot_query.iter() {
-            let rect = Rect::from_center_size(transform.translation().truncate(), node.size());
+            let rect = ui_node_screen_rect(transform, node, window);
             if rect.contains(cursor_pos) {
                 target_slot = Some(slot_idx.0);
+                break;
+            }
+        }
+
+        // 2. Check if released over MainHand Paperdoll slot
+        let mut dropped_on_main = false;
+        for (transform, node) in main_hand_slot_q.iter() {
+            let rect = ui_node_screen_rect(transform, node, window);
+            if rect.contains(cursor_pos) {
+                dropped_on_main = true;
+                break;
+            }
+        }
+
+        // 3. Check if released over OffHand Paperdoll slot
+        let mut dropped_on_off = false;
+        for (transform, node) in off_hand_slot_q.iter() {
+            let rect = ui_node_screen_rect(transform, node, window);
+            if rect.contains(cursor_pos) {
+                dropped_on_off = true;
+                break;
+            }
+        }
+
+        // 4. Check if released over Paperdoll Bag slot
+        let mut dropped_on_bag = None;
+        for (bag_slot_idx, transform, node) in bag_slot_query.iter() {
+            let rect = ui_node_screen_rect(transform, node, window);
+            if rect.contains(cursor_pos) {
+                dropped_on_bag = Some(bag_slot_idx.0);
+                break;
+            }
+        }
+
+        // 5. Check if released anywhere inside the Inventory window
+        let mut inside_inventory_window = false;
+        for (transform, node) in inv_root_query.iter() {
+            let rect = ui_node_screen_rect(transform, node, window);
+            if rect.contains(cursor_pos) {
+                inside_inventory_window = true;
                 break;
             }
         }
@@ -2086,7 +2223,29 @@ pub fn handle_inventory_drag_and_drop(
                     error!("Failed to swap slots: {:?}", e);
                 }
             }
+        } else if dropped_on_main {
+            info!("Paperdoll: Dragged item '{}' into MainHand", drag_drop.item_type);
+            if let Err(e) = conn.db.reducers.equip_weapon("MainHand".to_string(), drag_drop.item_type.clone()) {
+                error!("Failed to equip item to MainHand: {:?}", e);
+            }
+        } else if dropped_on_off {
+            info!("Paperdoll: Dragged item '{}' into OffHand", drag_drop.item_type);
+            if let Err(e) = conn.db.reducers.equip_weapon("OffHand".to_string(), drag_drop.item_type.clone()) {
+                error!("Failed to equip item to OffHand: {:?}", e);
+            }
+        } else if let Some(bag_idx) = dropped_on_bag {
+            if let Some(bag_def) = create_bag_container(&drag_drop.item_type) {
+                info!("Paperdoll: Dragged Bag '{}' into Bag Slot {}", drag_drop.item_type, bag_idx + 1);
+                equipped_bags.bags[bag_idx] = Some(bag_def);
+            } else {
+                info!("Item '{}' is not a container bag.", drag_drop.item_type);
+            }
+        } else if inside_inventory_window {
+            // Drag was released on an empty part of the inventory window / margins / header / crafting panel.
+            // DO NOT drop into the world! Cancel drag safely.
+            info!("Drag released inside inventory window - cancelled without world drop.");
         } else {
+            // Released outside the inventory window in the 3D game world: drop item into world
             info!("Dropping item '{}' ({}x) into world", drag_drop.item_type, drag_drop.count);
             if let Err(e) = conn.db.reducers.drop_inventory_item(source as u32, drag_drop.count) {
                 error!("Failed to drop item into world: {:?}", e);
@@ -2754,25 +2913,6 @@ pub fn visualize_selection(
     }
 }
 
-pub fn animate_view_model(
-    time: Res<Time>,
-    mut swing_state: ResMut<SwingState>,
-    mut arm_query: Query<&mut Transform, With<ViewModelArm>>
-) {
-    if swing_state.is_swinging {
-        swing_state.timer.tick(time.delta());
-        let Ok(mut arm) = arm_query.get_single_mut() else { return; };
-
-        let t = swing_state.timer.fraction();
-        let angle = if t < 0.5 { 1.0 - (t * 2.0) } else { (t - 0.5) * 2.0 };
-        arm.rotation = Quat::from_rotation_x(angle);
-
-        if swing_state.timer.just_finished() {
-            swing_state.is_swinging = false;
-            swing_state.timer.reset();
-        }
-    }
-}
 
 pub fn tick_particles(
     mut commands: Commands,

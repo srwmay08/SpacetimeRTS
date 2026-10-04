@@ -1305,21 +1305,7 @@ pub fn init_network_connection(
             },
             RenderLayers::from_layers(&[0, 1]),
             crate::binary_sky::AtmosphericCamera,
-        )).with_children(|cam| {
-            cam.spawn((
-                PbrBundle {
-                    mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.12, 0.12, 0.45)),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::srgb(0.86, 0.72, 0.60), perceptual_roughness: 0.9, ..default()
-                    }),
-                    transform: BevyTransform::from_xyz(0.3, -0.3, -0.5).with_rotation(Quat::from_rotation_x(1.0)),
-                    ..default()
-                },
-                RenderLayers::layer(1),
-                ViewModelArm, FPSMesh,
-                NotShadowCaster,
-            ));
-        });
+        ));
     });
 
     // Architectural Note: Directional lighting is dynamically governed by `BinarySkyPlugin`
