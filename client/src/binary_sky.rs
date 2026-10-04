@@ -2417,8 +2417,8 @@ mod tests {
         // 4. Verify WGSL shader file content mirrors the requested algorithm
         let shader_src = include_str!("../../assets/shaders/aurora.wgsl");
         assert!(shader_src.contains("TAU"), "Shader must define TAU");
-        assert!(shader_src.contains("aurora_noise"), "Shader must contain procedural domain noise");
-        assert!(shader_src.contains("breathe_exponent"), "Shader must contain dynamic breathing exponent");
+        assert!(shader_src.contains("auroraCurtainNoise"), "Shader must contain Nimitz triangle noise curtain algorithm");
+        assert!(shader_src.contains("tri2"), "Shader must contain triangle noise functions");
         assert!(shader_src.contains("x * 0.5, y, x"), "Shader must contain requested spectral color synthesis");
         assert!(!shader_src.contains("pow(s, 70.0)"), "Shader must NOT draw stars directly onto the aurora curtain");
     }
