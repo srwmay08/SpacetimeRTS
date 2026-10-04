@@ -36,6 +36,8 @@
 //    - [F9] Cycle atmospheric weather presets.
 // ----------------------------------------------------------------------------
 
+#![allow(dead_code)]
+
 use std::f32::consts::PI;
 use bevy::prelude::*;
 use bevy::pbr::{
@@ -45,6 +47,8 @@ use bevy::pbr::{
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
+use bevy::pbr::{Material, MaterialPlugin};
+use bevy::render::render_resource::{AsBindGroup, ShaderRef, ShaderType};
 
 // Import parry3d geometric query structures for planetary horizon occlusion
 use parry3d::math::{Point as ParryPoint, Vector as ParryVector};
@@ -475,6 +479,69 @@ pub struct StarBVolumetricDisk;
 /// Component tag for the procedural cosmic background starfield dome.
 #[derive(Component, Debug, Default)]
 pub struct CosmicStarfield;
+
+/// Uniform buffer passed to the procedural aurora ribbon WGSL shader.
+#[derive(Clone, Copy, ShaderType, Debug, Reflect)]
+#[allow(dead_code)]
+pub struct AuroraUniforms {
+    pub time: f32,
+    pub intensity: f32,
+    pub speed: f32,
+    pub night_factor: f32,
+    pub uv_scale: Vec2,
+    pub _padding: Vec2,
+    pub color_tint: Vec4,
+}
+
+impl Default for AuroraUniforms {
+    fn default() -> Self {
+        Self {
+            time: 0.0,
+            intensity: 1.0,
+            speed: 1.0,
+            night_factor: 1.0,
+            uv_scale: Vec2::new(8.0, 2.0),
+            _padding: Vec2::ZERO,
+            color_tint: Vec4::new(1.0, 1.0, 1.0, 1.0),
+        }
+    }
+}
+
+/// Custom Bevy PBR Material rendering animated planetary solar wind auroras.
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+#[allow(dead_code)]
+pub struct AuroraMaterial {
+    #[uniform(0)]
+    pub uniforms: AuroraUniforms,
+}
+
+impl Default for AuroraMaterial {
+    fn default() -> Self {
+        Self {
+            uniforms: AuroraUniforms::default(),
+        }
+    }
+}
+
+impl Material for AuroraMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/aurora.wgsl".into()
+    }
+
+    fn alpha_mode(&self) -> AlphaMode {
+        AlphaMode::Add
+    }
+
+    fn specialize(
+        _pipeline: &bevy::pbr::MaterialPipeline<Self>,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _layout: &bevy::render::mesh::MeshVertexBufferLayoutRef,
+        _key: bevy::pbr::MaterialPipelineKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        Ok(())
+    }
+}
 
 /// Component tag for the shimmering binary solar wind aurora ribbon mesh.
 #[derive(Component, Debug, Default)]
@@ -961,6 +1028,7 @@ pub fn setup_binary_sky_environment(
     config: Res<BinarySkyConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut aurora_materials: ResMut<Assets<AuroraMaterial>>,
 ) {
     info!("Initializing Dynamic Binary Sky System (S-Type Circumstellar Architecture)...");
 
@@ -1083,17 +1151,18 @@ pub fn setup_binary_sky_environment(
 
     // Spawn Binary Stellar Wind Aurora Ribbon Curtains
     commands.spawn((
-        PbrBundle {
+        MaterialMeshBundle {
             mesh: meshes.add(create_aurora_mesh()),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgba(1.0, 1.0, 1.0, 0.95),
-                emissive: LinearRgba::new(0.5, 2.5, 1.5, 1.0),
-                unlit: true,
-                fog_enabled: false,
-                alpha_mode: AlphaMode::Blend,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
+            material: aurora_materials.add(AuroraMaterial {
+                uniforms: AuroraUniforms {
+                    time: 0.0,
+                    intensity: 1.0,
+                    speed: 1.0,
+                    night_factor: 0.0,
+                    uv_scale: Vec2::new(8.0, 2.0),
+                    _padding: Vec2::ZERO,
+                    color_tint: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                },
             }),
             transform: Transform::from_xyz(0.0, 20.0, 0.0),
             visibility: Visibility::Hidden,
@@ -1490,10 +1559,11 @@ pub fn sync_celestial_visuals(
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<StarAVolumetricDisk>>,
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<StarBVolumetricDisk>>,
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<CosmicStarfield>>,
-        Query<(&mut Transform, &mut Visibility), With<AuroraCurtain>>,
+        Query<(&mut Transform, &mut Visibility, Option<&Handle<AuroraMaterial>>), With<AuroraCurtain>>,
         Query<(&mut Transform, &mut Visibility), With<PrecipitationStreaks>>,
     )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut aurora_materials: Option<ResMut<Assets<AuroraMaterial>>>,
 ) {
     let cam_pos = if let Some((cam_tf, _)) = celestial_set.p0().iter().find(|(_, cam)| cam.is_active) {
         cam_tf.translation()
@@ -1552,11 +1622,12 @@ pub fn sync_celestial_visuals(
     }
 
     // 3. Sync Cosmic Starfield (Camera-facing pinprick stars glittering at night)
+    let total_sun_lux = cache.star_a_illuminance_lux + cache.star_b_illuminance_lux;
+    let night_factor = (1.0 - (total_sun_lux / 16000.0).clamp(0.0, 1.0)).powi(2);
+
     if let Ok((mut tf_stars, mut vis_stars, mat_handle_stars)) = celestial_set.p3().get_single_mut() {
         tf_stars.translation = cam_pos;
         tf_stars.scale = Vec3::splat(config.starfield_scale);
-        let total_sun_lux = cache.star_a_illuminance_lux + cache.star_b_illuminance_lux;
-        let night_factor = (1.0 - (total_sun_lux / 16000.0).clamp(0.0, 1.0)).powi(2);
         if night_factor <= 0.02 {
             *vis_stars = Visibility::Hidden;
         } else {
@@ -1570,7 +1641,7 @@ pub fn sync_celestial_visuals(
 
     // 4. Sync Aurora Curtains (Real-time waving solar wind magnetic ribbons)
     let mut p4 = celestial_set.p4();
-    for (mut tf_aurora, mut vis_aurora) in p4.iter_mut() {
+    for (mut tf_aurora, mut vis_aurora, maybe_mat_handle) in p4.iter_mut() {
         tf_aurora.translation = cam_pos + Vec3::new(0.0, 20.0, 0.0);
         let wobble = (time.elapsed_seconds() * 0.4).sin() * 0.02;
         tf_aurora.rotation = Quat::from_rotation_y(wobble);
@@ -1579,6 +1650,14 @@ pub fn sync_celestial_visuals(
             *vis_aurora = Visibility::Visible;
         } else {
             *vis_aurora = Visibility::Hidden;
+        }
+
+        if let (Some(mat_handle), Some(ref mut mats)) = (maybe_mat_handle, aurora_materials.as_mut()) {
+            if let Some(mat) = mats.get_mut(mat_handle) {
+                mat.uniforms.time = time.elapsed_seconds();
+                mat.uniforms.intensity = weather.aurora_intensity;
+                mat.uniforms.night_factor = night_factor;
+            }
         }
     }
 
@@ -1758,6 +1837,11 @@ impl Plugin for BinarySkyPlugin {
             .init_resource::<crate::tree_colors::SeasonState>()
             .init_resource::<AmbientLight>()
             .init_resource::<ClearColor>()
+            .add_plugins(MaterialPlugin::<AuroraMaterial> {
+                prepass_enabled: false,
+                shadows_enabled: false,
+                ..default()
+            })
             .add_systems(Startup, setup_binary_sky_environment)
             .add_systems(
                 Update,
@@ -2188,5 +2272,63 @@ mod tests {
         assert!(light_b_layers.intersects(&RenderLayers::layer(0)), "Star B light must intersect world layer 0");
         assert!(light_b_layers.intersects(&RenderLayers::layer(2)), "Star B light must intersect player layer 2 to cast player character shadow");
         assert!(!light_b_layers.intersects(&RenderLayers::layer(1)), "Star B light must NOT intersect viewmodel layer 1");
+    }
+
+    #[test]
+    fn test_aurora_custom_material_and_uniform_synchronization() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::transform::TransformPlugin);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+        app.add_plugins(BinarySkyPlugin);
+
+        // Spawn active camera
+        app.world_mut().spawn((
+            Camera3dBundle {
+                camera: Camera { is_active: true, ..default() },
+                transform: Transform::from_xyz(0.0, 10.0, 0.0),
+                ..default()
+            },
+            AtmosphericCamera,
+        ));
+
+        // Advance to deep night and activate aurora weather
+        let day_sec = 1440.0;
+        {
+            let mut ephemeris = app.world_mut().resource_mut::<BinaryEphemerisState>();
+            ephemeris.simulation_time_seconds = (day_sec * 0.5) as f64; // midnight
+            ephemeris.diurnal_angle = std::f32::consts::PI;
+            ephemeris.star_a_elevation = -std::f32::consts::FRAC_PI_2;
+            let mut weather = app.world_mut().resource_mut::<AtmosphericWeather>();
+            weather.weather_type = WeatherType::StellarWindAurora;
+            weather.aurora_intensity = 0.92;
+        }
+
+        app.update();
+
+        // 1. Verify AuroraCurtain has Handle<AuroraMaterial>
+        let mut aurora_query = app.world_mut().query_filtered::<(&Handle<AuroraMaterial>, &Visibility), With<AuroraCurtain>>();
+        let (aurora_mat_handle, aurora_vis) = aurora_query.single(app.world());
+        assert_eq!(*aurora_vis, Visibility::Visible, "Aurora curtain must be visible during active aurora weather");
+
+        // 2. Verify AuroraMaterial uniforms were synchronized with ephemeris & weather
+        let aurora_materials = app.world().resource::<Assets<AuroraMaterial>>();
+        let mat = aurora_materials.get(aurora_mat_handle).expect("AuroraMaterial must exist in Assets");
+        assert_eq!(mat.uniforms.intensity, 0.92, "Aurora uniform intensity must match weather intensity");
+        assert!(mat.uniforms.night_factor > 0.9, "Night factor must be near 1.0 at midnight");
+        assert_eq!(mat.uniforms.uv_scale, Vec2::new(8.0, 2.0), "UV scale must be set for multi-fold drapery");
+
+        // 3. Verify Material alpha mode is Additive
+        assert_eq!(mat.alpha_mode(), AlphaMode::Add, "Aurora material must use additive blending for plasma glow");
+
+        // 4. Verify WGSL shader file content mirrors the requested algorithm
+        let shader_src = include_str!("../../assets/shaders/aurora.wgsl");
+        assert!(shader_src.contains("TAU"), "Shader must define TAU");
+        assert!(shader_src.contains("aurora_noise"), "Shader must contain procedural domain noise");
+        assert!(shader_src.contains("breathe_exponent"), "Shader must contain dynamic breathing exponent");
+        assert!(shader_src.contains("x * 0.5, y, x"), "Shader must contain requested spectral color synthesis");
+        assert!(shader_src.contains("pow(s, 70.0) * (1.0 - v)"), "Shader must contain high-energy electron micro-sparkle shimmer");
     }
 }
