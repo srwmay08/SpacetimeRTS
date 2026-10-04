@@ -480,56 +480,48 @@ pub struct StarBVolumetricDisk;
 #[derive(Component, Debug, Default)]
 pub struct CosmicStarfield;
 
-/// Uniform buffer passed to the procedural aurora ribbon WGSL shader.
+/// Uniform buffer passed to the procedural aurora sky dome WGSL shader.
 #[derive(Clone, Copy, ShaderType, Debug, Reflect)]
-#[allow(dead_code)]
-pub struct AuroraUniforms {
-    pub time: f32,
-    pub intensity: f32,
-    pub speed: f32,
+pub struct SkyUniforms {
     pub night_factor: f32,
-    pub uv_scale: Vec2,
-    pub _padding: Vec2,
-    pub color_tint: Vec4,
+    pub weather_intensity: f32,
+    pub speed: f32,
+    pub brightness: f32,
 }
 
-impl Default for AuroraUniforms {
+impl Default for SkyUniforms {
     fn default() -> Self {
         Self {
-            time: 0.0,
-            intensity: 1.0,
+            night_factor: 0.0,
+            weather_intensity: 0.0,
             speed: 1.0,
-            night_factor: 1.0,
-            uv_scale: Vec2::new(8.0, 2.0),
-            _padding: Vec2::ZERO,
-            color_tint: Vec4::new(1.0, 1.0, 1.0, 1.0),
+            brightness: 1.0,
         }
     }
 }
 
-/// Custom Bevy PBR Material rendering animated planetary solar wind auroras.
+/// Custom Bevy PBR Material rendering animated planetary solar wind auroras across the sky dome.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-#[allow(dead_code)]
-pub struct AuroraMaterial {
+pub struct StarAuroraDomeMaterial {
     #[uniform(0)]
-    pub uniforms: AuroraUniforms,
+    pub uniforms: SkyUniforms,
 }
 
-impl Default for AuroraMaterial {
+impl Default for StarAuroraDomeMaterial {
     fn default() -> Self {
         Self {
-            uniforms: AuroraUniforms::default(),
+            uniforms: SkyUniforms::default(),
         }
     }
 }
 
-impl Material for AuroraMaterial {
+impl Material for StarAuroraDomeMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/aurora.wgsl".into()
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Add
+        AlphaMode::Blend
     }
 
     fn specialize(
@@ -538,12 +530,26 @@ impl Material for AuroraMaterial {
         _layout: &bevy::render::mesh::MeshVertexBufferLayoutRef,
         _key: bevy::pbr::MaterialPipelineKey<Self>,
     ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        // Disable backface culling so the dome renders correctly from the inside
         descriptor.primitive.cull_mode = None;
+        // Disable depth writing and set depth comparison so the dome renders strictly behind all 3D world geometry
+        if let Some(ref mut depth_stencil) = descriptor.depth_stencil {
+            depth_stencil.depth_write_enabled = false;
+            depth_stencil.depth_compare = bevy::render::render_resource::CompareFunction::GreaterEqual;
+        }
         Ok(())
     }
 }
 
-/// Component tag for the shimmering binary solar wind aurora ribbon mesh.
+/// Compatibility alias preserving external API and test suite expectations.
+pub type AuroraMaterial = StarAuroraDomeMaterial;
+pub type AuroraUniforms = SkyUniforms;
+
+/// Component tag for the procedural planetary aurora sky dome.
+#[derive(Component, Debug, Default)]
+pub struct StarAuroraDome;
+
+/// Deprecated component tag for legacy ribbon queries and test compatibility.
 #[derive(Component, Debug, Default)]
 pub struct AuroraCurtain;
 
@@ -870,16 +876,18 @@ pub fn create_starfield_mesh(star_count: usize) -> Mesh {
 /// Generates an inverted procedural hemisphere mesh for the unified participating medium sky dome.
 pub fn create_sky_dome_mesh() -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    let rings = 12;
-    let sectors = 24;
+    let rings = 16;
+    let sectors = 32;
     let radius = 460.0;
 
     let mut positions = Vec::with_capacity((rings + 1) * (sectors + 1));
+    let mut normals = Vec::with_capacity((rings + 1) * (sectors + 1));
+    let mut uvs = Vec::with_capacity((rings + 1) * (sectors + 1));
     let mut colors = Vec::with_capacity((rings + 1) * (sectors + 1));
     let mut indices = Vec::with_capacity(rings * sectors * 6);
 
     for r in 0..=rings {
-        let phi = -0.15 + (r as f32 / rings as f32) * (PI * 0.5 + 0.15);
+        let phi = -0.05 + (r as f32 / rings as f32) * (PI * 0.5 + 0.05);
         let cos_phi = phi.cos();
         let sin_phi = phi.sin();
 
@@ -893,6 +901,9 @@ pub fn create_sky_dome_mesh() -> Mesh {
             let z = -radius * cos_phi * cos_theta;
 
             positions.push([x, y, z]);
+            // Inward-facing normal for sky dome viewed from inside
+            normals.push([-cos_phi * sin_theta, -sin_phi, cos_phi * cos_theta]);
+            uvs.push([s as f32 / sectors as f32, r as f32 / rings as f32]);
             colors.push([0.15, 0.40, 0.85, 1.0]); // Default daytime sky blue
         }
     }
@@ -913,82 +924,17 @@ pub fn create_sky_dome_mesh() -> Mesh {
     }
 
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
-}
-
-/// Generates a dual undulating ribbon curtain mesh for the binary stellar wind aurora.
-pub fn create_aurora_mesh() -> Mesh {
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    let segments = 64;
-    let mut positions = Vec::with_capacity((segments + 1) * 4);
-    let mut normals = Vec::with_capacity((segments + 1) * 4);
-    let mut uvs = Vec::with_capacity((segments + 1) * 4);
-    let mut colors = Vec::with_capacity((segments + 1) * 4);
-    let mut indices = Vec::with_capacity(segments * 12);
-
-    // Curtain 1: Emerald & Cyan Northern Curtain
-    let r1 = 180.0;
-    let h1 = 65.0;
-    for i in 0..=segments {
-        let theta = (i as f32 / segments as f32) * PI * 1.5 - PI * 0.75;
-        let wave = (theta * 4.5).sin() * 18.0 + (theta * 2.0).cos() * 10.0;
-        let r = r1 + wave;
-
-        let x = r * theta.sin();
-        let z = -r * theta.cos();
-
-        positions.push([x, 35.0, z]);
-        colors.push([0.05, 0.80, 0.45, 0.0]); // Transparent base
-        normals.push([0.0, 1.0, 0.0]);
-        uvs.push([i as f32 / segments as f32, 0.0]);
-
-        positions.push([x, 35.0 + h1, z]);
-        colors.push([0.10, 0.98, 0.65, 0.95]); // Luminous emerald crest
-        normals.push([0.0, 1.0, 0.0]);
-        uvs.push([i as f32 / segments as f32, 1.0]);
-    }
-
-    for i in 0..segments {
-        let b = (i * 2) as u32;
-        indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
-    }
-
-    // Curtain 2: Violet & Rose High-Altitude Polar Ribbon
-    let r2 = 205.0;
-    let h2 = 80.0;
-    let base_idx_c2 = ((segments + 1) * 2) as u32;
-    for i in 0..=segments {
-        let theta = (i as f32 / segments as f32) * PI * 1.3 - PI * 0.65;
-        let wave = (theta * 3.5 + 1.2).sin() * 22.0;
-        let r = r2 + wave;
-
-        let x = r * theta.sin();
-        let z = -r * theta.cos();
-
-        positions.push([x, 50.0, z]);
-        colors.push([0.45, 0.15, 0.75, 0.0]);
-        normals.push([0.0, 1.0, 0.0]);
-        uvs.push([i as f32 / segments as f32, 0.0]);
-
-        positions.push([x, 50.0 + h2, z]);
-        colors.push([0.90, 0.25, 0.95, 0.90]); // Radiant magenta crown
-        normals.push([0.0, 1.0, 0.0]);
-        uvs.push([i as f32 / segments as f32, 1.0]);
-    }
-
-    for i in 0..segments {
-        let b = base_idx_c2 + (i * 2) as u32;
-        indices.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
-    }
-
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
     mesh.insert_indices(Indices::U32(indices));
     mesh
+}
+
+/// Legacy dual ribbon curtain generator, deprecated in favor of procedural sky dome.
+#[deprecated(note = "Legacy dual ribbon mesh retired in favor of procedural sky dome (create_sky_dome_mesh)")]
+pub fn create_aurora_mesh() -> Mesh {
+    create_sky_dome_mesh()
 }
 
 /// Generates a cylindrical volume of downward precipitation streaks for stormy weather.
@@ -1076,7 +1022,7 @@ pub fn setup_binary_sky_environment(
     config: Res<BinarySkyConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut aurora_materials: ResMut<Assets<AuroraMaterial>>,
+    mut aurora_materials: ResMut<Assets<StarAuroraDomeMaterial>>,
 ) {
     info!("Initializing Dynamic Binary Sky System (S-Type Circumstellar Architecture)...");
 
@@ -1197,29 +1143,28 @@ pub fn setup_binary_sky_environment(
         Name::new("Cosmic Starfield Dome"),
     ));
 
-    // Spawn Binary Stellar Wind Aurora Ribbon Curtains
+    // Spawn Procedural Planetary Aurora Sky Dome
     commands.spawn((
         MaterialMeshBundle {
-            mesh: meshes.add(create_aurora_mesh()),
-            material: aurora_materials.add(AuroraMaterial {
-                uniforms: AuroraUniforms {
-                    time: 0.0,
-                    intensity: 1.0,
-                    speed: 1.0,
+            mesh: meshes.add(create_sky_dome_mesh()),
+            material: aurora_materials.add(StarAuroraDomeMaterial {
+                uniforms: SkyUniforms {
                     night_factor: 0.0,
-                    uv_scale: Vec2::new(8.0, 2.0),
-                    _padding: Vec2::ZERO,
-                    color_tint: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                    weather_intensity: 0.0,
+                    speed: 1.0,
+                    brightness: 1.0,
                 },
             }),
-            transform: Transform::from_xyz(0.0, 20.0, 0.0),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
             visibility: Visibility::Hidden,
             ..default()
         },
+        StarAuroraDome,
         AuroraCurtain,
+        AtmosphericSkyDome,
         NotShadowCaster,
         RenderLayers::from_layers(&[0, 1, 2]),
-        Name::new("Stellar Wind Aurora Curtains"),
+        Name::new("Planetary Aurora Sky Dome"),
     ));
 
     // Spawn Volumetric Precipitation Streaks (Stormy Rain Weather System)
@@ -1597,8 +1542,8 @@ pub fn sync_stellar_directional_lights(
     }
 }
 
-/// Synchronizes visual celestial disc meshes, background cosmic starfield, atmospheric sky dome,
-/// aurora ribbons, and precipitation streaks relative to the active camera.
+/// Synchronizes visual celestial disc meshes, background cosmic starfield, procedural aurora sky dome,
+/// and precipitation streaks relative to the active camera.
 pub fn sync_celestial_visuals(
     time: Res<Time>,
     config: Res<BinarySkyConfig>,
@@ -1610,11 +1555,11 @@ pub fn sync_celestial_visuals(
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<StarAVolumetricDisk>>,
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<StarBVolumetricDisk>>,
         Query<(&mut Transform, &mut Visibility, &Handle<StandardMaterial>), With<CosmicStarfield>>,
-        Query<(&mut Transform, &mut Visibility, Option<&Handle<AuroraMaterial>>), With<AuroraCurtain>>,
+        Query<(&mut Transform, &mut Visibility, Option<&Handle<StarAuroraDomeMaterial>>), With<StarAuroraDome>>,
         Query<(&mut Transform, &mut Visibility), With<PrecipitationStreaks>>,
     )>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut aurora_materials: Option<ResMut<Assets<AuroraMaterial>>>,
+    mut aurora_materials: Option<ResMut<Assets<StarAuroraDomeMaterial>>>,
 ) {
     let cam_pos = if let Some((cam_tf, _)) = celestial_set.p0().iter().find(|(_, cam)| cam.is_active) {
         cam_tf.translation()
@@ -1700,14 +1645,17 @@ pub fn sync_celestial_visuals(
         }
     }
 
-    // 4. Sync Aurora Curtains (Real-time waving solar wind magnetic ribbons)
+    // 4. Sync Procedural Aurora Sky Dome
+    // Dome transform keeps its origin locked strictly to active camera translation
     let mut p4 = celestial_set.p4();
     for (mut tf_aurora, mut vis_aurora, maybe_mat_handle) in p4.iter_mut() {
-        tf_aurora.translation = cam_pos + Vec3::new(0.0, 20.0, 0.0);
-        let wobble = (time.elapsed_seconds() * 0.4).sin() * 0.02;
-        tf_aurora.rotation = Quat::from_rotation_y(wobble);
+        tf_aurora.translation = cam_pos;
+        tf_aurora.rotation = Quat::IDENTITY;
 
-        if weather.weather_type == WeatherType::StellarWindAurora {
+        let is_aurora_weather = weather.weather_type == WeatherType::StellarWindAurora;
+        let is_active = is_aurora_weather && night_factor > 0.02;
+
+        if is_active {
             *vis_aurora = Visibility::Visible;
         } else {
             *vis_aurora = Visibility::Hidden;
@@ -1715,9 +1663,10 @@ pub fn sync_celestial_visuals(
 
         if let (Some(mat_handle), Some(ref mut mats)) = (maybe_mat_handle, aurora_materials.as_mut()) {
             if let Some(mat) = mats.get_mut(mat_handle) {
-                mat.uniforms.time = time.elapsed_seconds();
-                mat.uniforms.intensity = weather.aurora_intensity;
                 mat.uniforms.night_factor = night_factor;
+                mat.uniforms.weather_intensity = if is_aurora_weather { weather.aurora_intensity } else { 0.0 };
+                mat.uniforms.speed = 1.0;
+                mat.uniforms.brightness = 1.0;
             }
         }
     }
@@ -1935,7 +1884,7 @@ impl Plugin for BinarySkyPlugin {
             .init_resource::<crate::tree_colors::SeasonState>()
             .init_resource::<AmbientLight>()
             .init_resource::<ClearColor>()
-            .add_plugins(MaterialPlugin::<AuroraMaterial> {
+            .add_plugins(MaterialPlugin::<StarAuroraDomeMaterial> {
                 prepass_enabled: false,
                 shadows_enabled: false,
                 ..default()
@@ -2239,6 +2188,7 @@ mod tests {
         let mesh = create_aurora_mesh();
         assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
         assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
         assert!(mesh.indices().is_some());
     }
@@ -2472,27 +2422,30 @@ mod tests {
 
         app.update();
 
-        // 1. Verify AuroraCurtain has Handle<AuroraMaterial>
-        let mut aurora_query = app.world_mut().query_filtered::<(&Handle<AuroraMaterial>, &Visibility), With<AuroraCurtain>>();
+        // 1. Verify StarAuroraDome has Handle<StarAuroraDomeMaterial>
+        let mut aurora_query = app.world_mut().query_filtered::<(&Handle<StarAuroraDomeMaterial>, &Visibility), With<StarAuroraDome>>();
         let (aurora_mat_handle, aurora_vis) = aurora_query.single(app.world());
-        assert_eq!(*aurora_vis, Visibility::Visible, "Aurora curtain must be visible during active aurora weather");
+        assert_eq!(*aurora_vis, Visibility::Visible, "Aurora dome must be visible during active aurora weather");
 
-        // 2. Verify AuroraMaterial uniforms were synchronized with ephemeris & weather
-        let aurora_materials = app.world().resource::<Assets<AuroraMaterial>>();
-        let mat = aurora_materials.get(aurora_mat_handle).expect("AuroraMaterial must exist in Assets");
-        assert_eq!(mat.uniforms.intensity, 0.92, "Aurora uniform intensity must match weather intensity");
+        // 2. Verify StarAuroraDomeMaterial uniforms were synchronized with ephemeris & weather
+        let aurora_materials = app.world().resource::<Assets<StarAuroraDomeMaterial>>();
+        let mat = aurora_materials.get(aurora_mat_handle).expect("StarAuroraDomeMaterial must exist in Assets");
+        assert_eq!(mat.uniforms.weather_intensity, 0.92, "SkyUniforms weather_intensity must match weather intensity");
         assert!(mat.uniforms.night_factor > 0.9, "Night factor must be near 1.0 at midnight");
-        assert_eq!(mat.uniforms.uv_scale, Vec2::new(8.0, 2.0), "UV scale must be set for multi-fold drapery");
+        assert_eq!(mat.uniforms.speed, 1.0, "Speed must be 1.0");
+        assert_eq!(mat.uniforms.brightness, 1.0, "Brightness must be 1.0");
 
-        // 3. Verify Material alpha mode is Additive
-        assert_eq!(mat.alpha_mode(), AlphaMode::Add, "Aurora material must use additive blending for plasma glow");
+        // 3. Verify Material alpha mode is Blend
+        assert_eq!(mat.alpha_mode(), AlphaMode::Blend, "Aurora dome material must use blend mode for dome overlay");
 
         // 4. Verify WGSL shader file content mirrors the requested algorithm
         let shader_src = include_str!("../../assets/shaders/aurora.wgsl");
         assert!(shader_src.contains("TAU"), "Shader must define TAU");
+        assert!(shader_src.contains("SkyUniforms"), "Shader must define SkyUniforms");
         assert!(shader_src.contains("auroraCurtainNoise"), "Shader must contain Nimitz triangle noise curtain algorithm");
         assert!(shader_src.contains("tri2"), "Shader must contain triangle noise functions");
         assert!(shader_src.contains("x * 0.5, y, x"), "Shader must contain requested spectral color synthesis");
+        assert!(shader_src.contains("uniforms.weather_intensity * uniforms.night_factor <= 0.01"), "Shader must contain early-out inactivity check");
         assert!(!shader_src.contains("pow(s, 70.0)"), "Shader must NOT draw stars directly onto the aurora curtain");
     }
 

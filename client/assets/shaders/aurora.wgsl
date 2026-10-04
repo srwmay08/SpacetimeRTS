@@ -1,26 +1,25 @@
 // ============================================================================
 // File: client/assets/shaders/aurora.wgsl
 // ============================================================================
-// Real-time planetary aurora curtain shader for SpacetimeRTS.
+// Real-time planetary aurora sky dome raymarching shader for SpacetimeRTS.
 // Incorporates Nimitz triangle noise curtain folds, spectral emerald/cyan/violet
-// color gradient synthesis, and dynamic altitude striations.
+// color gradient synthesis, and dynamic altitude striations across a sky dome.
 // ============================================================================
 
 #import bevy_pbr::forward_io::VertexOutput
+#import bevy_pbr::mesh_view_bindings::view
+#import bevy_pbr::mesh_view_bindings::globals
 
 const TAU: f32 = 6.283185307179586;
 
-struct AuroraUniforms {
-    time: f32,
-    intensity: f32,
-    speed: f32,
+struct SkyUniforms {
     night_factor: f32,
-    uv_scale: vec2<f32>,
-    _padding: vec2<f32>,
-    color_tint: vec4<f32>,
+    weather_intensity: f32,
+    speed: f32,
+    brightness: f32,
 };
 
-@group(2) @binding(0) var<uniform> uniforms: AuroraUniforms;
+@group(2) @binding(0) var<uniform> uniforms: SkyUniforms;
 
 // --- Nimitz Triangle Noise Curtains ---
 
@@ -70,41 +69,56 @@ fn auroraCurtainNoise(p_in: vec2<f32>, time: f32) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let t = uniforms.time * uniforms.speed;
-#ifdef VERTEX_UVS_A
-    let uv = in.uv;
-#else
-    let uv = vec2<f32>(0.5, 0.5);
-#endif
+    // 1. Inactivity & Early-out Horizon Clipping (Zero ALU overhead when aurora inactive or below horizon)
+    let total_activity = uniforms.weather_intensity * uniforms.night_factor;
+    if (uniforms.weather_intensity * uniforms.night_factor <= 0.01) {
+        discard;
+    }
 
-    // Scale UV coordinates for multi-fold celestial drapery across the ribbon arc
-    let uv_scaled = vec2<f32>(uv.x * uniforms.uv_scale.x, uv.y * uniforms.uv_scale.y);
+    // Sky dome direction vector (normalized view direction)
+    let rd = normalize(in.world_position.xyz - view.world_position);
+    if (rd.y <= 0.015) {
+        discard;
+    }
 
-    // 1. Generate sharp, shifting curtain folds with Nimitz triangle noise
-    let curtain = auroraCurtainNoise(uv_scaled, t);
+    let t = globals.time * uniforms.speed;
+    let horizon_fade = smoothstep(0.015, 0.12, rd.y);
 
-    // 2. Dynamic curtain profile: normalize curtain folds and apply vertical ribbon envelope
-    let v_fade = smoothstep(0.0, 0.12, uv.y) * smoothstep(1.0, 0.75, uv.y);
-    var v = clamp((curtain / 0.55) * v_fade, 0.0, 1.0);
+    // 2. Procedural Sky Dome Raymarching through Ionospheric Aurora Shells
+    var accum_rgb = vec3<f32>(0.0);
+    var accum_alpha = 0.0;
 
-    // 3. Color Gradient formulation:
-    // x varies across the ribbon width (from 1.0 down to 0.25)
-    // y peaks at 1.0 in the curtain vertical core
-    var color = vec3<f32>(0.0);
-    let x = 1.0 - uv.x * 0.75;
-    let y = 1.0 - abs(uv.y * 2.0 - 1.0);
-    // Emerald/Cyan/Violet spectral synthesis: x*0.5 (red), y (green), x (blue)
-    color += vec3<f32>(x * 0.5, y, x) * v;
+    // Raymarch 12 altitude slices through the ionospheric layer
+    let steps = 12u;
+    for (var i = 0u; i < steps; i = i + 1u) {
+        let step_ratio = f32(i) / f32(steps);
+        // Altitude layer from h = 2.0 to 4.5
+        let h = 2.0 + step_ratio * 2.5;
+        let pt = (rd.xz / rd.y) * h;
 
-    // 4. Modulation by vertex color, color tint, atmospheric weather intensity, and diurnal night factor
-#ifdef VERTEX_COLORS
-    color = color * in.color.rgb;
-#endif
-    color = color * uniforms.color_tint.rgb;
+        let curtain = auroraCurtainNoise(pt * 0.08, t);
 
-    let total_intensity = uniforms.intensity * uniforms.night_factor;
-    let final_rgb = color * total_intensity;
-    let final_alpha = clamp(v * total_intensity, 0.0, 1.0);
+        // Vertical envelope fade across altitude slices
+        let v_env = sin(step_ratio * 3.14159265);
+        let density = (curtain / 0.55) * v_env;
 
-    return vec4<f32>(final_rgb, final_alpha);
+        // Spectral Emerald/Cyan/Violet synthesis: x*0.5 (red), y (green), x (blue)
+        let x = clamp(1.0 - (pt.x * 0.02 + step_ratio * 0.4), 0.25, 1.0);
+        let y = clamp(1.0 - abs(step_ratio * 2.0 - 1.0), 0.1, 1.0);
+        let spectral_color = vec3<f32>(x * 0.5, y, x);
+
+        let slice_alpha = density * 0.18;
+        accum_rgb += spectral_color * slice_alpha * (1.0 - accum_alpha);
+        accum_alpha += slice_alpha * (1.0 - accum_alpha);
+
+        if (accum_alpha >= 0.95) {
+            break;
+        }
+    }
+
+    let final_intensity = total_activity * uniforms.brightness * horizon_fade;
+    let final_rgb = accum_rgb * final_intensity;
+    let final_a = clamp(accum_alpha * final_intensity, 0.0, 1.0);
+
+    return vec4<f32>(final_rgb, final_a);
 }
