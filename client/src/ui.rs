@@ -2692,11 +2692,12 @@ pub fn update_floating_health_bars(
 
     let Ok((camera, cam_transform)) = camera_query.get_single() else { return; };
     
-    let health_map: std::collections::HashMap<u64, f32> = conn.db.db.health().iter()
+    // AI_RULES.md Rule 2.1 #3: BTreeMap and BTreeSet guarantee deterministic ordering without randomized SipHash
+    let health_map: std::collections::BTreeMap<u64, f32> = conn.db.db.health().iter()
         .map(|h| (h.entity_id, (h.current / h.max).clamp(0.0, 1.0)))
         .collect();
 
-    let mut tracked_units = std::collections::HashSet::new();
+    let mut tracked_units = std::collections::BTreeSet::new();
 
     for (net_id, transform) in unit_query.iter() {
         if let Some(&hp_percent) = health_map.get(&net_id.0) {

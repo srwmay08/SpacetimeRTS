@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::render_asset::RenderAssetUsages;
@@ -5,6 +6,7 @@ use avian3d::prelude::*;
 use tracing::info;
 use spacetimedb_sdk::Table;
 
+use crate::core::GameLayer;
 use crate::components::*;
 use crate::network::{SpacetimeConnection, VoxelBox, build_voxel_mesh};
 use crate::module_bindings::place_structure_reducer::place_structure; 
@@ -583,7 +585,8 @@ pub fn sync_structures(
 ) {
     let _ = conn.db.frame_tick();
     let db_structures: Vec<_> = conn.db.db.structure().iter().collect();
-    let mut spawned_ids = std::collections::HashSet::with_capacity(existing_structures.iter().len());
+    // AI_RULES.md Rule 2.1 #3: BTreeSet enforces deterministic ordering without randomized SipHash
+    let mut spawned_ids = BTreeSet::new();
 
     for (_entity, net_struct) in existing_structures.iter() {
         spawned_ids.insert(net_struct.structure_id);
@@ -664,6 +667,10 @@ pub fn sync_structures(
                 },
                 RigidBody::Static,
                 collider, 
+                // Architectural Note: Structures belong to Environment layer and collide with Units/Player,
+                // but crucially do NOT collide with other Environment static structures, preventing narrow-phase
+                // boundary overlap warnings and CPU hitching on adjacent foundations/walls.
+                CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
                 NetworkStructure { structure_id: s.structure_id },
             )).with_children(|parent| {
                 for socket in sockets {

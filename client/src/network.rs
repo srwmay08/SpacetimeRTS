@@ -12,10 +12,10 @@ use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
-use bevy::core_pipeline::prepass::{DepthPrepass, NormalPrepass};
 use bevy::pbr::{FogFalloff, FogSettings, NotShadowCaster};
 use avian3d::prelude::*;
-use std::collections::HashMap;
+// AI_RULES.md Rule 2.1 #3: BTreeMap and BTreeSet guarantee deterministic ordering without randomized SipHash
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
 
@@ -140,14 +140,14 @@ pub fn build_voxel_mesh(boxes: &[VoxelBox]) -> Mesh {
 
 pub struct MicroVoxelGrid {
     pub pitch: f32,
-    pub voxels: HashMap<(i32, i32, i32), [f32; 4]>,
+    pub voxels: BTreeMap<(i32, i32, i32), [f32; 4]>,
 }
 
 impl MicroVoxelGrid {
     pub fn new(pitch: f32) -> Self {
         Self {
             pitch,
-            voxels: HashMap::with_capacity(8192),
+            voxels: BTreeMap::new(),
         }
     }
 
@@ -881,8 +881,12 @@ pub fn init_network_connection(
         ));
     });
 
+    let spawn_x = 0.0;
+    let spawn_z = 0.0;
+    let spawn_y = crate::terrain::get_terrain_height(spawn_x, spawn_z) + 1.05;
+
     let mut player_entity_commands = commands.spawn((
-        SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 25.0, 0.0)),
+        SpatialBundle::from_transform(BevyTransform::from_xyz(spawn_x, spawn_y, spawn_z)),
         PlayerBody,
         RigidBody::Dynamic, 
         Collider::capsule(0.4, 1.2),
@@ -897,13 +901,16 @@ pub fn init_network_connection(
     ));
 
     player_entity_commands.insert((
-        LogicalPosition(Vec3::new(0.0, 25.0, 0.0)),
+        LogicalPosition(Vec3::new(spawn_x, spawn_y, spawn_z)),
         LogicalRotation(Quat::IDENTITY),
         crate::components::Faction::Player, 
         Selectable, 
         crate::prediction::InputBuffer::default(),
-        crate::prediction::AuthoritativeState::default(),
-        crate::prediction::LocalMovementTracker { last_position: Vec3::new(0.0, 25.0, 0.0) },
+        crate::prediction::AuthoritativeState {
+            position: Vec3::new(spawn_x, spawn_y, spawn_z),
+            last_processed_tick: 0,
+        },
+        crate::prediction::LocalMovementTracker { last_position: Vec3::new(spawn_x, spawn_y, spawn_z) },
         Friction::new(0.0).with_combine_rule(CoefficientCombine::Min),
     ));
 
@@ -939,6 +946,7 @@ pub fn init_network_connection(
                 ..default() 
             }, 
             PlayerHead, FpsCamera,
+            bevy_voxel_world::prelude::VoxelWorldCamera::<crate::terrain::ProceduralTerrainConfig>::default(),
             FogSettings {
                 color: sky_fog_color,
                 falloff: FogFalloff::Linear {
@@ -948,7 +956,6 @@ pub fn init_network_connection(
                 ..default()
             },
             RenderLayers::from_layers(&[0, 1]),
-            DepthPrepass, NormalPrepass,
             crate::binary_sky::AtmosphericCamera,
         )).with_children(|cam| {
             cam.spawn((
@@ -993,7 +1000,7 @@ pub fn wait_for_connection(
                 next_state.set(GameState::InGame);
                 info!("Bootstrapping complete. Entering In-Game State.");
                 
-                let spawn_y = crate::terrain::get_terrain_height(0.0, 0.0) + 1.05;
+                let spawn_y = crate::terrain::get_terrain_height(0.0, 0.0) + 1.5;
                 
                 if let Ok((mut transform, mut velocity, mut gravity, mut tracker, mut buffer)) = player_query.get_single_mut() {
                     transform.translation = Vec3::new(0.0, spawn_y, 0.0);
@@ -1056,7 +1063,7 @@ pub fn sync_transforms(
     player_body_query: Query<&BevyTransform, With<PlayerBody>>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut spawned_ids: Local<std::collections::HashSet<u64>>,
+    mut spawned_ids: Local<BTreeSet<u64>>,
     mut model_cache: Local<Option<CachedModelMeshes>>,
 ) {
     let _ = conn.db.frame_tick();
@@ -1203,7 +1210,7 @@ pub fn sync_transforms(
             Selectable, 
             RigidBody::Kinematic, 
             root_collider,
-            CollisionLayers::new([GameLayer::Unit], [GameLayer::Terrain]),
+            CollisionLayers::new([GameLayer::Unit], [GameLayer::Default]),
         ));
 
         if is_peasant {
@@ -1247,7 +1254,7 @@ pub fn sync_resource_nodes(
     player_query: Query<&BevyTransform, With<PlayerBody>>,
     conn: Res<SpacetimeConnection>,
     mut default_node_mat: Local<Option<Handle<StandardMaterial>>>,
-    mut local_nodes: Local<std::collections::HashSet<u64>>,
+    mut local_nodes: Local<BTreeSet<u64>>,
     mut scan_timer: Local<Option<Timer>>,
     mut model_cache: Local<Option<CachedModelMeshes>>,
 ) {
@@ -1637,9 +1644,7 @@ pub fn process_combat_events(
                                 transform: BevyTransform::from_xyz(event.x, event.y + 0.5, event.z),
                                 ..default()
                             },
-                            RigidBody::Dynamic,
-                            Collider::cuboid(0.1, 0.1, 0.1),
-                            ColliderDensity(1.0),
+                            RigidBody::Kinematic,
                             LinearVelocity(vel),
                             Particle { timer: Timer::from_seconds(0.5, TimerMode::Once) }, 
                         ));
@@ -1664,9 +1669,9 @@ pub fn sync_active_projectiles(
     mut existing_projectiles: Query<(Entity, &NetworkProjectile, &mut BevyTransform)>,
 ) {
     let db_projectiles: Vec<_> = conn.db.db.active_projectile().iter().collect();
-    let mut current_ids = std::collections::HashSet::new();
+    let mut current_ids = BTreeSet::new();
 
-    let mut entity_map = std::collections::HashMap::new();
+    let mut entity_map = BTreeMap::new();
     for (entity, net_proj, transform) in existing_projectiles.iter_mut() {
         entity_map.insert(net_proj.0, (entity, transform));
     }

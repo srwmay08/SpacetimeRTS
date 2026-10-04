@@ -549,7 +549,7 @@ impl CharacterCombatSkills {
         *current = current.saturating_add(amount);
 
         // Physical skill naturally grows with combat exertion
-        if *current % 500 == 0 && self.generic_physical < 100 {
+        if (*current).is_multiple_of(500) && self.generic_physical < 100 {
             self.generic_physical += 1;
         }
     }
@@ -1954,7 +1954,7 @@ pub fn advance_time_of_day(current_time: f32, dt_hours: f32) -> f32 {
 }
 
 pub fn is_daylight(time_of_day: f32) -> bool {
-    time_of_day >= 6.0 && time_of_day < 20.0
+    (6.0..20.0).contains(&time_of_day)
 }
 
 // ----------------------------------------------------------------------------

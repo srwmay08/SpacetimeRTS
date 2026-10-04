@@ -291,7 +291,7 @@ pub fn setup_binary_star_system(
         PrimaryStar,
         RenderLayers::from_layers(&[0, 2]),
         StellarOrbitalData {
-            direction: Vec3::new(0.0, 0.7071, 0.7071),
+            direction: Vec3::new(0.0, std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2),
             elevation_radians: PI * 0.25,
             azimuth_radians: PI,
             current_illuminance_lux: config.star_a_base_illuminance_lux,

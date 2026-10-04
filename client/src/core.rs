@@ -7,6 +7,7 @@
 
 #![allow(unexpected_cfgs)]
 
+use std::collections::BTreeSet;
 use bevy::prelude::*;
 use avian3d::prelude::*;
 
@@ -21,6 +22,7 @@ pub enum GameState {
     InGame,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(States, Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
 pub enum CameraMode {
     #[default]
@@ -72,8 +74,9 @@ pub struct SelectionState {
 
 #[derive(Resource, Default)]
 pub struct GeneratedChunks {
+    // AI_RULES.md Rule 2.1 #3: BTreeSet enforces deterministic ordering without randomized SipHash
     #[allow(dead_code)]
-    pub chunks: std::collections::HashSet<(i32, i32)>,
+    pub chunks: BTreeSet<(i32, i32)>,
 }
 
 #[derive(Resource)] 

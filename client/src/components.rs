@@ -80,6 +80,8 @@ pub struct VoxelChunkMarker {
 #[derive(Component)]
 pub struct VoxelGib {
     pub timer: Timer,
+    pub velocity: Vec3,
+    pub angular_velocity: Vec3,
 }
 
 #[derive(Component)]
@@ -197,7 +199,7 @@ pub enum CrosshairColorPreset {
 }
 
 impl CrosshairColorPreset {
-    pub fn to_color(&self) -> Color {
+    pub fn to_color(self) -> Color {
         match self {
             Self::Cyan => Color::srgb(0.0, 1.0, 1.0),
             Self::BrightGreen => Color::srgb(0.0, 1.0, 0.2),
