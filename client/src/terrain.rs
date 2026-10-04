@@ -289,13 +289,14 @@ pub fn get_perlin() -> &'static Perlin {
 pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     let qx = (x / VOXEL_SIZE).round() as i32;
     let qz = (z / VOXEL_SIZE).round() as i32;
+    let delta = crate::zone_editor::get_sculpted_height_delta(x, z);
     
     // Try cache first (read lock)
     {
         let cache = get_terrain_height_cache();
         if let Ok(cache) = cache.read() {
             if let Some(&height) = cache.get(&(qx, qz)) {
-                return height;
+                return height + delta;
             }
         }
     }
@@ -314,7 +315,7 @@ pub fn get_terrain_height(x: f32, z: f32) -> f32 {
         }
     }
     
-    height
+    height + delta
 }
 
 // Terrain height computation: delegates to procedural voxel terrain or canonical height
@@ -496,7 +497,9 @@ pub fn mesh_low_poly_terrain_chunk(
                 let facet_variation = (facet_hash - 0.5) * 0.08; // -0.04 to +0.04
 
                 // Stylized low-poly color determination:
-                let color = if world_centroid.y > 15.5 {
+                let color = if let Some(painted) = crate::zone_editor::get_painted_biome_color(world_centroid.x, world_centroid.z) {
+                    painted
+                } else if world_centroid.y > 15.5 {
                     // Alpine snow cap
                     let snow_white = 0.94 + facet_variation * 0.5;
                     [snow_white, snow_white + 0.02, snow_white + 0.05, 1.0]
@@ -649,7 +652,8 @@ pub fn update_infinite_voxel_terrain(
             }
         }
 
-        if server_mod_tick > last_tick {
+        let editor_dirty = crate::zone_editor::consume_chunk_dirty(cx, cz);
+        if server_mod_tick > last_tick || editor_dirty {
             if let Some(new_mesh) = mesh_low_poly_terrain_chunk(&db_chunks, cx, cz) {
                 let mesh_handle = meshes.add(new_mesh.clone());
                 let mut entity_cmds = commands.entity(existing_entity);

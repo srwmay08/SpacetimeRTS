@@ -17,6 +17,7 @@ mod audio_feedback;
 mod tactical_abilities;
 pub mod binary_sky;
 pub mod binary_stars;
+pub mod zone_editor;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -61,6 +62,7 @@ fn main() {
         .add_plugins(prediction::PredictionPlugin) 
         .add_plugins(binary_sky::BinarySkyPlugin)
         .add_plugins(terrain::TerrainPlugin)
+        .add_plugins(zone_editor::ZoneEditorPlugin)
         .insert_resource(Msaa::Off)
         
         // Architectural Note: Luminous Sky Clear Color.
