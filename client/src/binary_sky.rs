@@ -648,13 +648,19 @@ pub fn evaluate_spectral_transmittance(
 /// physical exposure adaptation (photopic daytime, mesopic twilight, and scotopic night):
 pub fn tonemap_atmospheric_radiance(radiance: Vec3) -> Vec3 {
     let luma = radiance.x * 0.2126 + radiance.y * 0.7152 + radiance.z * 0.0722;
-    let exposure = if luma > 0.08 {
-        1.0 / (luma + 0.15)
-    } else if luma > 0.015 {
-        (1.0 / (luma + 0.04)).min(20.0)
-    } else {
-        (1.0 / (luma + 0.02)).clamp(15.0, 32.0)
-    };
+    // Continuous, smooth photographic exposure adaptation across daytime, twilight, and night.
+    // Replaces disjoint piecewise branch jumps with a smooth C^1 transition:
+    let t_day = (luma / 0.12).clamp(0.0, 1.0);
+    let s_day = t_day * t_day * (3.0 - 2.0 * t_day);
+
+    let t_night = 1.0 - (luma / 0.035).clamp(0.0, 1.0);
+    let s_night = t_night * t_night * (3.0 - 2.0 * t_night);
+
+    let exp_day = 1.0 / (luma + 0.15);
+    let exp_twilight = 1.0 / (luma + 0.04);
+    let exp_night = (1.0 / (luma + 0.02)).clamp(15.0, 32.0);
+
+    let exposure = exp_day * s_day + exp_twilight * (1.0 - s_day) * (1.0 - s_night) + exp_night * s_night;
     let exp = radiance * exposure;
     Vec3::new(
         (exp.x / (1.0 + exp.x * 0.8)).clamp(0.0, 1.0),
@@ -1411,8 +1417,11 @@ pub fn update_atmospheric_scattering_and_cache(
     cache.star_a_color = Color::srgb(filtered_rgb_a.x, filtered_rgb_a.y, filtered_rgb_a.z);
     cache.star_b_color = Color::srgb(filtered_rgb_b.x, filtered_rgb_b.y, filtered_rgb_b.z);
 
-    let cutoff_a = (effective_elev_a.to_degrees() + 4.5).clamp(0.0, 4.5) / 4.5;
-    let cutoff_b = (effective_elev_b.to_degrees() + 4.5).clamp(0.0, 4.5) / 4.5;
+    // Smooth Hermite sunset/sunrise cutoff across civil/nautical twilight [-8.0°, +4.0°]
+    let t_a = ((effective_elev_a.to_degrees() + 8.0) / 12.0).clamp(0.0, 1.0);
+    let cutoff_a = t_a * t_a * (3.0 - 2.0 * t_a);
+    let t_b = ((effective_elev_b.to_degrees() + 8.0) / 12.0).clamp(0.0, 1.0);
+    let cutoff_b = t_b * t_b * (3.0 - 2.0 * t_b);
 
     let mean_trans_a = (cache.star_a_transmittance.x + cache.star_a_transmittance.y + cache.star_a_transmittance.z) / 3.0;
     let mean_trans_b = (cache.star_b_transmittance.x + cache.star_b_transmittance.y + cache.star_b_transmittance.z) / 3.0;
@@ -1471,23 +1480,22 @@ pub fn update_atmospheric_scattering_and_cache(
     // while high-altitude Rayleigh scattering scatters blue and grazing red penetrates:
     let twilight_a = {
         let elev_deg = effective_elev_a.to_degrees();
-        let twilight_factor = ((-elev_deg + 1.5).max(0.0) / 7.0).clamp(0.0, 1.0)
-            * ((elev_deg + 9.5).max(0.0) / 8.0).clamp(0.0, 1.0);
+        // Smooth Gaussian bell profile centered during civil twilight (-3.5°):
+        let bell = (-((elev_deg + 3.5) / 5.5).powi(2)).exp();
         Vec3::new(
-            0.85 * ((-elev_deg * 0.12).exp()).min(1.2),
+            0.85 * ((-elev_deg * 0.10).exp()).min(1.2),
             0.005, // Depleted green by Chappuis band
-            0.35 * ((elev_deg + 8.5) / 8.5).clamp(0.0, 1.0),
-        ) * twilight_factor * (config.star_a_base_illuminance_lux / 75_000.0)
+            0.35 * ((elev_deg + 10.0) / 10.0).clamp(0.0, 1.0),
+        ) * bell * (config.star_a_base_illuminance_lux / 75_000.0)
     };
     let twilight_b = {
         let elev_deg = effective_elev_b.to_degrees();
-        let twilight_factor = ((-elev_deg + 1.5).max(0.0) / 7.0).clamp(0.0, 1.0)
-            * ((elev_deg + 9.5).max(0.0) / 8.0).clamp(0.0, 1.0);
+        let bell = (-((elev_deg + 3.5) / 5.5).powi(2)).exp();
         Vec3::new(
-            0.65 * ((-elev_deg * 0.12).exp()).min(1.0),
+            0.65 * ((-elev_deg * 0.10).exp()).min(1.0),
             0.003,
-            0.25 * ((elev_deg + 8.5) / 8.5).clamp(0.0, 1.0),
-        ) * twilight_factor * (config.star_b_base_illuminance_lux / 55_000.0)
+            0.25 * ((elev_deg + 10.0) / 10.0).clamp(0.0, 1.0),
+        ) * bell * (config.star_b_base_illuminance_lux / 55_000.0)
     };
 
     cache.horizon_radiance = (horizon_mie_a + horizon_mie_b + twilight_a + twilight_b + starlight_airglow * 1.5) * cache.conjunction_amplification;
@@ -1856,10 +1864,17 @@ pub fn update_atmospheric_cameras_and_fog(
         WeatherType::OvercastPrecipitation => ((base_range * 0.05).max(10.0), base_range * 0.60),
     };
 
-    let sun_scatter_color = if cache.star_a_illuminance_lux > 10.0 {
-        cache.star_a_color
-    } else if cache.star_b_illuminance_lux > 10.0 {
-        cache.star_b_color
+    let weight_a = (cache.star_a_illuminance_lux / 60.0).clamp(0.0, 1.0);
+    let weight_b = (cache.star_b_illuminance_lux / 60.0).clamp(0.0, 1.0);
+    let sun_scatter_color = if weight_a > 0.001 || weight_b > 0.001 {
+        let col_a = cache.star_a_color.to_srgba();
+        let col_b = cache.star_b_color.to_srgba();
+        let total_w = (weight_a + weight_b).max(1e-4);
+        let r = (col_a.red * weight_a + col_b.red * weight_b) / total_w;
+        let g = (col_a.green * weight_a + col_b.green * weight_b) / total_w;
+        let b = (col_a.blue * weight_a + col_b.blue * weight_b) / total_w;
+        let alpha = weight_a.max(weight_b);
+        Color::srgba(r * alpha, g * alpha, b * alpha, alpha)
     } else {
         Color::NONE
     };
