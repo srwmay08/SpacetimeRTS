@@ -545,9 +545,9 @@ pub fn handle_editor_brush_painting(
         match editor.tool_category {
             EditorToolCategory::Doodads => {
                 let (mesh, scale) = match editor.doodad_choice {
-                    DoodadChoice::AutumnOak => (meshes.add(create_voxel_oak_mesh()), 1.0),
-                    DoodadChoice::AlpinePine => (meshes.add(create_voxel_pine_mesh()), 1.1),
-                    DoodadChoice::DeadTree => (meshes.add(create_voxel_dead_tree_mesh()), 1.0),
+                    DoodadChoice::AutumnOak => (meshes.add(create_voxel_oak_mesh(1001)), 1.0),
+                    DoodadChoice::AlpinePine => (meshes.add(create_voxel_pine_mesh(2002)), 1.1),
+                    DoodadChoice::DeadTree => (meshes.add(create_voxel_dead_tree_mesh(3003)), 1.0),
                     DoodadChoice::GraniteBoulder => (meshes.add(create_voxel_rock_mesh()), 1.3),
                     DoodadChoice::KnappedFlint => (meshes.add(create_voxel_flint_mesh()), 1.0),
                     DoodadChoice::BerryBush => (meshes.add(create_voxel_bush_mesh()), 1.0),

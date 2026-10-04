@@ -20,4 +20,5 @@ pub mod audio_feedback;
 pub mod tactical_abilities;
 pub mod binary_sky;
 pub mod binary_stars;
+pub mod tree_colors;
 pub mod zone_editor;

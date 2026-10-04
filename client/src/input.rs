@@ -909,6 +909,7 @@ pub fn update_interaction_prompt(
                     "Flint" => "[E] Pick up Flint",
                     "LooseStone" => "[E] Pick up Stone",
                     "Tree" => "Tree (Left-click with Stone Axe)",
+                    "FallenLog" => "[E] Chop Fallen Log",
                     "Rock" => "Rock (Left-click with Pickaxe)",
                     _ => "[E] Gather",
                 };

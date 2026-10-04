@@ -135,6 +135,45 @@ pub fn build_voxel_mesh(boxes: &[VoxelBox]) -> Mesh {
 }
 
 // ----------------------------------------------------------------------------
+// SEEDED DETERMINISTIC PRNG UTILITY
+// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+pub struct Prng {
+    pub state: u64,
+}
+
+impl Prng {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            state: if seed == 0 { 0x517cc1b727220a95 } else { seed },
+        }
+    }
+
+    pub fn next(&mut self) -> f64 {
+        self.state ^= self.state << 13;
+        self.state ^= self.state >> 7;
+        self.state ^= self.state << 17;
+        (self.state as f64) / (u64::MAX as f64)
+    }
+
+    pub fn range(&mut self, min: f32, max: f32) -> f32 {
+        min + (self.next() as f32) * (max - min)
+    }
+
+    pub fn blend_color(&mut self, c1: [f32; 4], c2: [f32; 4], t: f32) -> [f32; 4] {
+        let f = t.clamp(0.0, 1.0);
+        let inv = 1.0 - f;
+        [
+            c1[0] * inv + c2[0] * f,
+            c1[1] * inv + c2[1] * f,
+            c1[2] * inv + c2[2] * f,
+            c1[3] * inv + c2[3] * f,
+        ]
+    }
+}
+
+// ----------------------------------------------------------------------------
 // GENUINE MICRO-VOXEL RASTERIZER & EXPOSED-FACE EXTRACTOR
 // ----------------------------------------------------------------------------
 
@@ -214,6 +253,71 @@ impl MicroVoxelGrid {
                     }
                 }
             }
+        }
+    }
+
+    pub fn fill_ellipsoid(
+        &mut self,
+        cx: f32, cy: f32, cz: f32,
+        rx: f32, ry: f32, rz: f32,
+        color: [f32; 4],
+    ) {
+        if rx <= 0.0 || ry <= 0.0 || rz <= 0.0 {
+            return;
+        }
+        let min_x = (cx - rx).floor() as i32;
+        let max_x = (cx + rx).ceil() as i32;
+        let min_y = (cy - ry).floor() as i32;
+        let max_y = (cy + ry).ceil() as i32;
+        let min_z = (cz - rz).floor() as i32;
+        let max_z = (cz + rz).ceil() as i32;
+
+        let inv_rx2 = 1.0 / (rx * rx);
+        let inv_ry2 = 1.0 / (ry * ry);
+        let inv_rz2 = 1.0 / (rz * rz);
+
+        for x in min_x..=max_x {
+            let dx = x as f32 - cx;
+            let term_x = dx * dx * inv_rx2;
+            if term_x > 1.0 { continue; }
+            for y in min_y..=max_y {
+                let dy = y as f32 - cy;
+                let term_y = dy * dy * inv_ry2;
+                if term_x + term_y > 1.0 { continue; }
+                for z in min_z..=max_z {
+                    let dz = z as f32 - cz;
+                    let term_z = dz * dz * inv_rz2;
+                    if term_x + term_y + term_z <= 1.0 {
+                        self.voxels.insert((x, y, z), color);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn fill_curved_cylinder_y(
+        &mut self,
+        x0: f32, z0: f32,
+        y_start: i32, y_end: i32,
+        radius: f32,
+        curve_x: f32, curve_z: f32,
+        color: [f32; 4],
+    ) {
+        if y_start >= y_end { return; }
+        let h = (y_end - y_start) as f32;
+        for y in y_start..=y_end {
+            let t = (y - y_start) as f32 / h;
+            let offset_x = curve_x * t * t;
+            let offset_z = curve_z * t * t;
+            let r = radius * (1.0 - t * 0.25).max(1.0);
+            self.fill_cylinder_y(
+                (x0 + offset_x).round() as i32,
+                (z0 + offset_z).round() as i32,
+                y,
+                y,
+                r,
+                color,
+            );
         }
     }
 
@@ -320,114 +424,325 @@ impl MicroVoxelGrid {
 // TRUE MICRO-VOXEL TREES (0.06m Voxel Pitch)
 // ----------------------------------------------------------------------------
 
-pub fn create_voxel_dead_tree_mesh() -> Mesh {
+pub fn create_voxel_dead_tree_mesh(seed: u64) -> Mesh {
+    let mut rng = Prng::new(seed);
     let mut grid = MicroVoxelGrid::new(0.06);
-    let bark_dry = [0.74, 0.60, 0.40, 1.0];
-    let bark_shadow = [0.52, 0.40, 0.25, 1.0];
 
+    let bark_base = [0.74, 0.60, 0.40, 1.0];
+    let shadow_base = [0.52, 0.40, 0.25, 1.0];
+    let weathered = [0.62, 0.52, 0.36, 1.0];
+
+    let t_col = rng.range(0.0, 1.0);
+    let bark_dry = rng.blend_color(bark_base, weathered, t_col);
+    let bark_shadow = rng.blend_color(shadow_base, weathered, t_col);
+
+    let height_mult = rng.range(0.85, 1.15);
+    let trunk_h = (105.0 * height_mult).round() as i32;
+    let trunk_r = rng.range(3.8, 5.2);
+    let curve_x = rng.range(-3.5, 3.5);
+    let curve_z = rng.range(-3.5, 3.5);
+
+    // Gnarled root flares
     grid.fill_box([-7, 0, -2], [-3, 3, 2], bark_dry);
     grid.fill_box([3, 0, -2], [7, 3, 2], bark_dry);
     grid.fill_box([-2, 0, 3], [2, 3, 7], bark_dry);
     grid.fill_box([-2, 0, -7], [2, 3, -3], bark_dry);
 
-    grid.fill_cylinder_y(0, 0, 0, 20, 4.5, bark_dry);
-    grid.fill_cylinder_y(0, 0, 20, 45, 3.8, bark_shadow);
-    grid.fill_cylinder_y(0, 0, 45, 75, 3.0, bark_dry);
-    grid.fill_cylinder_y(0, 0, 75, 105, 2.2, bark_shadow);
+    // Curved tapered trunk
+    grid.fill_curved_cylinder_y(0.0, 0.0, 0, trunk_h, trunk_r, curve_x, curve_z, bark_dry);
 
-    grid.fill_line([-3, 42, 0], [-12, 54, -2], 1, bark_dry);
-    grid.fill_line([-12, 54, -2], [-20, 68, 1], 1, bark_shadow);
-    grid.fill_line([-20, 68, 1], [-27, 85, 3], 0, bark_dry);
-    grid.fill_line([-20, 68, 1], [-16, 78, -6], 0, bark_dry);
+    // Bare branches with procedural lengths and angles
+    let branch_scale = rng.range(0.80, 1.25);
+    let b1_len = (18.0 * branch_scale) as i32;
+    let b2_len = (22.0 * branch_scale) as i32;
+    let b3_len = (16.0 * branch_scale) as i32;
 
-    grid.fill_line([3, 48, 1], [14, 58, 6], 1, bark_dry);
-    grid.fill_line([14, 58, 6], [24, 72, 12], 1, bark_shadow);
-    grid.fill_line([24, 72, 12], [32, 88, 16], 0, bark_dry);
-    grid.fill_line([24, 72, 12], [22, 82, 4], 0, bark_dry);
+    let h1 = (trunk_h as f32 * 0.42).round() as i32;
+    let h2 = (trunk_h as f32 * 0.48).round() as i32;
+    let h3 = (trunk_h as f32 * 0.68).round() as i32;
+    let top_y = trunk_h;
 
-    grid.fill_line([0, 68, 3], [4, 82, 16], 1, bark_dry);
-    grid.fill_line([4, 82, 16], [8, 98, 26], 0, bark_shadow);
-    grid.fill_line([4, 82, 16], [-3, 92, 22], 0, bark_dry);
+    // Branch cluster 1 (West/North)
+    let ang1 = rng.range(-0.3, 0.3);
+    grid.fill_line([-3, h1, 0], [-12 + (ang1 * 10.0) as i32, h1 + 12, -2], 1, bark_dry);
+    grid.fill_line([-12, h1 + 12, -2], [-12 - b1_len, h1 + 24, 1], 1, bark_shadow);
+    grid.fill_line([-12 - b1_len, h1 + 24, 1], [-12 - b1_len - 6, h1 + 38, 3], 0, bark_dry);
+    grid.fill_line([-12 - b1_len, h1 + 24, 1], [-12 - b1_len + 4, h1 + 32, -6], 0, bark_dry);
 
-    grid.fill_line([0, 105, 0], [-8, 125, -4], 1, bark_dry);
-    grid.fill_line([-8, 125, -4], [-14, 142, -6], 0, bark_dry);
-    grid.fill_line([-8, 125, -4], [-4, 138, 4], 0, bark_dry);
+    // Branch cluster 2 (East/South)
+    grid.fill_line([3, h2, 1], [14, h2 + 10, 6], 1, bark_dry);
+    grid.fill_line([14, h2 + 10, 6], [14 + b2_len, h2 + 22, 12], 1, bark_shadow);
+    grid.fill_line([14 + b2_len, h2 + 22, 12], [14 + b2_len + 8, h2 + 36, 16], 0, bark_dry);
+    grid.fill_line([14 + b2_len, h2 + 22, 12], [14 + b2_len - 2, h2 + 30, 4], 0, bark_dry);
 
-    grid.fill_line([0, 105, 0], [7, 126, 3], 1, bark_shadow);
-    grid.fill_line([7, 126, 3], [15, 145, 6], 0, bark_dry);
-    grid.fill_line([7, 126, 3], [4, 140, -5], 0, bark_dry);
+    // Branch cluster 3 (Upper South)
+    grid.fill_line([0, h3, 3], [4, h3 + 14, 16], 1, bark_dry);
+    grid.fill_line([4, h3 + 14, 16], [4 + (b3_len / 2), h3 + 28, 16 + b3_len], 0, bark_shadow);
+    grid.fill_line([4, h3 + 14, 16], [-3, h3 + 24, 22], 0, bark_dry);
+
+    // Crown split spires
+    let top_cx = curve_x.round() as i32;
+    let top_cz = curve_z.round() as i32;
+    grid.fill_line([top_cx, top_y, top_cz], [top_cx - 8, top_y + 20, top_cz - 4], 1, bark_dry);
+    grid.fill_line([top_cx - 8, top_y + 20, top_cz - 4], [top_cx - 14, top_y + 36, top_cz - 6], 0, bark_dry);
+
+    grid.fill_line([top_cx, top_y, top_cz], [top_cx + 7, top_y + 21, top_cz + 3], 1, bark_shadow);
+    grid.fill_line([top_cx + 7, top_y + 21, top_cz + 3], [top_cx + 15, top_y + 38, top_cz + 6], 0, bark_dry);
 
     grid.build_mesh()
 }
 
-pub fn create_voxel_oak_mesh() -> Mesh {
+pub fn create_voxel_oak_mesh(seed: u64) -> Mesh {
+    let mut rng = Prng::new(seed);
     let mut grid = MicroVoxelGrid::new(0.06);
+
     let bark = [0.44, 0.28, 0.16, 1.0];
-    let amber = [0.94, 0.54, 0.16, 1.0];
-    let orange = [0.86, 0.38, 0.10, 1.0];
-    let gold = [0.96, 0.70, 0.18, 1.0];
+    let amber_base = [0.94, 0.54, 0.16, 1.0];
+    let orange_base = [0.86, 0.38, 0.10, 1.0];
+    let gold_base = [0.96, 0.70, 0.18, 1.0];
+    let russet = [0.76, 0.32, 0.12, 1.0];
 
-    grid.fill_cylinder_y(0, 0, 0, 38, 6.0, bark);
-    grid.fill_line([0, 32, 0], [15, 52, 6], 2, bark);
-    grid.fill_line([0, 32, 0], [-15, 50, -5], 2, bark);
-    grid.fill_line([0, 34, 0], [-4, 54, 14], 2, bark);
+    let t_palette = rng.range(0.0, 1.0);
+    let orange = rng.blend_color(orange_base, russet, t_palette);
+    let amber = rng.blend_color(amber_base, orange_base, t_palette * 0.5);
+    let gold = rng.blend_color(gold_base, amber_base, t_palette * 0.3);
 
-    grid.fill_sphere(0, 72, 0, 24.0, orange);
-    grid.fill_sphere(0, 84, 0, 19.0, amber);
-    grid.fill_sphere(0, 94, 0, 13.0, gold);
+    let trunk_h = rng.range(33.0, 44.0).round() as i32;
+    let trunk_r = rng.range(5.2, 6.8);
+    let curve_x = rng.range(-3.0, 3.0);
+    let curve_z = rng.range(-3.0, 3.0);
 
-    grid.fill_sphere(-20, 64, -8, 16.0, amber);
-    grid.fill_sphere(-24, 76, -6, 12.0, gold);
+    // Curved organic trunk
+    grid.fill_curved_cylinder_y(0.0, 0.0, 0, trunk_h, trunk_r, curve_x, curve_z, bark);
 
-    grid.fill_sphere(20, 66, 8, 17.0, orange);
-    grid.fill_sphere(24, 78, 6, 13.0, amber);
+    // Gnarled root base
+    grid.fill_cylinder_y(0, 0, 0, 4, trunk_r + 2.0, bark);
 
-    grid.fill_sphere(-5, 68, 18, 15.0, amber);
-    grid.fill_sphere(6, 68, -18, 15.0, orange);
+    // Heavy boughs spreading outward
+    let b_y = trunk_h - 6;
+    grid.fill_line([curve_x.round() as i32, b_y, curve_z.round() as i32], [15, b_y + 18, 6], 2, bark);
+    grid.fill_line([curve_x.round() as i32, b_y, curve_z.round() as i32], [-15, b_y + 16, -5], 2, bark);
+    grid.fill_line([curve_x.round() as i32, b_y + 2, curve_z.round() as i32], [-4, b_y + 20, 14], 2, bark);
+    grid.fill_line([curve_x.round() as i32, b_y + 2, curve_z.round() as i32], [6, b_y + 18, -14], 2, bark);
+
+    // Central organic canopy ellipsoids
+    let cx = curve_x + rng.range(-2.0, 2.0);
+    let cy = (trunk_h as f32) + 36.0 + rng.range(-3.0, 3.0);
+    let cz = curve_z + rng.range(-2.0, 2.0);
+
+    let rx = rng.range(21.0, 26.0);
+    let ry = rng.range(15.0, 20.0);
+    let rz = rng.range(21.0, 26.0);
+
+    grid.fill_ellipsoid(cx, cy, cz, rx, ry, rz, orange);
+    grid.fill_ellipsoid(cx, cy + 10.0, cz, rx * 0.82, ry * 0.75, rz * 0.82, amber);
+    grid.fill_ellipsoid(cx, cy + 20.0, cz, rx * 0.58, ry * 0.50, rz * 0.58, gold);
+
+    // Multiple overlapping asymmetric outer foliage lobes
+    let num_lobes = 4;
+    for i in 0..num_lobes {
+        let ang = (i as f32 / num_lobes as f32) * std::f32::consts::TAU + rng.range(-0.3, 0.3);
+        let dist = rng.range(16.0, 24.0);
+        let ox = ang.cos() * dist;
+        let oz = ang.sin() * dist;
+        let oy = rng.range(-6.0, 6.0);
+
+        let lobe_rx = rng.range(13.0, 18.0);
+        let lobe_ry = rng.range(10.0, 15.0);
+        let lobe_rz = rng.range(13.0, 18.0);
+
+        let lobe_col = if i % 2 == 0 { amber } else { orange };
+        grid.fill_ellipsoid(cx + ox, cy + oy, cz + oz, lobe_rx, lobe_ry, lobe_rz, lobe_col);
+
+        // Highlight cap on lobe
+        grid.fill_ellipsoid(cx + ox, cy + oy + 6.0, cz + oz, lobe_rx * 0.65, lobe_ry * 0.55, lobe_rz * 0.65, gold);
+    }
 
     grid.build_mesh()
 }
 
-pub fn create_voxel_pine_mesh() -> Mesh {
+pub fn create_voxel_pine_mesh(seed: u64) -> Mesh {
+    let mut rng = Prng::new(seed);
     let mut grid = MicroVoxelGrid::new(0.06);
+
     let bark = [0.26, 0.16, 0.08, 1.0];
     let d_green = [0.14, 0.36, 0.16, 1.0];
     let m_green = [0.20, 0.50, 0.22, 1.0];
     let l_green = [0.28, 0.62, 0.28, 1.0];
+    let tip_green = [0.35, 0.68, 0.32, 1.0];
 
-    grid.fill_cylinder_y(0, 0, 0, 60, 3.5, bark);
+    let height_mult = rng.range(0.88, 1.14);
+    let trunk_h = (130.0 * height_mult).round() as i32;
+    let trunk_r = rng.range(3.0, 4.2);
+    let curve_x = rng.range(-1.8, 1.8);
+    let curve_z = rng.range(-1.8, 1.8);
 
-    grid.fill_cylinder_y(0, 0, 38, 48, 28.0, d_green);
-    grid.fill_cylinder_y(0, 0, 48, 58, 22.0, m_green);
-    grid.fill_cylinder_y(0, 0, 58, 66, 16.0, m_green);
+    // Tall tapered trunk with slight organic lean
+    grid.fill_curved_cylinder_y(0.0, 0.0, 0, trunk_h, trunk_r, curve_x, curve_z, bark);
 
-    grid.fill_cylinder_y(0, 0, 66, 76, 20.0, d_green);
-    grid.fill_cylinder_y(0, 0, 76, 86, 15.0, m_green);
-    grid.fill_cylinder_y(0, 0, 86, 96, 10.0, l_green);
+    // Tapering conical foliage tiers
+    let tier_count = 5;
+    let start_y = (34.0 * height_mult).round() as i32;
+    let end_y = trunk_h;
+    let y_step = (end_y - start_y) / tier_count;
 
-    grid.fill_cylinder_y(0, 0, 96, 106, 12.0, d_green);
-    grid.fill_cylinder_y(0, 0, 106, 116, 8.0, m_green);
-    grid.fill_cylinder_y(0, 0, 116, 126, 4.5, l_green);
-    grid.fill_cylinder_y(0, 0, 126, 134, 1.5, l_green);
+    for i in 0..tier_count {
+        let t = i as f32 / (tier_count as f32 - 1.0);
+        let tier_y = start_y + i * y_step;
+        let base_r = (28.0 * (1.0 - t * 0.78) * rng.range(0.85, 1.15)).max(3.0);
+        let tier_h = (y_step as f32 * 1.15).round() as i32;
+
+        let frac_h = (tier_y as f32) / (trunk_h as f32);
+        let offset_x = curve_x * frac_h * frac_h;
+        let offset_z = curve_z * frac_h * frac_h;
+
+        // Under-tier shadow
+        grid.fill_ellipsoid(offset_x, tier_y as f32, offset_z, base_r, (tier_h as f32) * 0.45, base_r, d_green);
+        // Mid tier body
+        grid.fill_ellipsoid(offset_x, (tier_y + 3) as f32, offset_z, base_r * 0.85, (tier_h as f32) * 0.50, base_r * 0.85, m_green);
+        // Top tier highlight
+        grid.fill_ellipsoid(offset_x, (tier_y + 6) as f32, offset_z, base_r * 0.65, (tier_h as f32) * 0.40, base_r * 0.65, l_green);
+    }
+
+    // Needle Spire
+    let top_y = trunk_h;
+    grid.fill_cylinder_y(curve_x.round() as i32, curve_z.round() as i32, top_y, top_y + 8, 2.0, tip_green);
 
     grid.build_mesh()
 }
 
-pub fn create_voxel_round_tree_mesh() -> Mesh {
+pub fn create_voxel_round_tree_mesh(seed: u64) -> Mesh {
+    let mut rng = Prng::new(seed);
     let mut grid = MicroVoxelGrid::new(0.06);
+
     let bark = [0.22, 0.16, 0.10, 1.0];
     let shadow = [0.45, 0.32, 0.10, 1.0];
-    let gold_mid = [0.88, 0.72, 0.18, 1.0];
-    let gold_bright = [0.96, 0.82, 0.22, 1.0];
+    let gold_mid_base = [0.88, 0.72, 0.18, 1.0];
+    let gold_bright_base = [0.96, 0.82, 0.22, 1.0];
+    let warm_lime = [0.72, 0.82, 0.18, 1.0];
 
-    grid.fill_cylinder_y(0, 0, 0, 42, 4.0, bark);
-    grid.fill_sphere(0, 46, 0, 26.0, shadow);
-    grid.fill_sphere(0, 56, 0, 32.0, gold_mid);
-    grid.fill_sphere(0, 70, 0, 24.0, gold_bright);
-    grid.fill_sphere(0, 82, 0, 14.0, gold_bright);
+    let t_blend = rng.range(0.0, 1.0);
+    let gold_mid = rng.blend_color(gold_mid_base, warm_lime, t_blend * 0.4);
+    let gold_bright = rng.blend_color(gold_bright_base, gold_mid_base, t_blend * 0.3);
+
+    let trunk_h = rng.range(36.0, 48.0).round() as i32;
+    let trunk_r = rng.range(3.5, 4.8);
+    let curve_x = rng.range(-2.5, 2.5);
+    let curve_z = rng.range(-2.5, 2.5);
+
+    // Curved trunk
+    grid.fill_curved_cylinder_y(0.0, 0.0, 0, trunk_h, trunk_r, curve_x, curve_z, bark);
+
+    // Base core dome
+    let cx = curve_x + rng.range(-1.5, 1.5);
+    let cy = (trunk_h as f32) + 16.0;
+    let cz = curve_z + rng.range(-1.5, 1.5);
+
+    let rx = rng.range(24.0, 30.0);
+    let ry = rng.range(20.0, 25.0);
+    let rz = rng.range(24.0, 30.0);
+
+    // Under-canopy shadow
+    grid.fill_ellipsoid(cx, cy, cz, rx * 0.95, ry * 0.75, rz * 0.95, shadow);
+    // Main voluminous dome
+    grid.fill_ellipsoid(cx, cy + 8.0, cz, rx, ry, rz, gold_mid);
+    // Upper bright crown
+    grid.fill_ellipsoid(cx, cy + 18.0, cz, rx * 0.75, ry * 0.70, rz * 0.75, gold_bright);
+
+    // Overlapping cloud-like puffy lobes around the perimeter
+    let num_lobes = 4;
+    for i in 0..num_lobes {
+        let ang = (i as f32 / num_lobes as f32) * std::f32::consts::TAU + rng.range(-0.35, 0.35);
+        let dist = rng.range(12.0, 18.0);
+        let lx = cx + ang.cos() * dist;
+        let lz = cz + ang.sin() * dist;
+        let ly = cy + rng.range(2.0, 12.0);
+
+        let lrx = rng.range(12.0, 16.0);
+        let lry = rng.range(10.0, 14.0);
+        let lrz = rng.range(12.0, 16.0);
+
+        grid.fill_ellipsoid(lx, ly, lz, lrx, lry, lrz, gold_mid);
+        grid.fill_ellipsoid(lx, ly + 4.0, lz, lrx * 0.7, lry * 0.6, lrz * 0.7, gold_bright);
+    }
 
     grid.build_mesh()
 }
+
+pub fn create_voxel_fallen_log_mesh(seed: u64) -> Mesh {
+    let mut rng = Prng::new(seed);
+    let mut grid = MicroVoxelGrid::new(0.045);
+
+    let bark = [0.38, 0.24, 0.14, 1.0];
+    let wood_interior = [0.65, 0.50, 0.32, 1.0];
+    let moss = [0.24, 0.48, 0.18, 1.0];
+
+    let length = rng.range(40.0, 60.0).round() as i32;
+    let radius = rng.range(4.5, 6.5);
+    let curve_z = rng.range(-3.5, 3.5);
+
+    for x in -length..=length {
+        let t = (x + length) as f32 / (2.0 * length as f32);
+        let cz = (curve_z * (4.0 * t * (1.0 - t))).round() as i32;
+        let r = radius * (1.0 - (t - 0.5).abs() * 0.18);
+        let r_ceil = r.ceil() as i32;
+
+        for dy in -r_ceil..=r_ceil {
+            for dz in -r_ceil..=r_ceil {
+                if (dy as f32 * dy as f32 + dz as f32 * dz as f32) <= r * r {
+                    let col = if (x == -length || x == length) && dy.abs() < (r_ceil - 1) && dz.abs() < (r_ceil - 1) {
+                        wood_interior
+                    } else if dy > (r * 0.4) as i32 && rng.range(0.0, 1.0) < 0.65 {
+                        moss
+                    } else {
+                        bark
+                    };
+                    grid.set(x, dy + r_ceil, cz + dz, col);
+                }
+            }
+        }
+    }
+
+    grid.build_mesh()
+}
+
+/// Cache pre-generating 6 unique procedural variants per tree species.
+#[derive(Clone)]
+pub struct TreeMeshCache {
+    pub dead_tree_variants: Vec<Handle<Mesh>>,
+    pub oak_tree_variants: Vec<Handle<Mesh>>,
+    pub pine_tree_variants: Vec<Handle<Mesh>>,
+    pub round_tree_variants: Vec<Handle<Mesh>>,
+}
+
+impl TreeMeshCache {
+    pub fn new(meshes: &mut Assets<Mesh>) -> Self {
+        let mut dead = Vec::with_capacity(6);
+        let mut oak = Vec::with_capacity(6);
+        let mut pine = Vec::with_capacity(6);
+        let mut round = Vec::with_capacity(6);
+
+        for i in 0..6 {
+            let seed_dead = 1010 + i as u64 * 37 + 7;
+            let seed_oak = 2020 + i as u64 * 41 + 13;
+            let seed_pine = 3030 + i as u64 * 53 + 19;
+            let seed_round = 4040 + i as u64 * 67 + 23;
+
+            dead.push(meshes.add(create_voxel_dead_tree_mesh(seed_dead)));
+            oak.push(meshes.add(create_voxel_oak_mesh(seed_oak)));
+            pine.push(meshes.add(create_voxel_pine_mesh(seed_pine)));
+            round.push(meshes.add(create_voxel_round_tree_mesh(seed_round)));
+        }
+
+        Self {
+            dead_tree_variants: dead,
+            oak_tree_variants: oak,
+            pine_tree_variants: pine,
+            round_tree_variants: round,
+        }
+    }
+}
+
 
 // ----------------------------------------------------------------------------
 // TRUE MICRO-VOXEL CREATURES & NPCS (0.024m–0.028m Voxel Pitch)
@@ -758,10 +1073,11 @@ pub fn create_voxel_stone_mesh() -> Mesh {
 // ----------------------------------------------------------------------------
 
 pub struct CachedModelMeshes {
-    pub dead_tree: Handle<Mesh>,
-    pub oak_tree: Handle<Mesh>,
-    pub pine_tree: Handle<Mesh>,
-    pub round_tree: Handle<Mesh>,
+    pub tree_cache: TreeMeshCache,
+    #[allow(dead_code)] pub dead_tree: Handle<Mesh>,
+    #[allow(dead_code)] pub oak_tree: Handle<Mesh>,
+    #[allow(dead_code)] pub pine_tree: Handle<Mesh>,
+    #[allow(dead_code)] pub round_tree: Handle<Mesh>,
     pub rock: Handle<Mesh>,
     pub bush: Handle<Mesh>,
     pub branch: Handle<Mesh>,
@@ -772,7 +1088,39 @@ pub struct CachedModelMeshes {
     pub goblin: Handle<Mesh>,
     pub peasant: Handle<Mesh>,
     pub pet: Handle<Mesh>,
+    pub fallen_log: Handle<Mesh>,
 }
+
+impl CachedModelMeshes {
+    pub fn new(meshes: &mut Assets<Mesh>) -> Self {
+        let tree_cache = TreeMeshCache::new(meshes);
+        let dead_tree = tree_cache.dead_tree_variants[0].clone();
+        let oak_tree = tree_cache.oak_tree_variants[0].clone();
+        let pine_tree = tree_cache.pine_tree_variants[0].clone();
+        let round_tree = tree_cache.round_tree_variants[0].clone();
+        let fallen_log = meshes.add(create_voxel_fallen_log_mesh(5050));
+
+        Self {
+            tree_cache,
+            dead_tree,
+            oak_tree,
+            pine_tree,
+            round_tree,
+            rock: meshes.add(create_voxel_rock_mesh()),
+            bush: meshes.add(create_voxel_bush_mesh()),
+            branch: meshes.add(create_voxel_branch_mesh()),
+            flint: meshes.add(create_voxel_flint_mesh()),
+            stone: meshes.add(create_voxel_stone_mesh()),
+            deer: meshes.add(create_voxel_deer_mesh()),
+            boar: meshes.add(create_voxel_boar_mesh()),
+            goblin: meshes.add(create_voxel_goblin_mesh()),
+            peasant: meshes.add(create_voxel_peasant_mesh()),
+            pet: meshes.add(create_voxel_pet_mesh()),
+            fallen_log,
+        }
+    }
+}
+
 
 // ----------------------------------------------------------------------------
 // NETWORK CONNECTION SYSTEM
@@ -1077,24 +1425,7 @@ pub fn sync_transforms(
     const CREATURE_LOAD_RADIUS_SQ: f32 = 112.5 * 112.5;
     const CREATURE_UNLOAD_RADIUS_SQ: f32 = 120.0 * 120.0;
 
-    let cache = model_cache.get_or_insert_with(|| {
-        CachedModelMeshes {
-            dead_tree: meshes.add(create_voxel_dead_tree_mesh()),
-            oak_tree: meshes.add(create_voxel_oak_mesh()),
-            pine_tree: meshes.add(create_voxel_pine_mesh()),
-            round_tree: meshes.add(create_voxel_round_tree_mesh()),
-            rock: meshes.add(create_voxel_rock_mesh()),
-            bush: meshes.add(create_voxel_bush_mesh()),
-            branch: meshes.add(create_voxel_branch_mesh()),
-            flint: meshes.add(create_voxel_flint_mesh()),
-            stone: meshes.add(create_voxel_stone_mesh()),
-            deer: meshes.add(create_voxel_deer_mesh()),
-            boar: meshes.add(create_voxel_boar_mesh()),
-            goblin: meshes.add(create_voxel_goblin_mesh()),
-            peasant: meshes.add(create_voxel_peasant_mesh()),
-            pet: meshes.add(create_voxel_pet_mesh()),
-        }
-    });
+    let cache = model_cache.get_or_insert_with(|| CachedModelMeshes::new(&mut meshes));
 
     spawned_ids.clear();
 
@@ -1253,6 +1584,7 @@ pub fn sync_resource_nodes(
     node_query: Query<(Entity, &ResourceNodeItem, &BevyTransform)>, 
     player_query: Query<&BevyTransform, With<PlayerBody>>,
     conn: Res<SpacetimeConnection>,
+    tree_mats: Option<Res<crate::tree_colors::TreeMaterialHandles>>,
     mut default_node_mat: Local<Option<Handle<StandardMaterial>>>,
     mut local_nodes: Local<BTreeSet<u64>>,
     mut scan_timer: Local<Option<Timer>>,
@@ -1266,24 +1598,7 @@ pub fn sync_resource_nodes(
         return;
     }
 
-    let cache = model_cache.get_or_insert_with(|| {
-        CachedModelMeshes {
-            dead_tree: meshes.add(create_voxel_dead_tree_mesh()),
-            oak_tree: meshes.add(create_voxel_oak_mesh()),
-            pine_tree: meshes.add(create_voxel_pine_mesh()),
-            round_tree: meshes.add(create_voxel_round_tree_mesh()),
-            rock: meshes.add(create_voxel_rock_mesh()),
-            bush: meshes.add(create_voxel_bush_mesh()),
-            branch: meshes.add(create_voxel_branch_mesh()),
-            flint: meshes.add(create_voxel_flint_mesh()),
-            stone: meshes.add(create_voxel_stone_mesh()),
-            deer: meshes.add(create_voxel_deer_mesh()),
-            boar: meshes.add(create_voxel_boar_mesh()),
-            goblin: meshes.add(create_voxel_goblin_mesh()),
-            peasant: meshes.add(create_voxel_peasant_mesh()),
-            pet: meshes.add(create_voxel_pet_mesh()),
-        }
-    });
+    let cache = model_cache.get_or_insert_with(|| CachedModelMeshes::new(&mut meshes));
 
     let node_mat = default_node_mat.get_or_insert_with(|| {
         materials.add(StandardMaterial {
@@ -1307,8 +1622,9 @@ pub fn sync_resource_nodes(
 
         if server_node.is_none() {
             if dist_sq <= NODE_UNLOAD_RADIUS_SQ {
-                match node_item.node_type.as_str() {
-                    "Tree" => {
+                let clean_item_type = node_item.node_type.trim();
+                match clean_item_type {
+                    "Tree" | "Oak" | "Pine" | "Dead" | "Round" | _ if clean_item_type.starts_with("Tree") => {
                         let mut seed = (origin.x.abs() * 1000.0 + origin.z.abs() * 100.0) as u64;
                         seed ^= seed << 13;
                         seed ^= seed >> 7;
@@ -1316,18 +1632,48 @@ pub fn sync_resource_nodes(
                         let angle_rand = ((seed as f32) / (u32::MAX as f32)) * std::f32::consts::TAU;
                         let fall_dir = Vec3::new(angle_rand.cos(), 0.0, angle_rand.sin()).normalize();
 
-                        let tree_style = (node_item.node_id % 4) as u8;
+                        let biome = crate::tree_colors::get_biome(origin.y);
+                        let tree_style = if clean_item_type == "Oak" || clean_item_type.ends_with(":Oak") {
+                            1
+                        } else if clean_item_type == "Pine" || clean_item_type.ends_with(":Pine") {
+                            2
+                        } else if clean_item_type == "Dead" || clean_item_type.ends_with(":Dead") {
+                            0
+                        } else if clean_item_type == "Round" || clean_item_type.ends_with(":Round") {
+                            3
+                        } else {
+                            let mut species_seed = (node_item.node_id ^ 0x517cc1b727220a95) as u64;
+                            match crate::tree_colors::pick_tree_type(biome, &mut species_seed) {
+                                "Dead" => 0,
+                                "Oak" => 1,
+                                "Pine" => 2,
+                                _ => 3,
+                            }
+                        };
+
+                        let variant_idx = (node_item.node_id % 6) as usize;
                         let tree_mesh = match tree_style {
-                            0 => cache.dead_tree.clone(),
-                            1 => cache.oak_tree.clone(),
-                            2 => cache.pine_tree.clone(),
-                            _ => cache.round_tree.clone(),
+                            0 => cache.tree_cache.dead_tree_variants[variant_idx].clone(),
+                            1 => cache.tree_cache.oak_tree_variants[variant_idx].clone(),
+                            2 => cache.tree_cache.pine_tree_variants[variant_idx].clone(),
+                            _ => cache.tree_cache.round_tree_variants[variant_idx].clone(),
+                        };
+
+                        let tree_mat = if let Some(ref mats) = tree_mats {
+                            match tree_style {
+                                0 => mats.dead.clone(),
+                                1 => mats.oak.clone(),
+                                2 => mats.pine.clone(),
+                                _ => mats.round.clone(),
+                            }
+                        } else {
+                            node_mat.clone()
                         };
 
                         commands.spawn((
                             PbrBundle {
                                 mesh: tree_mesh,
-                                material: node_mat.clone(),
+                                material: tree_mat,
                                 transform: *transform,
                                 ..default()
                             },
@@ -1383,57 +1729,104 @@ pub fn sync_resource_nodes(
 
         let clean_type = node.node_type.trim();
 
-        let (mesh, collider, y_offset) = match clean_type {
-            "Tree" => {
-                let tree_style = (node.node_id % 4) as u8;
+        let (mesh, collider, y_offset, tree_comp_opt) = match clean_type {
+            "Tree" | "Oak" | "Pine" | "Dead" | "Round" | _ if clean_type.starts_with("Tree") => {
+                let biome = crate::tree_colors::get_biome(node.y);
+                let tree_style = if clean_type == "Oak" || clean_type.ends_with(":Oak") {
+                    1
+                } else if clean_type == "Pine" || clean_type.ends_with(":Pine") {
+                    2
+                } else if clean_type == "Dead" || clean_type.ends_with(":Dead") {
+                    0
+                } else if clean_type == "Round" || clean_type.ends_with(":Round") {
+                    3
+                } else {
+                    let mut species_seed = (node.node_id ^ 0x517cc1b727220a95) as u64;
+                    match crate::tree_colors::pick_tree_type(biome, &mut species_seed) {
+                        "Dead" => 0,
+                        "Oak" => 1,
+                        "Pine" => 2,
+                        _ => 3,
+                    }
+                };
+
+                let variant_idx = (node.node_id % 6) as usize;
                 let tree_mesh = match tree_style {
-                    0 => cache.dead_tree.clone(),
-                    1 => cache.oak_tree.clone(),
-                    2 => cache.pine_tree.clone(),
-                    _ => cache.round_tree.clone(),
+                    0 => cache.tree_cache.dead_tree_variants[variant_idx].clone(),
+                    1 => cache.tree_cache.oak_tree_variants[variant_idx].clone(),
+                    2 => cache.tree_cache.pine_tree_variants[variant_idx].clone(),
+                    _ => cache.tree_cache.round_tree_variants[variant_idx].clone(),
                 };
                 (
                     tree_mesh,
                     Collider::cylinder(0.40, 8.5),
                     0.0,
+                    Some(crate::components::TreeComponent { species: tree_style, variant: variant_idx }),
                 )
             }
+            "FallenLog" => (
+                cache.fallen_log.clone(),
+                Collider::cylinder(0.35, 3.2),
+                0.35,
+                None,
+            ),
             "Rock" => (
                 cache.rock.clone(),
                 Collider::cuboid(1.5, 1.4, 1.4),
                 0.0,
+                None,
             ),
             "Bush" => (
                 cache.bush.clone(),
                 Collider::sphere(0.85),
                 0.0,
+                None,
             ),
             "Branch" => (
                 cache.branch.clone(),
                 Collider::cuboid(1.5, 0.28, 0.9),
                 0.02,
+                None,
             ),
             "Flint" => (
                 cache.flint.clone(),
                 Collider::cuboid(0.55, 0.75, 0.45),
                 0.02,
+                None,
             ),
             "LooseStone" => (
                 cache.stone.clone(),
                 Collider::cuboid(1.2, 0.58, 0.95),
                 0.02,
+                None,
             ),
             _ => (
                 cache.stone.clone(),
                 Collider::cuboid(0.5, 0.5, 0.5),
                 0.0,
+                None,
             )
         };
 
-        commands.spawn((
+        let material = if let Some(ref tc) = tree_comp_opt {
+            if let Some(ref mats) = tree_mats {
+                match tc.species {
+                    0 => mats.dead.clone(),
+                    1 => mats.oak.clone(),
+                    2 => mats.pine.clone(),
+                    _ => mats.round.clone(),
+                }
+            } else {
+                node_mat.clone()
+            }
+        } else {
+            node_mat.clone()
+        };
+
+        let mut entity_cmd = commands.spawn((
             PbrBundle {
                 mesh, 
-                material: node_mat.clone(),
+                material,
                 transform: BevyTransform::from_xyz(node.x, node.y + y_offset, node.z),
                 ..default()
             },
@@ -1445,9 +1838,15 @@ pub fn sync_resource_nodes(
             collider,
             CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
         ));
+
+        if let Some(tc) = tree_comp_opt {
+            entity_cmd.insert(tc);
+        }
+
         local_nodes.insert(node.node_id);
     }
 }
+
 
 pub fn update_falling_trees(
     mut commands: Commands,
