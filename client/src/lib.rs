@@ -22,3 +22,4 @@ pub mod binary_sky;
 pub mod binary_stars;
 pub mod tree_colors;
 pub mod zone_editor;
+pub mod spellbook;

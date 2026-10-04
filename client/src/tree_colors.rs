@@ -295,7 +295,7 @@ mod tests {
         let oak_spring = get_seasonal_color(&OAK_PALETTE, Season::Spring, 0.0);
         let oak_summer = get_seasonal_color(&OAK_PALETTE, Season::Summer, 0.0);
         let oak_autumn = get_seasonal_color(&OAK_PALETTE, Season::Autumn, 0.0);
-        let oak_winter = get_seasonal_color(&OAK_PALETTE, Season::Winter, 0.0);
+        let _oak_winter = get_seasonal_color(&OAK_PALETTE, Season::Winter, 0.0);
 
         // Spring is vibrant green
         let spring_linear = oak_spring.to_linear();

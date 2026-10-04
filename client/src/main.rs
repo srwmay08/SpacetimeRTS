@@ -19,6 +19,7 @@ pub mod binary_sky;
 pub mod binary_stars;
 pub mod tree_colors;
 pub mod zone_editor;
+pub mod spellbook;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -65,6 +66,7 @@ fn main() {
         .add_plugins(binary_sky::BinarySkyPlugin)
         .add_plugins(terrain::TerrainPlugin)
         .add_plugins(zone_editor::ZoneEditorPlugin)
+        .add_plugins(spellbook::SpellbookPlugin)
         .insert_resource(Msaa::Off)
         
         // Architectural Note: Luminous Sky Clear Color.

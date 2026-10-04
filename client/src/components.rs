@@ -293,10 +293,10 @@ pub enum CrosshairArmDir {
 #[derive(Component)] pub struct ReticleCrosshairDot;
 #[derive(Component)] pub struct ReticleAmmoText;
 #[derive(Component)] pub struct ReticleBowChargeBar;
-#[derive(Component)] pub struct ReticleAbilityDashText;
-#[derive(Component)] pub struct ReticleAbilitySmokeText;
-#[derive(Component)] pub struct ReticleAbilityIntelText;
-#[derive(Component)] pub struct ReticleAbilityLiftText;
+#[allow(dead_code)] #[derive(Component)] pub struct ReticleAbilityDashText;
+#[allow(dead_code)] #[derive(Component)] pub struct ReticleAbilitySmokeText;
+#[allow(dead_code)] #[derive(Component)] pub struct ReticleAbilityIntelText;
+#[allow(dead_code)] #[derive(Component)] pub struct ReticleAbilityLiftText;
 #[derive(Component)] pub struct ReticleCriticalHealthAlert;
 #[derive(Component)] pub struct ReticleHitMarker;
 #[derive(Component)] pub struct ReticleHitMarkerTick;

@@ -588,6 +588,7 @@ pub fn update_infinite_voxel_terrain(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut chunk_query: Query<(Entity, &mut VoxelChunkMarker, &mut Handle<Mesh>, Option<&TerrainChunkHasCollider>)>,
+    render_settings: Option<Res<crate::spellbook::TerrainRenderSettings>>,
     mut default_material: Local<Option<Handle<StandardMaterial>>>,
     mut loaded_entities: Local<BTreeMap<u64, (Entity, u64, bool)>>,
     mut last_player_chunk: Local<Option<(i32, i32)>>,
@@ -683,13 +684,23 @@ pub fn update_infinite_voxel_terrain(
         }
     }
 
-    // 2. Collect candidate unspawned chunks within view radius
-    let mut candidates: Vec<(i32, i32, i32, u64)> = Vec::with_capacity(384);
-    let radius_sq = LOW_POLY_RADIUS_CHUNKS * LOW_POLY_RADIUS_CHUNKS;
+    // Dynamic visible range & batch tuning from options panel
+    let (view_radius, unload_radius, spawn_batch) = if let Some(ref rs) = render_settings {
+        let vr = if rs.spawn_full_zone { 64 } else { rs.view_distance_chunks };
+        let ur = if rs.spawn_full_zone { 70 } else { rs.unload_distance_chunks.max(vr + 3) };
+        let batch = if rs.spawn_full_zone { 256 } else { 32.max(vr as usize * 3) };
+        (vr, ur, batch)
+    } else {
+        (LOW_POLY_RADIUS_CHUNKS, LOW_POLY_UNLOAD_RADIUS_CHUNKS, 32)
+    };
 
-    for cz in (p_cz - LOW_POLY_RADIUS_CHUNKS)..=(p_cz + LOW_POLY_RADIUS_CHUNKS) {
+    // 2. Collect candidate unspawned chunks within view radius
+    let mut candidates: Vec<(i32, i32, i32, u64)> = Vec::with_capacity(512);
+    let radius_sq = view_radius * view_radius;
+
+    for cz in (p_cz - view_radius)..=(p_cz + view_radius) {
         let dz = cz - p_cz;
-        for cx in (p_cx - LOW_POLY_RADIUS_CHUNKS)..=(p_cx + LOW_POLY_RADIUS_CHUNKS) {
+        for cx in (p_cx - view_radius)..=(p_cx + view_radius) {
             let dx = cx - p_cx;
             let dist_sq = dx * dx + dz * dz;
             if dist_sq > radius_sq {
@@ -709,7 +720,7 @@ pub fn update_infinite_voxel_terrain(
 
     // Guaranteed immediate frame-1 loading for the player's immediate 3x3 surrounding chunks (dist_sq <= 2)
     let immediate_unspawned = candidates.iter().take_while(|c| c.2 <= 2).count();
-    let max_spawn_this_frame = 32.max(immediate_unspawned);
+    let max_spawn_this_frame = spawn_batch.max(immediate_unspawned);
 
     for (cx, cz, dist_sq_chunks, key) in candidates.into_iter().take(max_spawn_this_frame) {
         let db_mod_tick = db_chunks.get(&key).map(|c| c.last_modified_tick).unwrap_or(0);
@@ -753,7 +764,7 @@ pub fn update_infinite_voxel_terrain(
     }
 
     // 3. Despawn distant chunks beyond hysteresis unload radius
-    let unload_radius_sq = LOW_POLY_UNLOAD_RADIUS_CHUNKS * LOW_POLY_UNLOAD_RADIUS_CHUNKS;
+    let unload_radius_sq = unload_radius * unload_radius;
     for (&key, &(entity, _, _)) in loaded_entities.iter() {
         let (cx, _cy, cz) = unpack_chunk_key(key);
         let dx = cx - p_cx;

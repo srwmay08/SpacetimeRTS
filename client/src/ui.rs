@@ -1124,49 +1124,6 @@ pub fn setup_ui(mut commands: Commands) {
             ReticleBowChargeBar,
         ));
 
-        // Reticle-Adjacent Tactical Abilities Cluster (Left of Crosshair)
-        reticle.spawn(NodeBundle {
-            style: Style {
-                position_type: PositionType::Absolute,
-                right: Val::Px(30.0),
-                top: Val::Px(-28.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(2.0),
-                align_items: AlignItems::FlexEnd,
-                ..default()
-            },
-            ..default()
-        }).with_children(|abilities| {
-            abilities.spawn((
-                TextBundle::from_section(
-                    "[Q] DASH",
-                    TextStyle { font_size: 10.0, color: Color::srgb(0.0, 1.0, 1.0), ..default() }
-                ),
-                ReticleAbilityDashText,
-            ));
-            abilities.spawn((
-                TextBundle::from_section(
-                    "[C] SMOKE",
-                    TextStyle { font_size: 10.0, color: Color::srgb(0.7, 0.8, 0.9), ..default() }
-                ),
-                ReticleAbilitySmokeText,
-            ));
-            abilities.spawn((
-                TextBundle::from_section(
-                    "[X] INTEL",
-                    TextStyle { font_size: 10.0, color: Color::srgb(1.0, 0.85, 0.2), ..default() }
-                ),
-                ReticleAbilityIntelText,
-            ));
-            abilities.spawn((
-                TextBundle::from_section(
-                    "[F] LIFT",
-                    TextStyle { font_size: 10.0, color: Color::srgb(0.2, 1.0, 0.4), ..default() }
-                ),
-                ReticleAbilityLiftText,
-            ));
-        });
-
         // Reticle-Adjacent Low-Profile Critical Health Alert (Directly below crosshair)
         reticle.spawn((
             TextBundle::from_section(
@@ -3022,61 +2979,14 @@ pub fn update_reticle_adjacent_hud(
 
 pub fn update_reticle_abilities_and_hitmarker(
     time: Res<Time>,
-    ability_state: Res<TacticalAbilityState>,
     mut hit_marker_state: ResMut<HitMarkerState>,
     camera_mode: Res<State<CameraMode>>,
-    mut dash_text_q: Query<&mut Text, (With<ReticleAbilityDashText>, Without<ReticleAbilitySmokeText>, Without<ReticleAbilityIntelText>, Without<ReticleAbilityLiftText>)>,
-    mut smoke_text_q: Query<&mut Text, (With<ReticleAbilitySmokeText>, Without<ReticleAbilityDashText>, Without<ReticleAbilityIntelText>, Without<ReticleAbilityLiftText>)>,
-    mut intel_text_q: Query<&mut Text, (With<ReticleAbilityIntelText>, Without<ReticleAbilityDashText>, Without<ReticleAbilitySmokeText>, Without<ReticleAbilityLiftText>)>,
-    mut lift_text_q: Query<&mut Text, (With<ReticleAbilityLiftText>, Without<ReticleAbilityDashText>, Without<ReticleAbilitySmokeText>, Without<ReticleAbilityIntelText>)>,
     mut hitmarker_q: Query<(&mut Style, &Children), With<ReticleHitMarker>>,
     mut hitmarker_ticks_q: Query<&mut BackgroundColor, With<ReticleHitMarkerTick>>,
 ) {
     if *camera_mode.get() != CameraMode::FPS { return; }
 
-    // 1. Tactical Ability Cooldowns (Left of Crosshair)
-    if let Ok(mut text) = dash_text_q.get_single_mut() {
-        let cd = ability_state.cooldowns.dash_remaining;
-        if cd <= 0.0 {
-            text.sections[0].value = "[Q] DASH".into();
-            text.sections[0].style.color = Color::srgb(0.0, 1.0, 1.0);
-        } else {
-            text.sections[0].value = format!("[Q] {:.1}s", cd);
-            text.sections[0].style.color = Color::srgb(0.4, 0.5, 0.5);
-        }
-    }
-    if let Ok(mut text) = smoke_text_q.get_single_mut() {
-        let cd = ability_state.cooldowns.smoke_remaining;
-        if cd <= 0.0 {
-            text.sections[0].value = "[C] SMOKE".into();
-            text.sections[0].style.color = Color::srgb(0.7, 0.8, 0.9);
-        } else {
-            text.sections[0].value = format!("[C] {:.1}s", cd);
-            text.sections[0].style.color = Color::srgb(0.4, 0.5, 0.5);
-        }
-    }
-    if let Ok(mut text) = intel_text_q.get_single_mut() {
-        let cd = ability_state.cooldowns.intel_remaining;
-        if cd <= 0.0 {
-            text.sections[0].value = "[X] INTEL".into();
-            text.sections[0].style.color = Color::srgb(1.0, 0.85, 0.2);
-        } else {
-            text.sections[0].value = format!("[X] {:.1}s", cd);
-            text.sections[0].style.color = Color::srgb(0.4, 0.5, 0.5);
-        }
-    }
-    if let Ok(mut text) = lift_text_q.get_single_mut() {
-        let cd = ability_state.cooldowns.lift_remaining;
-        if cd <= 0.0 {
-            text.sections[0].value = "[F] LIFT".into();
-            text.sections[0].style.color = Color::srgb(0.2, 1.0, 0.4);
-        } else {
-            text.sections[0].value = format!("[F] {:.1}s", cd);
-            text.sections[0].style.color = Color::srgb(0.4, 0.5, 0.5);
-        }
-    }
-
-    // 2. Reticle Hitmarker Ticks (Auditory/Visual Balance)
+    // Reticle Hitmarker Ticks (Auditory/Visual Balance)
     hit_marker_state.timer.tick(time.delta());
     if let Ok((mut hm_style, children)) = hitmarker_q.get_single_mut() {
         if !hit_marker_state.timer.finished() {
