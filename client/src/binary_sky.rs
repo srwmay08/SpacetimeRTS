@@ -772,6 +772,17 @@ pub fn create_billboard_starfield_mesh(star_count: usize) -> Mesh {
             c[2] *= dim;
         }
 
+        // Atmospheric air mass extinction:
+        // Overhead stars (y >= 0.22, elevation >= 13°) shine at 100% brilliance.
+        // Below 13° down to the horizon (y <= 0.02, ~1° elevation), starlight traverses
+        // exponentially more air mass, aerosols, and ground fog, smoothly extinguishing to 0.
+        let horizon_factor = ((y - 0.02) / 0.20).clamp(0.0, 1.0);
+        let extinction = horizon_factor * horizon_factor; // Smooth quadratic optical depth attenuation
+        c[0] *= extinction;
+        c[1] *= extinction;
+        c[2] *= extinction;
+        c[3] *= extinction;
+
         // Diamond star geometry eliminating square rasterization artifacts:
         // Generates tapered 4-point diamond facets along randomized celestial axes,
         // producing natural stellar glints that taper to sharp subpixel points at the tips.
@@ -2150,6 +2161,38 @@ mod tests {
             "Stars must be uniformly distributed with zero zenith concentration: upper_ratio was {:.3}",
             upper_ratio
         );
+    }
+
+    #[test]
+    fn test_starfield_horizon_extinction() {
+        let star_count = 6000;
+        let mesh = create_billboard_starfield_mesh(star_count);
+        let pos_attr = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
+        let col_attr = match mesh.attribute(Mesh::ATTRIBUTE_COLOR).unwrap() {
+            bevy::render::mesh::VertexAttributeValues::Float32x4(v) => v,
+            _ => panic!("Expected Float32x4 colors"),
+        };
+
+        let mut extinguished_count = 0;
+        let mut overhead_count = 0;
+
+        for i in 0..star_count {
+            let idx = i * 4;
+            let center_y = (pos_attr[idx][1] + pos_attr[idx + 1][1] + pos_attr[idx + 2][1] + pos_attr[idx + 3][1]) / 4.0;
+            let norm_y = center_y / 240.0;
+            let alpha = col_attr[idx][3];
+
+            if norm_y <= 0.02 {
+                assert_eq!(alpha, 0.0, "Stars at or below horizon must be fully extinguished (alpha == 0)");
+                extinguished_count += 1;
+            } else if norm_y >= 0.25 {
+                assert!(alpha >= 0.99, "Stars high above horizon must retain full opacity (alpha == 1.0)");
+                overhead_count += 1;
+            }
+        }
+
+        assert!(extinguished_count > 0, "Must have extinguished stars near horizon");
+        assert!(overhead_count > 0, "Must have bright stars high overhead");
     }
 
     #[test]
