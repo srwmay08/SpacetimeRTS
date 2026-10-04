@@ -356,7 +356,7 @@ impl Default for BinaryEphemerisState {
             diurnal_angle: 0.0,
             primary_orbit_angle: 0.0,
             binary_orbit_angle: 0.0,
-            star_a_direction: Vec3::new(0.0, 0.7071, -0.7071),
+            star_a_direction: Vec3::new(0.0, std::f32::consts::FRAC_1_SQRT_2, -std::f32::consts::FRAC_1_SQRT_2),
             star_a_elevation: PI * 0.25, // High +45° bright sun
             star_a_azimuth: 0.0,
             star_b_direction: Vec3::new(0.5, 0.4, 0.5).normalize(),

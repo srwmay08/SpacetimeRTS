@@ -60,6 +60,7 @@ fn main() {
         ))
         .add_plugins(prediction::PredictionPlugin) 
         .add_plugins(binary_sky::BinarySkyPlugin)
+        .add_plugins(terrain::TerrainPlugin)
         .insert_resource(Msaa::Off)
         
         // Architectural Note: Luminous Sky Clear Color.

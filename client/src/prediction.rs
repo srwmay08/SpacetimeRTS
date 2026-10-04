@@ -6,9 +6,10 @@
 // ----------------------------------------------------------------------------
 // Architectural Note: Implements client-side movement prediction and authoritative
 // server reconciliation. Calculates unacknowledged inputs and intra-tick physics
-// displacement, applying smooth correction without false snapping.
+// displacement, applying smooth correction without false snapping or physics desyncs.
 
 use bevy::prelude::*;
+use avian3d::prelude::Position as PhysicsPosition;
 use std::collections::VecDeque;
 use crate::network::SpacetimeConnection;
 use crate::core::NetworkTickTimer;
@@ -86,13 +87,19 @@ fn buffer_and_send_movement(
 }
 
 fn reconcile_server_state(
-    mut query: Query<(&mut Transform, &mut InputBuffer, &AuthoritativeState, &mut LocalMovementTracker), Changed<AuthoritativeState>>,
+    mut query: Query<(
+        &mut Transform,
+        Option<&mut PhysicsPosition>,
+        &mut InputBuffer,
+        &AuthoritativeState,
+        &mut LocalMovementTracker,
+    ), Changed<AuthoritativeState>>,
 ) {
     // Architectural Note: 0.25m threshold (0.0625m^2) absorbs natural slope elevation
     // clamping while catching true authoritative desyncs.
     const TOLERANCE_SQ: f32 = 0.25 * 0.25;
 
-    for (mut transform, mut buffer, auth_state, mut tracker) in query.iter_mut() {
+    for (mut transform, maybe_physics_pos, mut buffer, auth_state, mut tracker) in query.iter_mut() {
         // 1. Discard acknowledged inputs
         buffer.queue.retain(|input| input.tick_id > auth_state.last_processed_tick);
 
@@ -111,6 +118,10 @@ fn reconcile_server_state(
 
         if divergence_sq > TOLERANCE_SQ {
             transform.translation = expected_live_pos;
+            if let Some(mut phys_pos) = maybe_physics_pos {
+                // Synchronize Avian3D PhysicsPosition so physics engine does not revert transform
+                phys_pos.0 = expected_live_pos;
+            }
             tracker.last_position = expected_live_pos;
 
             tracing::info!(
