@@ -192,6 +192,7 @@ pub fn sync_resource_nodes(
                             FallingTree {
                                 base_pos: origin,
                                 fall_dir,
+                                initial_rotation: transform.rotation,
                                 angle: 0.0,
                                 angular_vel: 0.35,
                                 elapsed: 0.0,
@@ -271,7 +272,7 @@ pub fn sync_resource_nodes(
                 };
                 (
                     tree_mesh,
-                    Collider::cylinder(0.40, 8.5),
+                    Collider::cylinder(0.45, 17.0),
                     0.0,
                     Some(crate::components::TreeComponent { species: tree_style, variant: variant_idx }),
                 )
@@ -335,11 +336,32 @@ pub fn sync_resource_nodes(
             node_mat.clone()
         };
 
+        let (tree_rotation, tree_scale) = if tree_comp_opt.is_some() {
+            // Stable deterministic pseudo-random hash based on node_id
+            let hash1 = ((node.node_id.wrapping_mul(2654435761) ^ (node.node_id >> 16)) % 10000) as f32 / 10000.0;
+            let hash2 = (((node.node_id.wrapping_mul(1664525) + 1013904223) ^ (node.node_id >> 11)) % 10000) as f32 / 10000.0;
+
+            // Randomized degree of rotation around vertical axis (0 to 360 degrees)
+            let yaw = hash1 * std::f32::consts::TAU;
+
+            // Randomized height range: up to 20% taller or shorter than default sizes (0.80 to 1.20)
+            let height_var = 0.80 + (hash2 * 0.40);
+            let width_var = 0.90 + (hash1 * 0.20);
+
+            (Quat::from_rotation_y(yaw), Vec3::new(width_var, height_var, width_var))
+        } else {
+            (Quat::IDENTITY, Vec3::ONE)
+        };
+
         let mut entity_cmd = commands.spawn((
             PbrBundle {
                 mesh, 
                 material: material.clone(),
-                transform: BevyTransform::from_xyz(node.x, node.y + y_offset, node.z),
+                transform: BevyTransform {
+                    translation: Vec3::new(node.x, node.y + y_offset, node.z),
+                    rotation: tree_rotation,
+                    scale: tree_scale,
+                },
                 ..default()
             },
             ResourceNodeItem { 
@@ -408,10 +430,10 @@ pub fn update_falling_trees(
 
         let kickback = falling.fall_dir * (falling.angle * 0.25);
         transform.translation = falling.base_pos + kickback;
-        transform.rotation = rot;
+        transform.rotation = rot * falling.initial_rotation;
 
-        let tip_world = transform.translation + rot * Vec3::new(0.0, 9.2, 0.0);
-        let mid_world = transform.translation + rot * Vec3::new(0.0, 5.0, 0.0);
+        let tip_world = transform.translation + rot * Vec3::new(0.0, 18.0, 0.0);
+        let mid_world = transform.translation + rot * Vec3::new(0.0, 10.0, 0.0);
 
         let ground_y_at_tip = crate::terrain::get_terrain_height(tip_world.x, tip_world.z);
         let ground_y_at_mid = crate::terrain::get_terrain_height(mid_world.x, mid_world.z);
@@ -433,33 +455,33 @@ pub fn update_falling_trees(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
-                base + dir * 1.5,
-                16,
+                base + dir * 3.0,
+                24,
                 Color::srgb(0.34, 0.22, 0.12),
                 Color::srgb(0.44, 0.28, 0.15),
-                0.10,
+                0.12,
             );
 
             crate::terrain::spawn_voxel_gibs(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
-                base + dir * 5.0,
-                20,
+                base + dir * 10.0,
+                32,
                 Color::srgb(0.34, 0.22, 0.12),
                 Color::srgb(0.20, 0.55, 0.20),
-                0.10,
+                0.12,
             );
 
             crate::terrain::spawn_voxel_gibs(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
-                base + dir * 8.0,
-                28,
+                base + dir * 17.0,
+                40,
                 Color::srgb(0.18, 0.55, 0.18),
                 Color::srgb(0.26, 0.68, 0.26),
-                0.08,
+                0.10,
             );
 
             commands.entity(entity).despawn_recursive();

@@ -365,21 +365,21 @@ pub fn create_lowpoly_pine_mesh(seed: u64) -> Mesh {
     // Seed-based conifer variety
     let roll = rng.range(0.0, 1.0);
     let (needle_base, tier_count) = if roll < 0.40 {
-        // Tall dark spruce (6-7 tiers)
-        (d_spruce, (rng.range(5.8, 7.2)).round() as usize)
+        // Tall dark spruce (8-10 tiers)
+        (d_spruce, (rng.range(8.0, 10.4)).round() as usize)
     } else if roll < 0.80 {
-        // Alpine sage fir (4-5 tiers)
-        (m_fir, (rng.range(4.0, 5.2)).round() as usize)
+        // Alpine sage fir (6-8 tiers)
+        (m_fir, (rng.range(6.0, 8.2)).round() as usize)
     } else {
-        // Frost-rimed highland conifer (5 tiers)
-        (l_frost, 5)
+        // Frost-rimed highland conifer (7 tiers)
+        (l_frost, 7)
     };
 
-    let total_h = rng.range(6.8, 9.8);
-    let trunk_r_base = rng.range(0.24, 0.34);
+    let total_h = rng.range(13.6, 19.6);
+    let trunk_r_base = rng.range(0.36, 0.48);
     let trunk_r_top = trunk_r_base * 0.45;
-    let lean_x = rng.range(-0.35, 0.35);
-    let lean_z = rng.range(-0.35, 0.35);
+    let lean_x = rng.range(-0.5, 0.5);
+    let lean_z = rng.range(-0.5, 0.5);
 
     let trunk_base = Vec3::ZERO;
     let trunk_top = Vec3::new(lean_x, total_h * 0.88, lean_z);
@@ -389,15 +389,15 @@ pub fn create_lowpoly_pine_mesh(seed: u64) -> Mesh {
 
     // Stacked conical skirts
     let skirt_sides = (rng.range(6.0, 8.4)).round() as usize; // 6 to 8 facets
-    let start_y = total_h * 0.22;
+    let start_y = total_h * 0.20;
     let end_y = total_h;
     let y_step = (end_y - start_y) / tier_count as f32;
 
     for i in 0..tier_count {
         let t = i as f32 / tier_count as f32;
         let tier_y = start_y + i as f32 * y_step;
-        let tier_r = (2.2 * (1.0 - t * 0.72) * rng.range(0.90, 1.12)).max(0.45);
-        let tier_apex_y = (tier_y + y_step * 1.5).min(total_h + 0.3);
+        let tier_r = (3.2 * (1.0 - t * 0.72) * rng.range(0.90, 1.12)).max(0.65);
+        let tier_apex_y = (tier_y + y_step * 1.5).min(total_h + 0.4);
 
         let lean_frac = tier_y / total_h;
         let center = Vec3::new(lean_x * lean_frac, tier_y, lean_z * lean_frac);
@@ -411,14 +411,14 @@ pub fn create_lowpoly_pine_mesh(seed: u64) -> Mesh {
             1.0,
         ];
 
-        let overhang = 0.25 + (1.0 - t) * 0.20;
+        let overhang = 0.35 + (1.0 - t) * 0.25;
         builder.add_cone_skirt(apex, center, tier_r, skirt_sides, col, overhang);
     }
 
     // Apex needle spire
-    let spire_apex = Vec3::new(lean_x, total_h + 0.4, lean_z);
+    let spire_apex = Vec3::new(lean_x, total_h + 0.6, lean_z);
     let spire_base = Vec3::new(lean_x, total_h * 0.92, lean_z);
-    builder.add_cone_skirt(spire_apex, spire_base, 0.45, skirt_sides, needle_base, 0.15);
+    builder.add_cone_skirt(spire_apex, spire_base, 0.60, skirt_sides, needle_base, 0.20);
 
     builder.build()
 }
@@ -438,11 +438,11 @@ pub fn create_lowpoly_oak_mesh(seed: u64) -> Mesh {
     let canopy_col = rng.blend_color(amber_base, orange_base, t_blend * 0.6);
     let gold_highlight = rng.blend_color(gold_base, amber_base, 0.35);
 
-    let trunk_h = rng.range(2.8, 3.8);
-    let trunk_r = rng.range(0.35, 0.48);
+    let trunk_h = rng.range(5.6, 7.6);
+    let trunk_r = rng.range(0.48, 0.65);
 
     let trunk_base = Vec3::ZERO;
-    let fork_pt = Vec3::new(rng.range(-0.25, 0.25), trunk_h, rng.range(-0.25, 0.25));
+    let fork_pt = Vec3::new(rng.range(-0.4, 0.4), trunk_h, rng.range(-0.4, 0.4));
 
     // Sturdy 6-sided lower trunk
     builder.add_tapered_prism(trunk_base, fork_pt, trunk_r, trunk_r * 0.82, 6, bark, true, true);
@@ -453,9 +453,9 @@ pub fn create_lowpoly_oak_mesh(seed: u64) -> Mesh {
         let root_dir = Vec3::new(ang.cos(), 0.0, ang.sin());
         builder.add_tapered_prism(
             trunk_base,
-            trunk_base + root_dir * 0.75,
+            trunk_base + root_dir * 1.2,
             trunk_r * 0.65,
-            0.08,
+            0.12,
             4,
             bark,
             true,
@@ -469,8 +469,8 @@ pub fn create_lowpoly_oak_mesh(seed: u64) -> Mesh {
 
     for i in 0..branch_count {
         let ang = (i as f32 / branch_count as f32) * 2.0 * PI + rng.range(-0.35, 0.35);
-        let dist = rng.range(1.4, 2.2);
-        let lift = rng.range(1.2, 2.0);
+        let dist = rng.range(2.6, 4.0);
+        let lift = rng.range(2.4, 3.8);
         let tip = fork_pt + Vec3::new(ang.cos() * dist, lift, ang.sin() * dist);
 
         builder.add_tapered_prism(fork_pt, tip, trunk_r * 0.58, trunk_r * 0.30, 5, bark, false, true);
@@ -478,19 +478,19 @@ pub fn create_lowpoly_oak_mesh(seed: u64) -> Mesh {
     }
 
     // Central primary canopy blob
-    let center_blob_pos = fork_pt + Vec3::new(0.0, rng.range(1.4, 2.0), 0.0);
-    let rx = rng.range(2.0, 2.6);
-    let ry = rng.range(1.4, 1.9);
-    let rz = rng.range(2.0, 2.6);
+    let center_blob_pos = fork_pt + Vec3::new(0.0, rng.range(2.8, 3.8), 0.0);
+    let rx = rng.range(3.2, 4.2);
+    let ry = rng.range(2.4, 3.4);
+    let rz = rng.range(3.2, 4.2);
     builder.add_faceted_blob(center_blob_pos, Vec3::new(rx, ry, rz), canopy_col, 0, &mut rng, 0.18);
 
     // Secondary canopy clusters atop branch tips
     for (i, tip) in branch_tips.into_iter().enumerate() {
-        let lobe_rx = rng.range(1.2, 1.7);
-        let lobe_ry = rng.range(1.0, 1.4);
-        let lobe_rz = rng.range(1.2, 1.7);
+        let lobe_rx = rng.range(2.0, 2.8);
+        let lobe_ry = rng.range(1.6, 2.4);
+        let lobe_rz = rng.range(2.0, 2.8);
         let col = if i % 2 == 0 { canopy_col } else { gold_highlight };
-        builder.add_faceted_blob(tip + Vec3::new(0.0, 0.5, 0.0), Vec3::new(lobe_rx, lobe_ry, lobe_rz), col, 0, &mut rng, 0.15);
+        builder.add_faceted_blob(tip + Vec3::new(0.0, 0.8, 0.0), Vec3::new(lobe_rx, lobe_ry, lobe_rz), col, 0, &mut rng, 0.15);
     }
 
     builder.build()
@@ -507,9 +507,9 @@ pub fn create_lowpoly_round_tree_mesh(seed: u64) -> Mesh {
     let chartreuse = [0.55, 0.84, 0.26, 1.0];
     let olive = [0.35, 0.62, 0.18, 1.0];
 
-    let trunk_h = rng.range(2.6, 3.6);
-    let trunk_r = rng.range(0.22, 0.30);
-    let trunk_top = Vec3::new(rng.range(-0.18, 0.18), trunk_h, rng.range(-0.18, 0.18));
+    let trunk_h = rng.range(5.2, 7.2);
+    let trunk_r = rng.range(0.32, 0.44);
+    let trunk_top = Vec3::new(rng.range(-0.3, 0.3), trunk_h, rng.range(-0.3, 0.3));
 
     // Slender 5-sided trunk
     builder.add_tapered_prism(Vec3::ZERO, trunk_top, trunk_r, trunk_r * 0.65, 5, bark, true, true);
@@ -517,20 +517,20 @@ pub fn create_lowpoly_round_tree_mesh(seed: u64) -> Mesh {
     let variety_roll = rng.range(0.0, 1.0);
     if variety_roll < 0.50 {
         // Variant A: Double-Blob Clustered Deciduous (lower secondary lobe + upper primary crown)
-        let lower_pos = trunk_top + Vec3::new(rng.range(-0.35, 0.35), 0.6, rng.range(-0.35, 0.35));
-        let upper_pos = trunk_top + Vec3::new(0.0, 1.9, 0.0);
+        let lower_pos = trunk_top + Vec3::new(rng.range(-0.6, 0.6), 1.2, rng.range(-0.6, 0.6));
+        let upper_pos = trunk_top + Vec3::new(0.0, 3.6, 0.0);
 
-        let r_lower = rng.range(1.3, 1.7);
-        let r_upper = rng.range(1.8, 2.3);
+        let r_lower = rng.range(2.2, 2.8);
+        let r_upper = rng.range(2.8, 3.6);
 
         builder.add_faceted_blob(lower_pos, Vec3::new(r_lower, r_lower * 0.85, r_lower), olive, 0, &mut rng, 0.16);
         builder.add_faceted_blob(upper_pos, Vec3::new(r_upper, r_upper * 1.05, r_upper), chartreuse, 0, &mut rng, 0.15);
     } else {
         // Variant B: Teardrop / Poplar (vertically elongated, pinched top and base)
-        let crown_center = trunk_top + Vec3::new(0.0, 2.2, 0.0);
-        let rx = rng.range(1.4, 1.8);
-        let ry = rng.range(2.5, 3.3);
-        let rz = rng.range(1.4, 1.8);
+        let crown_center = trunk_top + Vec3::new(0.0, 4.4, 0.0);
+        let rx = rng.range(2.2, 2.8);
+        let ry = rng.range(4.8, 6.4);
+        let rz = rng.range(2.2, 2.8);
 
         builder.add_faceted_blob(crown_center, Vec3::new(rx, ry, rz), lime_green, 0, &mut rng, 0.14);
     }
@@ -548,10 +548,10 @@ pub fn create_lowpoly_dead_tree_mesh(seed: u64) -> Mesh {
     let shadow_base = [0.45, 0.36, 0.24, 1.0];
     let wood_tip = [0.78, 0.68, 0.50, 1.0];
 
-    let trunk_h = rng.range(5.5, 7.5);
-    let trunk_r = rng.range(0.35, 0.48);
-    let lean_x = rng.range(-0.6, 0.6);
-    let lean_z = rng.range(-0.6, 0.6);
+    let trunk_h = rng.range(11.0, 15.0);
+    let trunk_r = rng.range(0.48, 0.65);
+    let lean_x = rng.range(-1.0, 1.0);
+    let lean_z = rng.range(-1.0, 1.0);
 
     let trunk_base = Vec3::ZERO;
     let trunk_mid = Vec3::new(lean_x * 0.45, trunk_h * 0.55, lean_z * 0.45);
@@ -564,15 +564,15 @@ pub fn create_lowpoly_dead_tree_mesh(seed: u64) -> Mesh {
     // Root buttresses
     for i in 0..4 {
         let ang = i as f32 * (PI * 0.5) + rng.range(-0.25, 0.25);
-        let root_end = Vec3::new(ang.cos() * 0.9, 0.0, ang.sin() * 0.9);
-        builder.add_tapered_prism(trunk_base, root_end, trunk_r * 0.6, 0.06, 4, shadow_base, true, true);
+        let root_end = Vec3::new(ang.cos() * 1.5, 0.0, ang.sin() * 1.5);
+        builder.add_tapered_prism(trunk_base, root_end, trunk_r * 0.6, 0.10, 4, shadow_base, true, true);
     }
 
     // Bare jagged branches
     let branch_levels = [
-        (trunk_mid, 1.8, 1.2, 0.22),
-        (trunk_mid + Vec3::new(0.0, 1.0, 0.0), 2.2, 1.6, 0.18),
-        (trunk_top, 1.4, 0.9, 0.14),
+        (trunk_mid, 3.2, 2.4, 0.35),
+        (trunk_mid + Vec3::new(0.0, 2.0, 0.0), 3.8, 3.2, 0.28),
+        (trunk_top, 2.6, 1.8, 0.22),
     ];
 
     for (origin, reach, lift, thick) in branch_levels {
@@ -582,7 +582,7 @@ pub fn create_lowpoly_dead_tree_mesh(seed: u64) -> Mesh {
 
         // Sub-twig
         let sub_ang = ang + rng.range(-0.8, 0.8);
-        let sub_end = b_end + Vec3::new(sub_ang.cos() * 0.8, 0.6, sub_ang.sin() * 0.8);
+        let sub_end = b_end + Vec3::new(sub_ang.cos() * 1.4, 1.0, sub_ang.sin() * 1.4);
         builder.add_tapered_prism(b_end, sub_end, thick * 0.55, 0.04, 3, wood_tip, false, true);
     }
 

@@ -770,193 +770,80 @@ pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
     }
 }
 
-#[spacetimedb::reducer(client_connected)]
-pub fn client_connected(ctx: &ReducerContext) {
-    let sender = ctx.sender();
+pub fn spawn_world_resource_nodes(ctx: &ReducerContext) {
+    let existing: Vec<u64> = ctx.db.resource_node().iter().map(|n| n.node_id).collect();
+    for id in existing {
+        ctx.db.resource_node().node_id().delete(id);
+    }
 
-    let node_count = ctx.db.resource_node().iter().count();
-    if node_count < 14000 {
-        if node_count > 0 {
-            let existing: Vec<u64> = ctx.db.resource_node().iter().map(|n| n.node_id).collect();
-            for id in existing {
-                ctx.db.resource_node().node_id().delete(id);
-            }
-        }
+    let mut seed = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    let mut total_spawned = 0usize;
 
-        let mut seed = ctx.timestamp.to_micros_since_unix_epoch() as u64;
-        let mut total_spawned = 0usize;
+    // Fast 2D spatial grid for instantaneous overlap testing at high density
+    let cell_size = 10.0f32;
+    let grid_dim = 42usize; // -210 to +210 on X and Z
+    let mut grid: Vec<Vec<(f32, f32, f32)>> = vec![Vec::with_capacity(32); grid_dim * grid_dim];
 
-        // Fast 2D spatial grid for instantaneous overlap testing at high density
-        let cell_size = 10.0f32;
-        let grid_dim = 42usize; // -210 to +210 on X and Z
-        let mut grid: Vec<Vec<(f32, f32, f32)>> = vec![Vec::with_capacity(24); grid_dim * grid_dim];
-
-        let check_overlap = |x: f32, z: f32, spacing: f32, grid: &[Vec<(f32, f32, f32)>]| -> bool {
-            let gx = ((x + 210.0) / cell_size).floor() as i32;
-            let gz = ((z + 210.0) / cell_size).floor() as i32;
-            for ix in (gx - 1).max(0)..=(gx + 1).min(grid_dim as i32 - 1) {
-                for iz in (gz - 1).max(0)..=(gz + 1).min(grid_dim as i32 - 1) {
-                    let idx = (ix as usize) * grid_dim + (iz as usize);
-                    for &(px, pz, ps) in &grid[idx] {
-                        let min_d = spacing.max(ps);
-                        if (px - x) * (px - x) + (pz - z) * (pz - z) < min_d * min_d {
-                            return true;
-                        }
+    let check_overlap = |x: f32, z: f32, spacing: f32, grid: &[Vec<(f32, f32, f32)>]| -> bool {
+        let gx = ((x + 210.0) / cell_size).floor() as i32;
+        let gz = ((z + 210.0) / cell_size).floor() as i32;
+        for ix in (gx - 1).max(0)..=(gx + 1).min(grid_dim as i32 - 1) {
+            for iz in (gz - 1).max(0)..=(gz + 1).min(grid_dim as i32 - 1) {
+                let idx = (ix as usize) * grid_dim + (iz as usize);
+                for &(px, pz, ps) in &grid[idx] {
+                    let min_d = spacing.max(ps);
+                    if (px - x) * (px - x) + (pz - z) * (pz - z) < min_d * min_d {
+                        return true;
                     }
                 }
             }
-            false
+        }
+        false
+    };
+
+    let insert_spatial = |x: f32, z: f32, spacing: f32, grid: &mut [Vec<(f32, f32, f32)>]| {
+        let gx = ((x + 210.0) / cell_size).floor() as i32;
+        let gz = ((z + 210.0) / cell_size).floor() as i32;
+        if gx >= 0 && gx < grid_dim as i32 && gz >= 0 && gz < grid_dim as i32 {
+            grid[(gx as usize) * grid_dim + (gz as usize)].push((x, z, spacing));
+        }
+    };
+
+    // 1. Generate 144-192 forest centers across the world map (further doubled groves)
+    let num_forests = 144 + (prng(&mut seed) * 48.0) as usize;
+    let mut forest_centers: Vec<(f32, f32, f32, &'static str)> = Vec::with_capacity(num_forests);
+
+    for _ in 0..num_forests {
+        let fx = (prng(&mut seed) * 360.0) - 180.0;
+        let fz = (prng(&mut seed) * 360.0) - 180.0;
+        let fr = 24.0 + prng(&mut seed) * 36.0; // 24-60m radius
+        let fy = get_terrain_height(fx, fz);
+        let biome = get_biome(fy);
+        // Species clump grouping: Each forest has a dominant species archetype!
+        let species = match biome {
+            Biome::Lowland => if prng(&mut seed) < 0.60 { "Oak" } else { "Round" },
+            Biome::Hill => if prng(&mut seed) < 0.70 { "Pine" } else { "Oak" },
+            Biome::Mountain => if prng(&mut seed) < 0.75 { "Pine" } else { "Dead" },
         };
+        forest_centers.push((fx, fz, fr, species));
+    }
 
-        let insert_spatial = |x: f32, z: f32, spacing: f32, grid: &mut [Vec<(f32, f32, f32)>]| {
-            let gx = ((x + 210.0) / cell_size).floor() as i32;
-            let gz = ((z + 210.0) / cell_size).floor() as i32;
-            if gx >= 0 && gx < grid_dim as i32 && gz >= 0 && gz < grid_dim as i32 {
-                grid[(gx as usize) * grid_dim + (gz as usize)].push((x, z, spacing));
+    // 2. Spawn trees around forest centers with gaussian falloff (dense groves: 280-460 trees per cluster)
+    for &(fx, fz, fr, dominant_species) in &forest_centers {
+        let cluster_size = (280.0 + prng(&mut seed) * 180.0) as usize;
+
+        for _ in 0..cluster_size {
+            let angle = prng(&mut seed) * std::f32::consts::TAU;
+            let dist = gaussian_rand(&mut seed).abs() * fr;
+            let rx = fx + angle.cos() * dist;
+            let rz = fz + angle.sin() * dist;
+
+            if rx.abs() > 195.0 || rz.abs() > 195.0 {
+                continue;
             }
-        };
 
-        // 1. Generate 72-96 forest centers across the world map (further doubled groves)
-        let num_forests = 72 + (prng(&mut seed) * 24.0) as usize;
-        let mut forest_centers: Vec<(f32, f32, f32, &'static str)> = Vec::with_capacity(num_forests);
-
-        for _ in 0..num_forests {
-            let fx = (prng(&mut seed) * 360.0) - 180.0;
-            let fz = (prng(&mut seed) * 360.0) - 180.0;
-            let fr = 24.0 + prng(&mut seed) * 36.0; // 24-60m radius
-            let fy = get_terrain_height(fx, fz);
-            let biome = get_biome(fy);
-            // Species clump grouping: Each forest has a dominant species archetype!
-            let species = match biome {
-                Biome::Lowland => if prng(&mut seed) < 0.60 { "Oak" } else { "Round" },
-                Biome::Hill => if prng(&mut seed) < 0.70 { "Pine" } else { "Oak" },
-                Biome::Mountain => if prng(&mut seed) < 0.75 { "Pine" } else { "Dead" },
-            };
-            forest_centers.push((fx, fz, fr, species));
-        }
-
-        // 2. Spawn trees around forest centers with gaussian falloff (dense groves: 180-320 trees per cluster)
-        for &(fx, fz, fr, dominant_species) in &forest_centers {
-            let cluster_size = (180.0 + prng(&mut seed) * 140.0) as usize;
-
-            for _ in 0..cluster_size {
-                let angle = prng(&mut seed) * std::f32::consts::TAU;
-                let dist = gaussian_rand(&mut seed).abs() * fr;
-                let rx = fx + angle.cos() * dist;
-                let rz = fz + angle.sin() * dist;
-
-                if rx.abs() > 195.0 || rz.abs() > 195.0 {
-                    continue;
-                }
-
-                let zone = get_zone(dist, fr);
-                let req_spacing = get_spacing(zone, &mut seed) * 0.40;
-
-                if check_overlap(rx, rz, req_spacing, &grid) {
-                    continue;
-                }
-
-                let ry = get_terrain_height(rx, rz);
-                if ry > 1.5 && ry < 25.0 {
-                    let biome = get_biome(ry);
-                    let sc = match biome {
-                        Biome::Lowland => 0.9 + prng(&mut seed) * 1.2,
-                        Biome::Hill => 0.8 + prng(&mut seed) * 1.0,
-                        Biome::Mountain => 0.6 + prng(&mut seed) * 0.8,
-                    };
-                    let tool = if sc > 1.2 { "Stone Axe" } else { "None" };
-                    let health = (3.0 * sc).max(1.0) as u32;
-
-                    // Clump species coherence: 85% dominant species of this grove, 15% understory mix
-                    let tree_type = if prng(&mut seed) < 0.85 {
-                        match dominant_species {
-                            "Oak" => "Tree:Oak",
-                            "Pine" => "Tree:Pine",
-                            "Round" => "Tree:Round",
-                            _ => "Tree:Dead",
-                        }
-                    } else {
-                        match biome {
-                            Biome::Lowland => if prng(&mut seed) < 0.5 { "Tree:Round" } else { "Tree:Oak" },
-                            Biome::Hill => if prng(&mut seed) < 0.6 { "Tree:Pine" } else { "Tree:Oak" },
-                            Biome::Mountain => if prng(&mut seed) < 0.7 { "Tree:Pine" } else { "Tree:Dead" },
-                        }
-                    };
-
-                    ctx.db.resource_node().insert(ResourceNode {
-                        node_id: 0,
-                        node_type: tree_type.into(),
-                        x: rx,
-                        y: ry,
-                        z: rz,
-                        chunk_x: (rx / 50.0).floor() as i32,
-                        chunk_z: (rz / 50.0).floor() as i32,
-                        health,
-                        scale: sc,
-                        required_tool: tool.into(),
-                    });
-                    insert_spatial(rx, rz, req_spacing, &mut grid);
-                    total_spawned += 1;
-
-                    // Understory vegetation in ForestCore
-                    if zone == Zone::ForestCore && prng(&mut seed) < 0.30 {
-                        let ux = rx + (prng(&mut seed) * 3.0 - 1.5);
-                        let uz = rz + (prng(&mut seed) * 3.0 - 1.5);
-                        if ux.abs() <= 195.0 && uz.abs() <= 195.0 && !check_overlap(ux, uz, 1.0, &grid) {
-                            let uy = get_terrain_height(ux, uz);
-                            if uy > 1.5 && uy < 25.0 {
-                                let u_type = if prng(&mut seed) < 0.6 { "Bush" } else { "Branch" };
-                                ctx.db.resource_node().insert(ResourceNode {
-                                    node_id: 0,
-                                    node_type: u_type.into(),
-                                    x: ux,
-                                    y: uy,
-                                    z: uz,
-                                    chunk_x: (ux / 50.0).floor() as i32,
-                                    chunk_z: (uz / 50.0).floor() as i32,
-                                    health: 1,
-                                    scale: 0.8,
-                                    required_tool: "None".into(),
-                                });
-                                insert_spatial(ux, uz, 1.0, &mut grid);
-                                total_spawned += 1;
-                            }
-                        }
-                    }
-
-                    // Fallen logs in clearings
-                    if zone == Zone::Clearing && prng(&mut seed) < 0.12 {
-                        let lx = rx + (prng(&mut seed) * 6.0 - 3.0);
-                        let lz = rz + (prng(&mut seed) * 6.0 - 3.0);
-                        if lx.abs() <= 195.0 && lz.abs() <= 195.0 && !check_overlap(lx, lz, 2.4, &grid) {
-                            let ly = get_terrain_height(lx, lz);
-                            if ly > 1.5 && ly < 25.0 {
-                                ctx.db.resource_node().insert(ResourceNode {
-                                    node_id: 0,
-                                    node_type: "FallenLog".into(),
-                                    x: lx,
-                                    y: ly,
-                                    z: lz,
-                                    chunk_x: (lx / 50.0).floor() as i32,
-                                    chunk_z: (lz / 50.0).floor() as i32,
-                                    health: 2,
-                                    scale: 1.0,
-                                    required_tool: "None".into(),
-                                });
-                                insert_spatial(lx, lz, 2.4, &mut grid);
-                                total_spawned += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Add scattered lone trees outside forests (2,560 lone trees, doubled from 1,280)
-        for _ in 0..2560 {
-            let rx = (prng(&mut seed) * 380.0) - 190.0;
-            let rz = (prng(&mut seed) * 380.0) - 190.0;
-            let req_spacing = get_spacing(Zone::Open, &mut seed) * 0.40;
+            let zone = get_zone(dist, fr);
+            let req_spacing = get_spacing(zone, &mut seed) * 0.25;
 
             if check_overlap(rx, rz, req_spacing, &grid) {
                 continue;
@@ -973,10 +860,20 @@ pub fn client_connected(ctx: &ReducerContext) {
                 let tool = if sc > 1.2 { "Stone Axe" } else { "None" };
                 let health = (3.0 * sc).max(1.0) as u32;
 
-                let tree_type = match biome {
-                    Biome::Lowland => if prng(&mut seed) < 0.5 { "Tree:Oak" } else { "Tree:Round" },
-                    Biome::Hill => if prng(&mut seed) < 0.6 { "Tree:Pine" } else { "Tree:Oak" },
-                    Biome::Mountain => if prng(&mut seed) < 0.7 { "Tree:Pine" } else { "Tree:Dead" },
+                // Clump species coherence: 85% dominant species of this grove, 15% understory mix
+                let tree_type = if prng(&mut seed) < 0.85 {
+                    match dominant_species {
+                        "Oak" => "Tree:Oak",
+                        "Pine" => "Tree:Pine",
+                        "Round" => "Tree:Round",
+                        _ => "Tree:Dead",
+                    }
+                } else {
+                    match biome {
+                        Biome::Lowland => if prng(&mut seed) < 0.5 { "Tree:Round" } else { "Tree:Oak" },
+                        Biome::Hill => if prng(&mut seed) < 0.6 { "Tree:Pine" } else { "Tree:Oak" },
+                        Biome::Mountain => if prng(&mut seed) < 0.7 { "Tree:Pine" } else { "Tree:Dead" },
+                    }
                 };
 
                 ctx.db.resource_node().insert(ResourceNode {
@@ -993,60 +890,171 @@ pub fn client_connected(ctx: &ReducerContext) {
                 });
                 insert_spatial(rx, rz, req_spacing, &mut grid);
                 total_spawned += 1;
+
+                // Understory vegetation in ForestCore
+                if zone == Zone::ForestCore && prng(&mut seed) < 0.30 {
+                    let ux = rx + (prng(&mut seed) * 3.0 - 1.5);
+                    let uz = rz + (prng(&mut seed) * 3.0 - 1.5);
+                    if ux.abs() <= 195.0 && uz.abs() <= 195.0 && !check_overlap(ux, uz, 1.0, &grid) {
+                        let uy = get_terrain_height(ux, uz);
+                        if uy > 1.5 && uy < 25.0 {
+                            let u_type = if prng(&mut seed) < 0.6 { "Bush" } else { "Branch" };
+                            ctx.db.resource_node().insert(ResourceNode {
+                                node_id: 0,
+                                node_type: u_type.into(),
+                                x: ux,
+                                y: uy,
+                                z: uz,
+                                chunk_x: (ux / 50.0).floor() as i32,
+                                chunk_z: (uz / 50.0).floor() as i32,
+                                health: 1,
+                                scale: 0.8,
+                                required_tool: "None".into(),
+                            });
+                            insert_spatial(ux, uz, 1.0, &mut grid);
+                            total_spawned += 1;
+                        }
+                    }
+                }
+
+                // Fallen logs in clearings
+                if zone == Zone::Clearing && prng(&mut seed) < 0.12 {
+                    let lx = rx + (prng(&mut seed) * 6.0 - 3.0);
+                    let lz = rz + (prng(&mut seed) * 6.0 - 3.0);
+                    if lx.abs() <= 195.0 && lz.abs() <= 195.0 && !check_overlap(lx, lz, 2.4, &grid) {
+                        let ly = get_terrain_height(lx, lz);
+                        if ly > 1.5 && ly < 25.0 {
+                            ctx.db.resource_node().insert(ResourceNode {
+                                node_id: 0,
+                                node_type: "FallenLog".into(),
+                                x: lx,
+                                y: ly,
+                                z: lz,
+                                chunk_x: (lx / 50.0).floor() as i32,
+                                chunk_z: (lz / 50.0).floor() as i32,
+                                health: 2,
+                                scale: 1.0,
+                                required_tool: "None".into(),
+                            });
+                            insert_spatial(lx, lz, 2.4, &mut grid);
+                            total_spawned += 1;
+                        }
+                    }
+                }
             }
         }
+    }
 
-        // 4. Spawn non-tree mineral and foraging resources up to target density (~24,000 nodes)
-        let mut attempts = 0;
-        while total_spawned < 24000 && attempts < 28000 {
-            attempts += 1;
-            let rx = (prng(&mut seed) * 390.0) - 195.0;
-            let rz = (prng(&mut seed) * 390.0) - 195.0;
-            let req_spacing = 2.8;
+    // 3. Add scattered lone trees outside forests (5,120 lone trees, doubled from 2,560)
+    for _ in 0..5120 {
+        let rx = (prng(&mut seed) * 380.0) - 190.0;
+        let rz = (prng(&mut seed) * 380.0) - 190.0;
+        let req_spacing = get_spacing(Zone::Open, &mut seed) * 0.25;
 
-            if check_overlap(rx, rz, req_spacing, &grid) {
-                continue;
-            }
-
-            let ry = get_terrain_height(rx, rz);
-            if ry > 1.5 && ry < 25.0 {
-                let biome = get_biome(ry);
-                let type_roll = prng(&mut seed);
-
-                let (node_type, scale, health, req_tool) = if biome == Biome::Mountain || ry > 14.0 {
-                    let sc = 0.6 + prng(&mut seed) * 2.4;
-                    ("Rock", sc, (4.0 * sc) as u32, "Pickaxe")
-                } else if type_roll < 0.22 {
-                    ("Flint", 0.6, 1, "None")
-                } else if type_roll < 0.44 {
-                    ("LooseStone", 0.6, 1, "None")
-                } else if type_roll < 0.66 {
-                    ("Branch", 0.6, 1, "None")
-                } else if type_roll < 0.88 {
-                    ("Bush", 1.0, 1, "None")
-                } else {
-                    let sc = 0.5 + prng(&mut seed) * 1.8;
-                    ("Rock", sc, (4.0 * sc) as u32, "Pickaxe")
-                };
-
-                ctx.db.resource_node().insert(ResourceNode {
-                    node_id: 0,
-                    node_type: node_type.into(),
-                    x: rx,
-                    y: ry,
-                    z: rz,
-                    chunk_x: (rx / 50.0).floor() as i32,
-                    chunk_z: (rz / 50.0).floor() as i32,
-                    health,
-                    scale,
-                    required_tool: req_tool.into(),
-                });
-                insert_spatial(rx, rz, req_spacing, &mut grid);
-                total_spawned += 1;
-            }
+        if check_overlap(rx, rz, req_spacing, &grid) {
+            continue;
         }
 
+        let ry = get_terrain_height(rx, rz);
+        if ry > 1.5 && ry < 25.0 {
+            let biome = get_biome(ry);
+            let sc = match biome {
+                Biome::Lowland => 0.9 + prng(&mut seed) * 1.2,
+                Biome::Hill => 0.8 + prng(&mut seed) * 1.0,
+                Biome::Mountain => 0.6 + prng(&mut seed) * 0.8,
+            };
+            let tool = if sc > 1.2 { "Stone Axe" } else { "None" };
+            let health = (3.0 * sc).max(1.0) as u32;
 
+            let tree_type = match biome {
+                Biome::Lowland => if prng(&mut seed) < 0.5 { "Tree:Oak" } else { "Tree:Round" },
+                Biome::Hill => if prng(&mut seed) < 0.6 { "Tree:Pine" } else { "Tree:Oak" },
+                Biome::Mountain => if prng(&mut seed) < 0.7 { "Tree:Pine" } else { "Tree:Dead" },
+            };
+
+            ctx.db.resource_node().insert(ResourceNode {
+                node_id: 0,
+                node_type: tree_type.into(),
+                x: rx,
+                y: ry,
+                z: rz,
+                chunk_x: (rx / 50.0).floor() as i32,
+                chunk_z: (rz / 50.0).floor() as i32,
+                health,
+                scale: sc,
+                required_tool: tool.into(),
+            });
+            insert_spatial(rx, rz, req_spacing, &mut grid);
+            total_spawned += 1;
+        }
+    }
+
+    // 4. Spawn non-tree mineral and foraging resources up to target density (~48,000 nodes)
+    let mut attempts = 0;
+    while total_spawned < 48000 && attempts < 56000 {
+        attempts += 1;
+        let rx = (prng(&mut seed) * 390.0) - 195.0;
+        let rz = (prng(&mut seed) * 390.0) - 195.0;
+        let req_spacing = 2.4;
+
+        if check_overlap(rx, rz, req_spacing, &grid) {
+            continue;
+        }
+
+        let ry = get_terrain_height(rx, rz);
+        if ry > 1.5 && ry < 25.0 {
+            let biome = get_biome(ry);
+            let type_roll = prng(&mut seed);
+
+            let (node_type, scale, health, req_tool) = if biome == Biome::Mountain || ry > 14.0 {
+                let sc = 0.6 + prng(&mut seed) * 2.4;
+                ("Rock", sc, (4.0 * sc) as u32, "Pickaxe")
+            } else if type_roll < 0.22 {
+                ("Flint", 0.6, 1, "None")
+            } else if type_roll < 0.44 {
+                ("LooseStone", 0.6, 1, "None")
+            } else if type_roll < 0.66 {
+                ("Branch", 0.6, 1, "None")
+            } else if type_roll < 0.88 {
+                ("Bush", 1.0, 1, "None")
+            } else {
+                let sc = 0.5 + prng(&mut seed) * 1.8;
+                ("Rock", sc, (4.0 * sc) as u32, "Pickaxe")
+            };
+
+            ctx.db.resource_node().insert(ResourceNode {
+                node_id: 0,
+                node_type: node_type.into(),
+                x: rx,
+                y: ry,
+                z: rz,
+                chunk_x: (rx / 50.0).floor() as i32,
+                chunk_z: (rz / 50.0).floor() as i32,
+                health,
+                scale,
+                required_tool: req_tool.into(),
+            });
+            insert_spatial(rx, rz, req_spacing, &mut grid);
+            total_spawned += 1;
+        }
+    }
+}
+
+#[reducer]
+pub fn admin_respawn_resources(ctx: &ReducerContext) {
+    spawn_world_resource_nodes(ctx);
+}
+
+#[spacetimedb::reducer(client_connected)]
+pub fn client_connected(ctx: &ReducerContext) {
+    let sender = ctx.sender();
+
+    let node_count = ctx.db.resource_node().iter().count();
+    if node_count < 28000 {
+        spawn_world_resource_nodes(ctx);
+    }
+
+    if ctx.db.structure().iter().count() == 0 {
         let base_x = 0.0;
         let base_z = 15.0;
         let base_y = get_terrain_height(base_x, base_z) + 0.5;

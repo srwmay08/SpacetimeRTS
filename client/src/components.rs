@@ -99,6 +99,7 @@ pub struct VoxelGib {
 pub struct FallingTree {
     pub base_pos: Vec3,
     pub fall_dir: Vec3,
+    pub initial_rotation: Quat,
     pub angle: f32,
     pub angular_vel: f32,
     pub elapsed: f32,
