@@ -778,16 +778,31 @@ pub fn create_billboard_starfield_mesh(star_count: usize) -> Mesh {
             c[2] *= dim;
         }
 
-        // Atmospheric air mass extinction:
-        // Overhead stars (y >= 0.22, elevation >= 13°) shine at 100% brilliance.
-        // Below 13° down to the horizon (y <= 0.02, ~1° elevation), starlight traverses
-        // exponentially more air mass, aerosols, and ground fog, smoothly extinguishing to 0.
-        let horizon_factor = ((y - 0.02) / 0.20).clamp(0.0, 1.0);
-        let extinction = horizon_factor * horizon_factor; // Smooth quadratic optical depth attenuation
-        c[0] *= extinction;
-        c[1] *= extinction;
-        c[2] *= extinction;
-        c[3] *= extinction;
+        // Magnitude-tiered atmospheric air mass extinction:
+        // In real observational astronomy, prominent 0th-magnitude guide stars punch through
+        // much thicker low-horizon haze than faint 5th-magnitude background field stars.
+        let is_guide_star = u3 > 0.97;
+        let is_nav_star = u3 > 0.82;
+
+        let (cutoff_y, full_y) = if is_guide_star {
+            (0.015, 0.075) // Guide stars: visible down to ~1.2°
+        } else if is_nav_star {
+            (0.025, 0.110) // Navigational stars: visible down to ~2.5°
+        } else {
+            (0.040, 0.145) // Faint background stars: fade across 2.5° to 8.3°
+        };
+
+        let horizon_factor = ((y - cutoff_y) / (full_y - cutoff_y)).clamp(0.0, 1.0);
+        // Smooth concave Hermite curve (preserves starlight visibility longer before falling off)
+        let extinction = horizon_factor * (2.0 - horizon_factor);
+
+        // Fast polynomial Rayleigh reddening (zero transcendental powf calls):
+        // Blue wavelengths scatter out rapidly in lower atmosphere; red wavelengths penetrate deepest
+        let ext_sq = extinction * extinction;
+        c[0] *= extinction;        // Red penetrates haze cleanly
+        c[1] *= extinction * 0.98; // Green slightly attenuated
+        c[2] *= ext_sq;            // Blue scatters away rapidly (quadratic decay)
+        c[3] *= extinction;        // Alpha transparency
 
         // Diamond star geometry eliminating square rasterization artifacts:
         // Generates tapered 4-point diamond facets along randomized celestial axes,
@@ -2197,11 +2212,11 @@ mod tests {
             let norm_y = center_y / 240.0;
             let alpha = col_attr[idx][3];
 
-            if norm_y <= 0.02 {
+            if norm_y <= 0.015 {
                 assert_eq!(alpha, 0.0, "Stars at or below horizon must be fully extinguished (alpha == 0)");
                 extinguished_count += 1;
-            } else if norm_y >= 0.25 {
-                assert!(alpha >= 0.99, "Stars high above horizon must retain full opacity (alpha == 1.0)");
+            } else if norm_y >= 0.16 {
+                assert!(alpha >= 0.99, "Stars above extinction boundary must retain full opacity (alpha == 1.0)");
                 overhead_count += 1;
             }
         }
