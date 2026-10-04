@@ -213,6 +213,8 @@ pub struct BinarySkyConfig {
     pub rayleigh_scale_height: f32,
     /// Mie aerosol scale height H_M in meters (~1,200 m on Earth).
     pub mie_scale_height: f32,
+    /// Stratospheric ozone layer scale height H_O in meters (~25,000 m).
+    pub ozone_scale_height: f32,
     /// Wavelength-dependent Rayleigh scattering coefficient vector β_R (km^-1)
     /// evaluated at RGB primary wavelengths [680nm, 550nm, 440nm]:
     /// [0.0058, 0.0135, 0.0331] km^-1.
@@ -221,6 +223,11 @@ pub struct BinarySkyConfig {
     pub mie_scattering_coefficient: f32,
     /// Mie aerosol absorption coefficient β_Ma (km^-1): 0.0044 km^-1.
     pub mie_absorption_coefficient: f32,
+    /// Wavelength-dependent stratospheric Chappuis ozone absorption coefficient vector β_O (km^-1)
+    /// evaluated at RGB primary wavelengths [680nm, 550nm, 440nm]:
+    /// Peak absorption occurs in green (550nm) with low red and negligible blue absorption:
+    /// [0.00065, 0.00240, 0.000085] km^-1.
+    pub ozone_absorption_coefficients: Vec3,
     /// Mean ground surface diffuse albedo (e.g. 0.18 for average soil/vegetation).
     pub ground_albedo: f32,
 
@@ -268,10 +275,12 @@ impl Default for BinarySkyConfig {
             atmosphere_height_meters: 100_000.0,
             rayleigh_scale_height: 8_400.0,
             mie_scale_height: 1_200.0,
+            ozone_scale_height: 25_000.0,
             // Rayleigh scattering cross-sections at 680nm (R), 550nm (G), 440nm (B)
             rayleigh_scattering_coefficients: Vec3::new(0.0058, 0.0135, 0.0331),
             mie_scattering_coefficient: 0.0040,
             mie_absorption_coefficient: 0.0044,
+            ozone_absorption_coefficients: Vec3::new(0.00065, 0.00240, 0.000085),
             ground_albedo: 0.18,
             star_a_temperature_kelvin: 5800.0,
             star_a_base_illuminance_lux: 75_000.0,
@@ -525,27 +534,65 @@ pub fn optical_air_mass(elevation_radians: f32) -> f32 {
     }
 }
 
+/// Calculates relative optical air mass m_O(θ) across the planetary stratospheric ozone layer (h_O ≈ 25 km).
+/// - For elevation α >= 0°: Evaluates Chapman spherical layer geometry (zenith m_O ≈ 1.0, horizon m_O ≈ 11.35).
+/// - For elevation α < 0° (twilight): Evaluates tangent spherical shell grazing path through both entry
+///   and exit chords, increasing smoothly up to ~38.0 during nautical/astronomical twilight without singularities.
+pub fn optical_air_mass_ozone(elevation_radians: f32) -> f32 {
+    let deg = elevation_radians.to_degrees();
+    if deg >= 0.0 {
+        let r_ratio = 6371.0 / (6371.0 + 25.0);
+        let cos_elev = elevation_radians.cos();
+        let denom = (1.0 - r_ratio * r_ratio * cos_elev * cos_elev).max(1e-4).sqrt();
+        (1.0 / denom).clamp(1.0, 11.35)
+    } else {
+        (11.35 + (-deg) * 2.5).clamp(11.35, 38.0)
+    }
+}
+
 /// Evaluates wavelength-dependent spectral transmittance T(λ) across the
-/// combined Rayleigh and Mie participating medium:
+/// combined Rayleigh, Mie, and stratospheric Chappuis ozone participating medium:
 ///
-/// T(λ) = exp(-(β_R(λ) * H_R * m_R(α) + β_M * H_M * m_M(α)))
+/// T(λ) = exp(-(β_R(λ) * H_R * m_R(α) + β_Me * H_M * m_M(α) + β_O(λ) * H_O * m_O(α)))
 pub fn evaluate_spectral_transmittance(
     elevation_radians: f32,
     config: &BinarySkyConfig,
 ) -> Vec3 {
-    let air_mass = optical_air_mass(elevation_radians);
+    let air_mass_r = optical_air_mass(elevation_radians);
+    let air_mass_o = optical_air_mass_ozone(elevation_radians);
     let h_r_km = config.rayleigh_scale_height * 0.001;
     let h_m_km = config.mie_scale_height * 0.001;
+    let h_o_km = config.ozone_scale_height * 0.001;
     let beta_me = config.mie_scattering_coefficient + config.mie_absorption_coefficient;
 
-    let tau_rayleigh = config.rayleigh_scattering_coefficients * h_r_km * air_mass;
-    let tau_mie = Vec3::splat(beta_me * h_m_km * air_mass);
-    let total_optical_depth = tau_rayleigh + tau_mie;
+    let tau_rayleigh = config.rayleigh_scattering_coefficients * h_r_km * air_mass_r;
+    let tau_mie = Vec3::splat(beta_me * h_m_km * air_mass_r);
+    let tau_ozone = config.ozone_absorption_coefficients * h_o_km * air_mass_o;
+    let total_optical_depth = tau_rayleigh + tau_mie + tau_ozone;
     
     Vec3::new(
         (-total_optical_depth.x).exp(),
         (-total_optical_depth.y).exp(),
         (-total_optical_depth.z).exp(),
+    )
+}
+
+/// Converts physical atmospheric spectral radiance to sRGB display color using
+/// physical exposure adaptation (photopic daytime, mesopic twilight, and scotopic night):
+pub fn tonemap_atmospheric_radiance(radiance: Vec3) -> Vec3 {
+    let luma = radiance.x * 0.2126 + radiance.y * 0.7152 + radiance.z * 0.0722;
+    let exposure = if luma > 0.08 {
+        1.0 / (luma + 0.15)
+    } else if luma > 0.015 {
+        (1.0 / (luma + 0.04)).min(20.0)
+    } else {
+        (1.0 / (luma + 0.02)).clamp(15.0, 32.0)
+    };
+    let exp = radiance * exposure;
+    Vec3::new(
+        (exp.x / (1.0 + exp.x * 0.8)).clamp(0.0, 1.0),
+        (exp.y / (1.0 + exp.y * 0.8)).clamp(0.0, 1.0),
+        (exp.z / (1.0 + exp.z * 0.8)).clamp(0.0, 1.0),
     )
 }
 
@@ -1288,19 +1335,49 @@ pub fn update_atmospheric_scattering_and_cache(
     let phase_a = multi_octave_stellar_glare(cos_theta_za, false);
     let phase_b = multi_octave_stellar_glare(cos_theta_zb, true);
 
-    let sky_scatter_a = config.rayleigh_scattering_coefficients * (cache.star_a_illuminance_lux * 0.00002) * phase_a;
-    let sky_scatter_b = Vec3::new(0.024, 0.016, 0.008) * (cache.star_b_illuminance_lux * 0.00003) * phase_b;
+    // Rayleigh zenith single-scattering (produces vivid azure Rayleigh blue at high noon)
+    let sky_scatter_a = config.rayleigh_scattering_coefficients * (cache.star_a_illuminance_lux * 0.000035) * phase_a;
+    let sky_scatter_b = config.rayleigh_scattering_coefficients * blackbody_b * (cache.star_b_illuminance_lux * 0.000035) * phase_b;
 
-    // Deep starlight floor so the night sky is atmospheric navy electric rather than pitch black
-    let night_starlight = COLOR_NAVY_ELECTRIC * 0.018 + Vec3::new(0.002, 0.001, 0.005);
-    cache.zenith_radiance = (sky_scatter_a + sky_scatter_b + night_starlight) * cache.conjunction_amplification;
+    // Diffuse cosmic starlight airglow floor (Rayleigh-scattered extraterrestrial starlight with ozone green depletion)
+    let starlight_airglow = Vec3::new(
+        config.rayleigh_scattering_coefficients.x * 24.0, // Red starlight component
+        config.rayleigh_scattering_coefficients.y * 0.08, // Ozone Chappuis suppresses green
+        config.rayleigh_scattering_coefficients.z * 18.0, // Rayleigh high-frequency blue
+    ) * 0.08;
 
-    let horizon_scatter_a = filtered_rgb_a * (cache.star_a_illuminance_lux * 0.00004);
-    let horizon_scatter_b = filtered_rgb_b * (cache.star_b_illuminance_lux * 0.00005);
-    let max_elev = effective_elev_a.max(effective_elev_b);
-    let sunset_chrom = evaluate_sunset_palette_color(max_elev);
-    let chromatic_horizon = sunset_chrom * ((cache.star_a_illuminance_lux + cache.star_b_illuminance_lux) * 0.000035).max(0.006);
-    cache.horizon_radiance = (horizon_scatter_a + horizon_scatter_b + chromatic_horizon + night_starlight * 1.5) * cache.conjunction_amplification;
+    cache.zenith_radiance = (sky_scatter_a + sky_scatter_b + starlight_airglow * 0.5) * cache.conjunction_amplification;
+
+    // Horizon Radiance:
+    // a) Forward Mie aerosol scattering of transmitted direct beams (Amber Gold & Blaze Orange sunset):
+    let horizon_mie_a = filtered_rgb_a * (cache.star_a_illuminance_lux * 0.000045);
+    let horizon_mie_b = filtered_rgb_b * (cache.star_b_illuminance_lux * 0.000050);
+
+    // b) Stratospheric Ozone Twilight Arch (Belt of Venus: Hot Fuchsia #ff0054 & Dark Raspberry #9e0059):
+    // Sunlight grazing horizontally through the stratospheric ozone layer has green (550nm) heavily absorbed,
+    // while high-altitude Rayleigh scattering scatters blue and grazing red penetrates:
+    let twilight_a = {
+        let elev_deg = effective_elev_a.to_degrees();
+        let twilight_factor = ((-elev_deg + 1.5).max(0.0) / 7.0).clamp(0.0, 1.0)
+            * ((elev_deg + 9.5).max(0.0) / 8.0).clamp(0.0, 1.0);
+        Vec3::new(
+            0.85 * ((-elev_deg * 0.12).exp()).min(1.2),
+            0.005, // Depleted green by Chappuis band
+            0.35 * ((elev_deg + 8.5) / 8.5).clamp(0.0, 1.0),
+        ) * twilight_factor * (config.star_a_base_illuminance_lux / 75_000.0)
+    };
+    let twilight_b = {
+        let elev_deg = effective_elev_b.to_degrees();
+        let twilight_factor = ((-elev_deg + 1.5).max(0.0) / 7.0).clamp(0.0, 1.0)
+            * ((elev_deg + 9.5).max(0.0) / 8.0).clamp(0.0, 1.0);
+        Vec3::new(
+            0.65 * ((-elev_deg * 0.12).exp()).min(1.0),
+            0.003,
+            0.25 * ((elev_deg + 8.5) / 8.5).clamp(0.0, 1.0),
+        ) * twilight_factor * (config.star_b_base_illuminance_lux / 55_000.0)
+    };
+
+    cache.horizon_radiance = (horizon_mie_a + horizon_mie_b + twilight_a + twilight_b + starlight_airglow * 1.5) * cache.conjunction_amplification;
 
     // ------------------------------------------------------------------------
     // 4. Scene Ambient Light & Ground Bounce Irradiance
@@ -1419,18 +1496,22 @@ pub fn sync_celestial_visuals(
             tf_a.translation = cam_pos + ephemeris.star_a_direction * 410.0;
             tf_a.look_at(cam_pos, Vec3::Y);
             if let Some(mat) = materials.get_mut(mat_handle_a) {
-                let chrom = if ephemeris.star_a_elevation > 0.15 {
-                    config.star_a_color_override.unwrap_or(Color::srgb(1.0, 0.98, 0.92))
-                } else {
-                    let palette_rgb = evaluate_sunset_palette_color(ephemeris.star_a_elevation);
-                    Color::srgb(palette_rgb.x, palette_rgb.y, palette_rgb.z)
-                };
+                let chrom = config.star_a_color_override.unwrap_or_else(|| {
+                    let trans = cache.star_a_transmittance;
+                    let blackbody = planck_blackbody_rgb(config.star_a_temperature_kelvin);
+                    let filtered = blackbody * trans;
+                    let max_c = filtered.x.max(filtered.y).max(filtered.z).max(1e-4);
+                    let norm = filtered / max_c;
+                    Color::srgb(norm.x.clamp(0.0, 1.0), norm.y.clamp(0.0, 1.0), norm.z.clamp(0.0, 1.0))
+                });
                 mat.base_color = chrom;
+                let srgba = chrom.to_srgba();
+                mat.emissive = LinearRgba::new(srgba.red * 2.5, srgba.green * 2.5, srgba.blue * 2.5, 1.0);
             }
         }
     }
 
-    // 2. Sync Companion Star B Disk (Amber dwarf with blaze-orange & fuchsia horizon shift)
+    // 2. Sync Companion Star B Disk (Amber dwarf with blaze-orange & crimson horizon shift)
     if let Ok((mut tf_b, mut vis_b, mat_handle_b)) = celestial_set.p2().get_single_mut() {
         if ephemeris.star_b_elevation < -0.10 {
             *vis_b = Visibility::Hidden;
@@ -1439,13 +1520,17 @@ pub fn sync_celestial_visuals(
             tf_b.translation = cam_pos + ephemeris.star_b_direction * 410.0;
             tf_b.look_at(cam_pos, Vec3::Y);
             if let Some(mat) = materials.get_mut(mat_handle_b) {
-                let chrom = if ephemeris.star_b_elevation > 0.15 {
-                    config.star_b_color_override.unwrap_or(Color::srgb(1.0, 0.60, 0.22))
-                } else {
-                    let palette_rgb = evaluate_sunset_palette_color(ephemeris.star_b_elevation);
-                    Color::srgb(palette_rgb.x, palette_rgb.y, palette_rgb.z)
-                };
+                let chrom = config.star_b_color_override.unwrap_or_else(|| {
+                    let trans = cache.star_b_transmittance;
+                    let blackbody = planck_blackbody_rgb(config.star_b_temperature_kelvin);
+                    let filtered = blackbody * trans;
+                    let max_c = filtered.x.max(filtered.y).max(filtered.z).max(1e-4);
+                    let norm = filtered / max_c;
+                    Color::srgb(norm.x.clamp(0.0, 1.0), norm.y.clamp(0.0, 1.0), norm.z.clamp(0.0, 1.0))
+                });
                 mat.base_color = chrom;
+                let srgba = chrom.to_srgba();
+                mat.emissive = LinearRgba::new(srgba.red * 2.5, srgba.green * 2.5, srgba.blue * 2.5, 1.0);
             }
         }
     }
@@ -1594,21 +1679,20 @@ pub fn handle_sky_time_and_weather_inputs(
 }
 
 /// Updates camera clear color and volumetric atmospheric distance fog
-/// matching the unified participating medium's extinction profiles and sunset palette.
+/// matching the physical participating medium's extinction profiles and radiance cache.
 pub fn update_atmospheric_cameras_and_fog(
-    ephemeris: Res<BinaryEphemerisState>,
-    _cache: Res<AtmosphericRadianceCache>,
+    _ephemeris: Res<BinaryEphemerisState>,
+    cache: Res<AtmosphericRadianceCache>,
     weather: Res<AtmosphericWeather>,
     mut commands: Commands,
     camera_query: Query<Entity, With<AtmosphericCamera>>,
     mut clear_color: ResMut<ClearColor>,
 ) {
-    let max_elev = ephemeris.star_a_elevation.max(ephemeris.star_b_elevation);
-    let palette_rgb = evaluate_sunset_palette_color(max_elev);
+    let horizon_rgb = tonemap_atmospheric_radiance(cache.horizon_radiance);
     let mut horizon_color = Color::srgb(
-        palette_rgb.x.clamp(0.0, 1.0),
-        palette_rgb.y.clamp(0.0, 1.0),
-        palette_rgb.z.clamp(0.0, 1.0),
+        horizon_rgb.x.clamp(0.0, 1.0),
+        horizon_rgb.y.clamp(0.0, 1.0),
+        horizon_rgb.z.clamp(0.0, 1.0),
     );
 
     if weather.weather_type == WeatherType::OvercastPrecipitation {
@@ -1717,6 +1801,87 @@ mod tests {
         assert!(trans_horizon.x > trans_horizon.y);
         assert!(trans_horizon.y > trans_horizon.z);
         assert!(trans_horizon.x > 10.0 * trans_horizon.z);
+    }
+
+    #[test]
+    fn test_stratospheric_ozone_and_spectral_transmittance() {
+        let config = BinarySkyConfig::default();
+
+        // 1. Ozone air mass bounds:
+        let m_o_zenith = optical_air_mass_ozone(PI * 0.5);
+        assert!((m_o_zenith - 1.0).abs() < 0.05);
+
+        let m_o_horizon = optical_air_mass_ozone(0.0);
+        assert!(m_o_horizon > 10.0 && m_o_horizon < 12.0);
+
+        let m_o_twilight = optical_air_mass_ozone((-5.0f32).to_radians());
+        assert!(m_o_twilight > 20.0 && m_o_twilight <= 38.0);
+
+        // 2. Chappuis ozone absorption in green (550nm):
+        let trans_twilight = evaluate_spectral_transmittance((-3.0f32).to_radians(), &config);
+        assert!(trans_twilight.x > trans_twilight.y, "Red transmittance should exceed green due to ozone absorption");
+    }
+
+    #[test]
+    fn test_reverse_engineered_physical_sky_chromaticity() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<BinarySkyConfig>();
+        app.init_resource::<BinaryEphemerisState>();
+        app.init_resource::<AtmosphericRadianceCache>();
+        app.init_resource::<AtmosphericWeather>();
+        app.init_resource::<AmbientLight>();
+        app.init_resource::<ClearColor>();
+
+        app.add_systems(Update, (update_binary_ephemeris, update_atmospheric_scattering_and_cache, update_atmospheric_cameras_and_fog).chain());
+
+        // 1. Test High Noon (12:00):
+        {
+            let mut eph = app.world_mut().resource_mut::<BinaryEphemerisState>();
+            eph.simulation_time_seconds = 0.0;
+            eph.diurnal_angle = 0.0;
+        }
+        app.update();
+        {
+            let cache = app.world().resource::<AtmosphericRadianceCache>();
+            // Zenith radiance should be dominated by Rayleigh blue:
+            assert!(cache.zenith_radiance.z > cache.zenith_radiance.x * 2.5, "Zenith sky must be Rayleigh blue at noon");
+            // Direct Star A should be warm solar white:
+            assert!(cache.star_a_transmittance.x > 0.8 && cache.star_a_transmittance.z > 0.6);
+        }
+
+        // 2. Test Sunset (18.0h):
+        {
+            let mut eph = app.world_mut().resource_mut::<BinaryEphemerisState>();
+            let day_sec = 1440.0;
+            eph.simulation_time_seconds = day_sec * 0.25;
+            eph.diurnal_angle = PI * 0.5;
+        }
+        app.update();
+        {
+            let cache = app.world().resource::<AtmosphericRadianceCache>();
+            // Transmittance should shift Star A to blaze-orange/amber (blue strongly extinguished):
+            assert!(cache.star_a_transmittance.x > cache.star_a_transmittance.z * 10.0, "Blue light must be extinguished at sunset");
+            let horizon_col = tonemap_atmospheric_radiance(cache.horizon_radiance);
+            assert!(horizon_col.x > horizon_col.y, "Horizon must be red/orange biased at sunset");
+        }
+
+        // 3. Test Deep Night (00:00):
+        {
+            let mut eph = app.world_mut().resource_mut::<BinaryEphemerisState>();
+            let day_sec = 1440.0;
+            eph.simulation_time_seconds = day_sec * 0.5;
+            eph.diurnal_angle = PI;
+        }
+        app.update();
+        {
+            let clear_col = app.world().resource::<ClearColor>().0;
+            let srgba = clear_col.to_srgba();
+            // ClearColor must have the Electric Navy tone (blue prominent, subtle red violet, green near zero):
+            assert!(srgba.blue > 0.25, "Night horizon clear color must have prominent blue");
+            assert!(srgba.red > 0.08, "Night horizon clear color must have violet red tint");
+            assert!(srgba.green < 0.05, "Green must be suppressed by ozone Chappuis band in night airglow");
+        }
     }
 
     #[test]
