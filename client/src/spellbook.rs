@@ -615,6 +615,7 @@ pub fn setup_prepared_hotbar_ui(
                                 background_color: BackgroundColor(Color::srgba(0.08, 0.08, 0.10, 0.92)),
                                 ..default()
                             },
+                            Interaction::default(),
                             HotbarSlotButton(slot_idx),
                         )).with_children(|slot| {
                             // Top bar: Hotkey badge & slot index
@@ -1058,6 +1059,7 @@ fn spawn_spellbook_slot(builder: &mut ChildBuilder, slot_idx: usize) {
             background_color: BackgroundColor(Color::srgba(0.84, 0.77, 0.64, 0.40)),
             ..default()
         },
+        Interaction::default(),
         SpellbookSlotCard(slot_idx),
     )).with_children(|card| {
         // Square Icon Box
@@ -2381,19 +2383,15 @@ pub fn handle_spellbook_interactions(
     }
 }
 
-fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, window: &Window) -> Rect {
-    let screen_center = Vec2::new(
-        transform.translation().x + window.width() * 0.5,
-        -transform.translation().y + window.height() * 0.5,
-    );
-    Rect::from_center_size(screen_center, node.size())
+fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, _window: &Window) -> Rect {
+    node.logical_rect(transform)
 }
 
 pub fn handle_spell_drag_and_drop(
     mouse: Res<ButtonInput<MouseButton>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    card_query: Query<(&SpellbookSlotCard, &GlobalTransform, &Node)>,
-    hotbar_slot_q: Query<(&HotbarSlotButton, &GlobalTransform, &Node)>,
+    card_query: Query<(&SpellbookSlotCard, &GlobalTransform, &Node, Option<&Interaction>)>,
+    hotbar_slot_q: Query<(&HotbarSlotButton, &GlobalTransform, &Node, Option<&Interaction>)>,
     mut spell_drag: ResMut<SpellDragState>,
     mut hotbar: ResMut<PreparedHotbarState>,
     mut spellbook_state: ResMut<SpellbookWindowState>,
@@ -2405,9 +2403,10 @@ pub fn handle_spell_drag_and_drop(
 
     // Right-Click on Hotbar Slot: Clear / Unprepare slot!
     if mouse.just_pressed(MouseButton::Right) {
-        for (slot_btn, transform, node) in hotbar_slot_q.iter() {
+        for (slot_btn, transform, node, interaction) in hotbar_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 if hotbar.slots[slot_btn.0].is_some() {
                     info!("Unprepared spell from Hotbar Slot {}", slot_btn.0 + 1);
                     hotbar.slots[slot_btn.0] = None;
@@ -2422,9 +2421,10 @@ pub fn handle_spell_drag_and_drop(
     if mouse.just_pressed(MouseButton::Left) {
         // Check spellbook cards if spellbook is open
         if spellbook_state.is_open {
-            for (card, transform, node) in card_query.iter() {
+            for (card, transform, node, interaction) in card_query.iter() {
                 let rect = ui_node_screen_rect(transform, node, window);
-                if rect.contains(cursor_pos) {
+                let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+                if is_hit {
                     let spell_idx = spellbook_state.current_page * 12 + card.0;
                     if spell_idx < filtered.len() {
                         let def = filtered[spell_idx];
@@ -2440,9 +2440,10 @@ pub fn handle_spell_drag_and_drop(
         }
 
         // Check hotbar slots to drag/reorder prepared spells
-        for (slot_btn, transform, node) in hotbar_slot_q.iter() {
+        for (slot_btn, transform, node, interaction) in hotbar_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 if let Some(spell_id) = &hotbar.slots[slot_btn.0] {
                     spell_drag.is_dragging = true;
                     spell_drag.source_slot = Some(slot_btn.0);
@@ -2460,9 +2461,10 @@ pub fn handle_spell_drag_and_drop(
 
     if mouse.just_released(MouseButton::Left) && spell_drag.is_dragging {
         let mut target_slot = None;
-        for (slot_btn, transform, node) in hotbar_slot_q.iter() {
+        for (slot_btn, transform, node, interaction) in hotbar_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 target_slot = Some(slot_btn.0);
                 break;
             }

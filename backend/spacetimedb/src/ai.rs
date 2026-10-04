@@ -7,7 +7,7 @@ use crate::inventory;
 use crate::resource_node;
 use crate::respawn_bush_timer; 
 use crate::building::structure; 
-use crate::combat::{health, faction_component, Faction};
+use crate::combat::{health, faction_component, Faction, active_projectile, equipment_loadout};
 use crate::combat_event;
 
 // ----------------------------------------------------------------------------
@@ -499,19 +499,56 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
                             brain.state = BrainState::Idle;
                             brain.target_id = None;
                         } else {
-                            current_speed = 5.5;
-                            if dist_sq < 4.0 {
+                            let arch = crate::bestiary::get_archetype_by_ai_type(brain.ai_type);
+                            let loadout = ctx.db.equipment_loadout().entity_id().find(brain.entity_id);
+                            let weapon_name = loadout
+                                .as_ref()
+                                .and_then(|l| if !l.main_hand.is_empty() && l.main_hand != "None" { Some(l.main_hand.as_str()) } else { None })
+                                .unwrap_or(arch.default_main_hand);
+                            let weapon_def = crate::armory::get_weapon_def(weapon_name);
+
+                            current_speed = arch.run_speed;
+                            let max_reach = weapon_def.attack_range;
+                            let max_reach_sq = max_reach * max_reach;
+
+                            if dist_sq <= max_reach_sq {
                                 current_speed = 0.0;
                                 brain.timer += dt;
-                                if brain.timer >= 1.0 { 
-                                    crate::combat::apply_damage(ctx, target, 10.0);
-                                    ctx.db.combat_event().insert(crate::CombatEvent {
-                                        id: 0, 
-                                        event_type: "HitPlayer".to_string(),
-                                        x: t.x, 
-                                        y: t.y + 1.0, 
-                                        z: t.z
-                                    });
+                                if brain.timer >= weapon_def.cooldown_secs {
+                                    if let Some(proj_kind) = weapon_def.projectile_kind {
+                                        let dist = dist_sq.sqrt().max(0.01);
+                                        let ndx = dx / dist;
+                                        let ndz = dz / dist;
+                                        let dy = (t.y + 0.5) - (transform.y + 0.5);
+                                        let ndy = (dy / dist).clamp(-1.0, 1.0);
+
+                                        ctx.db.active_projectile().insert(crate::combat::ActiveProjectile {
+                                            projectile_id: 0,
+                                            shooter_id: brain.entity_id,
+                                            kind: proj_kind,
+                                            pos_x: transform.x + ndx * 0.6,
+                                            pos_y: transform.y + 0.4,
+                                            pos_z: transform.z + ndz * 0.6,
+                                            vel_x: ndx * weapon_def.projectile_speed,
+                                            vel_y: ndy * weapon_def.projectile_speed,
+                                            vel_z: ndz * weapon_def.projectile_speed,
+                                            gravity: weapon_def.gravity,
+                                            drag: weapon_def.drag,
+                                            damage: weapon_def.base_damage,
+                                            blast_radius: 0.0,
+                                            start_tick: 0,
+                                            lifetime: 3.0,
+                                        });
+                                    } else {
+                                        crate::combat::apply_damage(ctx, target, weapon_def.base_damage);
+                                        ctx.db.combat_event().insert(crate::CombatEvent {
+                                            id: 0, 
+                                            event_type: "HitPlayer".to_string(),
+                                            x: t.x, 
+                                            y: t.y + 1.0, 
+                                            z: t.z
+                                        });
+                                    }
                                     brain.timer = 0.0;
                                 }
                             } else {

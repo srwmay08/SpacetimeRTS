@@ -3,6 +3,8 @@ use std::sync::RwLock;
 use rapier3d::prelude::*;
 use crate::movement::transform;
 use crate::building::structure;
+use crate::ai::{harvestable_corpse, npc_brain};
+use crate::combat::health;
 
 /// Global cache for our purely stateless QueryPipeline
 static PHYSICS_CACHE: RwLock<Option<(ColliderSet, QueryPipeline)>> = RwLock::new(None);
@@ -13,13 +15,36 @@ static PHYSICS_CACHE: RwLock<Option<(ColliderSet, QueryPipeline)>> = RwLock::new
 pub fn rebuild_physics_cache(ctx: &ReducerContext) {
     let mut colliders = ColliderSet::new();
 
-    // 1. Add all dynamic entities (Players, NPCs) as Capsules
+    // 1. Add all dynamic entities (Players, NPCs) using Bestiary archetypes
     for t in ctx.db.transform().iter() {
-        // Humanoid shape: 1.0m height total (half-height 0.5), 0.8m width (radius 0.4)
-        let collider = ColliderBuilder::capsule_y(0.5, 0.4)
-            .translation(Vector::new(t.x, t.y + 0.5, t.z)) 
-            .user_data(t.entity_id as u128) 
-            .build();
+        if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
+        if ctx.db.health().entity_id().find(t.entity_id).is_none() { continue; }
+
+        let collider = if let Some(brain) = ctx.db.npc_brain().entity_id().find(t.entity_id) {
+            let arch = crate::bestiary::get_archetype_by_ai_type(brain.ai_type);
+            match arch.collider_shape {
+                crate::bestiary::ColliderShape::Cuboid => {
+                    let (hx, hy, hz) = arch.collider_half_extents;
+                    ColliderBuilder::cuboid(hx, hy, hz)
+                        .translation(Vector::new(t.x, t.y + arch.vertical_offset, t.z))
+                        .user_data(t.entity_id as u128)
+                        .build()
+                }
+                crate::bestiary::ColliderShape::Capsule => {
+                    let (rad, hh, _) = arch.collider_half_extents;
+                    ColliderBuilder::capsule_y(hh, rad)
+                        .translation(Vector::new(t.x, t.y + arch.vertical_offset, t.z))
+                        .user_data(t.entity_id as u128)
+                        .build()
+                }
+            }
+        } else {
+            // Humanoid shape: 1.8m height total (half-height 0.5, radius 0.4)
+            ColliderBuilder::capsule_y(0.5, 0.4)
+                .translation(Vector::new(t.x, t.y - 0.15, t.z)) 
+                .user_data(t.entity_id as u128) 
+                .build()
+        };
         colliders.insert(collider);
     }
 

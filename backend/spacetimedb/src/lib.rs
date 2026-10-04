@@ -16,6 +16,8 @@ pub mod ai;
 pub mod voxel;
 pub mod spatial;
 pub mod physics;
+pub mod armory;
+pub mod bestiary;
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history, faction_component, Faction, weapon_skill, equipment_loadout};

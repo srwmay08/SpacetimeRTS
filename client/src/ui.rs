@@ -266,7 +266,6 @@ pub fn setup_ui(mut commands: Commands) {
                     ..default()
                 },
                 HotbarSlotUi(slot_idx),
-                InventorySlotIndex(slot_idx),
             )).with_children(|slot| {
                 slot.spawn(TextBundle::from_section(
                     (slot_idx + 1).to_string(),
@@ -507,6 +506,7 @@ pub fn setup_ui(mut commands: Commands) {
                     border_color: Color::srgb(0.4, 0.4, 0.45).into(),
                     ..default()
                 },
+                Interaction::default(),
                 PaperdollMainHandSlot,
             )).with_children(|row| {
                 row.spawn((
@@ -553,6 +553,7 @@ pub fn setup_ui(mut commands: Commands) {
                     border_color: Color::srgb(0.4, 0.4, 0.45).into(),
                     ..default()
                 },
+                Interaction::default(),
                 PaperdollOffHandSlot,
             )).with_children(|row| {
                 row.spawn((
@@ -676,6 +677,7 @@ pub fn setup_ui(mut commands: Commands) {
                                 background_color: Color::srgba(0.09, 0.09, 0.09, 0.92).into(),
                                 ..default()
                             },
+                            Interaction::default(),
                             InventorySlotIndex(slot_idx),
                         )).with_children(|slot| {
                             slot.spawn((
@@ -2277,12 +2279,8 @@ pub fn update_console_ui(
     }
 }
 
-pub fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, window: &Window) -> Rect {
-    let screen_center = Vec2::new(
-        transform.translation().x + window.width() * 0.5,
-        -transform.translation().y + window.height() * 0.5,
-    );
-    Rect::from_center_size(screen_center, node.size())
+pub fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, _window: &Window) -> Rect {
+    node.logical_rect(transform)
 }
 
 // ----------------------------------------------------------------------------
@@ -2293,10 +2291,10 @@ pub fn handle_inventory_drag_and_drop(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    slot_query: Query<(&InventorySlotIndex, &GlobalTransform, &Node)>,
-    main_hand_slot_q: Query<(&GlobalTransform, &Node), With<PaperdollMainHandSlot>>,
-    off_hand_slot_q: Query<(&GlobalTransform, &Node), With<PaperdollOffHandSlot>>,
-    bag_slot_query: Query<(&PaperdollBagSlotIndex, &GlobalTransform, &Node)>,
+    slot_query: Query<(&InventorySlotIndex, &GlobalTransform, &Node, Option<&Interaction>)>,
+    main_hand_slot_q: Query<(&GlobalTransform, &Node, Option<&Interaction>), With<PaperdollMainHandSlot>>,
+    off_hand_slot_q: Query<(&GlobalTransform, &Node, Option<&Interaction>), With<PaperdollOffHandSlot>>,
+    bag_slot_query: Query<(&PaperdollBagSlotIndex, &GlobalTransform, &Node, Option<&Interaction>)>,
     inv_root_query: Query<(&GlobalTransform, &Node), With<InventoryUiRoot>>,
     mut drag_drop: ResMut<DragDropState>,
     conn: Res<SpacetimeConnection>,
@@ -2312,9 +2310,10 @@ pub fn handle_inventory_drag_and_drop(
 
     // Right-Click to Quick-Equip Weapon or Bag
     if mouse.just_pressed(MouseButton::Right) {
-        for (slot_idx, transform, node) in slot_query.iter() {
+        for (slot_idx, transform, node, interaction) in slot_query.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 if let Some(slot) = inv.slots.get(slot_idx.0) {
                     if slot.count > 0 && !slot.item_type.is_empty() {
                         let item_name = slot.item_type.clone();
@@ -2354,9 +2353,10 @@ pub fn handle_inventory_drag_and_drop(
     }
 
     if mouse.just_pressed(MouseButton::Left) {
-        for (slot_idx, transform, node) in slot_query.iter() {
+        for (slot_idx, transform, node, interaction) in slot_query.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 if let Some(slot) = inv.slots.get(slot_idx.0) {
                     if slot.count > 0 && !slot.item_type.is_empty() {
                         drag_drop.is_dragging = true;
@@ -2380,9 +2380,10 @@ pub fn handle_inventory_drag_and_drop(
 
         // 1. Check if released on another inventory bag slot
         let mut target_slot = None;
-        for (slot_idx, transform, node) in slot_query.iter() {
+        for (slot_idx, transform, node, interaction) in slot_query.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 target_slot = Some(slot_idx.0);
                 break;
             }
@@ -2390,9 +2391,10 @@ pub fn handle_inventory_drag_and_drop(
 
         // 2. Check if released over MainHand Paperdoll slot
         let mut dropped_on_main = false;
-        for (transform, node) in main_hand_slot_q.iter() {
+        for (transform, node, interaction) in main_hand_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 dropped_on_main = true;
                 break;
             }
@@ -2400,9 +2402,10 @@ pub fn handle_inventory_drag_and_drop(
 
         // 3. Check if released over OffHand Paperdoll slot
         let mut dropped_on_off = false;
-        for (transform, node) in off_hand_slot_q.iter() {
+        for (transform, node, interaction) in off_hand_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 dropped_on_off = true;
                 break;
             }
@@ -2410,9 +2413,10 @@ pub fn handle_inventory_drag_and_drop(
 
         // 4. Check if released over Paperdoll Bag slot
         let mut dropped_on_bag = None;
-        for (bag_slot_idx, transform, node) in bag_slot_query.iter() {
+        for (bag_slot_idx, transform, node, interaction) in bag_slot_query.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
                 dropped_on_bag = Some(bag_slot_idx.0);
                 break;
             }
@@ -2422,7 +2426,7 @@ pub fn handle_inventory_drag_and_drop(
         let mut inside_inventory_window = false;
         for (transform, node) in inv_root_query.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            if rect.contains(cursor_pos) {
+            if rect.inflate(10.0).contains(cursor_pos) {
                 inside_inventory_window = true;
                 break;
             }

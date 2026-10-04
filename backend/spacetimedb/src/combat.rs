@@ -399,16 +399,16 @@ pub fn equip_weapon(
     log::debug!("Player {} equipped {} in {}", session.entity_id, weapon_name, slot);
 
     if slot == "MainHand" {
-        if is_two_handed && loadout.off_hand != "None" {
-            return Err("Cannot equip two-handed weapon while off-hand is occupied.".to_string());
+        if is_two_handed {
+            loadout.off_hand = "None".to_string();
         }
         loadout.main_hand = weapon_name;
     } else if slot == "OffHand" {
-        if is_weapon_two_handed(&loadout.main_hand) {
-            return Err("Cannot equip off-hand when main-hand is two-handed.".to_string());
-        }
         if is_two_handed {
             return Err("Cannot equip a two-handed weapon in off-hand.".to_string());
+        }
+        if is_weapon_two_handed(&loadout.main_hand) {
+            loadout.main_hand = "None".to_string();
         }
         loadout.off_hand = weapon_name;
     } else {
@@ -701,6 +701,23 @@ pub fn fire_weapon(
     let session = ctx.db.player_session().identity().find(ctx.sender())
         .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
 
+    let loadout = ctx.db.equipment_loadout().entity_id().find(session.entity_id);
+    let main_hand = loadout.as_ref().map(|l| l.main_hand.as_str()).unwrap_or("None");
+    let off_hand = loadout.as_ref().map(|l| l.off_hand.as_str()).unwrap_or("None");
+
+    let active_weapon_name = if main_hand != "None" && !main_hand.is_empty() {
+        main_hand
+    } else if off_hand != "None" && !off_hand.is_empty() {
+        off_hand
+    } else {
+        "Unarmed"
+    };
+    let weapon_def = crate::armory::get_weapon_def(active_weapon_name);
+    let weapon_damage = weapon_def.base_damage;
+    let skill_category = weapon_def.skill_category;
+    let xp_amount = weapon_def.xp_yield;
+    let max_range = weapon_def.attack_range.max(2.0);
+
     let mut hit_entity = None;
     let mut hit_location = (0.0, 0.0, 0.0);
 
@@ -712,19 +729,59 @@ pub fn fire_weapon(
     let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
 
     let mut colliders = rapier3d::prelude::ColliderSet::new();
+    let mut processed_entities = std::collections::BTreeSet::new();
+
+    // 1. Lag-compensated snapshots for online players with hitbox history
     for history in ctx.db.hitbox_history().iter() {
         if history.entity_id == session.entity_id { continue; }
         if ctx.db.harvestable_corpse().entity_id().find(history.entity_id).is_some() { continue; }
 
         if let Some(snap) = history.snapshots.iter().min_by_key(|s| (s.tick_id as i64 - client_tick as i64).abs()) {
             let col = rapier3d::prelude::ColliderBuilder::capsule_y(0.5, 0.4)
-                .translation(rapier3d::prelude::Vector::new(snap.x, snap.y + 0.5, snap.z))
+                .translation(rapier3d::prelude::Vector::new(snap.x, snap.y - 0.15, snap.z))
                 .user_data(history.entity_id as u128)
                 .build();
             colliders.insert(col);
+            processed_entities.insert(history.entity_id);
         }
     }
+
+    // 2. Authoritative living dynamic entities (NPCs: Boars, Deer, Goblins, Peasants, or players without history)
+    for t in ctx.db.transform().iter() {
+        if t.entity_id == session.entity_id { continue; }
+        if processed_entities.contains(&t.entity_id) { continue; }
+        if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
+        if ctx.db.health().entity_id().find(t.entity_id).is_none() { continue; }
+
+        let col = if let Some(brain) = ctx.db.npc_brain().entity_id().find(t.entity_id) {
+            let arch = crate::bestiary::get_archetype_by_ai_type(brain.ai_type);
+            match arch.collider_shape {
+                crate::bestiary::ColliderShape::Cuboid => {
+                    let (hx, hy, hz) = arch.collider_half_extents;
+                    rapier3d::prelude::ColliderBuilder::cuboid(hx, hy, hz)
+                        .translation(rapier3d::prelude::Vector::new(t.x, t.y + arch.vertical_offset, t.z))
+                        .user_data(t.entity_id as u128)
+                        .build()
+                }
+                crate::bestiary::ColliderShape::Capsule => {
+                    let (rad, hh, _) = arch.collider_half_extents;
+                    rapier3d::prelude::ColliderBuilder::capsule_y(hh, rad)
+                        .translation(rapier3d::prelude::Vector::new(t.x, t.y + arch.vertical_offset, t.z))
+                        .user_data(t.entity_id as u128)
+                        .build()
+                }
+            }
+        } else {
+            // General humanoid entity
+            rapier3d::prelude::ColliderBuilder::capsule_y(0.5, 0.4)
+                .translation(rapier3d::prelude::Vector::new(t.x, t.y - 0.15, t.z))
+                .user_data(t.entity_id as u128)
+                .build()
+        };
+        colliders.insert(col);
+    }
     
+    // 3. Static structures
     for s in ctx.db.structure().iter() {
         let col = rapier3d::prelude::ColliderBuilder::cuboid(1.25, 1.25, 1.25)
             .translation(rapier3d::prelude::Vector::new(s.x, s.y, s.z))
@@ -743,7 +800,7 @@ pub fn fire_weapon(
 
     let rigid_bodies = rapier3d::prelude::RigidBodySet::new();
     if let Some((handle, toi)) = query_pipeline.cast_ray(
-        &rigid_bodies, &colliders, &ray, 300.0, true, rapier3d::prelude::QueryFilter::default()
+        &rigid_bodies, &colliders, &ray, max_range, true, rapier3d::prelude::QueryFilter::default()
     ) {
         let user_data = colliders[handle].user_data;
         let is_structure = (user_data >> 64) == 1;
@@ -753,14 +810,14 @@ pub fn fire_weapon(
         hit_location = (hit_pt.x, hit_pt.y, hit_pt.z);
         
         if is_structure {
-            crate::building::damage_structure(ctx, target_id, 20.0);
+            crate::building::damage_structure(ctx, target_id, weapon_damage);
         } else {
             hit_entity = Some(target_id);
         }
     }
 
     if let Some(target_id) = hit_entity {
-        apply_damage(ctx, target_id, 20.0);
+        apply_damage(ctx, target_id, weapon_damage);
 
         ctx.db.combat_event().insert(CombatEvent {
             id: 0,
@@ -770,8 +827,11 @@ pub fn fire_weapon(
             z: hit_location.2,
         });
 
-        award_combat_xp(ctx, session.entity_id, "Edged", 15);
-        log::debug!("Hit validated via Lag Compensation: Entity {} hit {}", session.entity_id, target_id);
+        award_combat_xp(ctx, session.entity_id, skill_category, xp_amount);
+        log::debug!(
+            "Hit validated: Entity {} hit {} for {:.1} damage ({})",
+            session.entity_id, target_id, weapon_damage, skill_category
+        );
     }
 
     Ok(())
