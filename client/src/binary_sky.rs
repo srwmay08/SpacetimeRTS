@@ -1134,6 +1134,7 @@ pub fn update_binary_ephemeris(
     time: Res<Time<Virtual>>,
     config: Res<BinarySkyConfig>,
     mut ephemeris: ResMut<BinaryEphemerisState>,
+    season: Option<ResMut<crate::tree_colors::SeasonState>>,
 ) {
     let delta = time.delta_seconds_f64() * config.time_scale as f64;
     ephemeris.simulation_time_seconds += delta;
@@ -1146,6 +1147,21 @@ pub fn update_binary_ephemeris(
     ephemeris.day_progress = ((t % day_duration) / day_duration) as f32;
     ephemeris.year_progress = ((t % year_duration) / year_duration) as f32;
     ephemeris.binary_progress = ((t % binary_duration) / binary_duration) as f32;
+
+    if let Some(mut season) = season {
+        let year_frac = ephemeris.year_progress.rem_euclid(1.0);
+        let (current_season, progress) = if year_frac < 0.25 {
+            (crate::tree_colors::Season::Spring, year_frac / 0.25)
+        } else if year_frac < 0.50 {
+            (crate::tree_colors::Season::Summer, (year_frac - 0.25) / 0.25)
+        } else if year_frac < 0.75 {
+            (crate::tree_colors::Season::Autumn, (year_frac - 0.50) / 0.25)
+        } else {
+            (crate::tree_colors::Season::Winter, (year_frac - 0.75) / 0.25)
+        };
+        season.current = current_season;
+        season.progress = progress;
+    }
 
     ephemeris.diurnal_angle = (ephemeris.day_progress * 2.0 * PI) as f32;
     ephemeris.primary_orbit_angle = (ephemeris.year_progress * 2.0 * PI) as f32;
@@ -1739,6 +1755,7 @@ impl Plugin for BinarySkyPlugin {
             .init_resource::<BinaryEphemerisState>()
             .init_resource::<AtmosphericRadianceCache>()
             .init_resource::<AtmosphericWeather>()
+            .init_resource::<crate::tree_colors::SeasonState>()
             .init_resource::<AmbientLight>()
             .init_resource::<ClearColor>()
             .add_systems(Startup, setup_binary_sky_environment)

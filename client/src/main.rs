@@ -17,6 +17,7 @@ mod audio_feedback;
 mod tactical_abilities;
 pub mod binary_sky;
 pub mod binary_stars;
+pub mod tree_colors;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -33,6 +34,7 @@ use crate::weapons::*;
 use crate::tuner::*;
 use crate::audio_feedback::*;
 use crate::tactical_abilities::*;
+use crate::tree_colors::*;
 
 // P2 Fix: SystemSets for explicit ordering and predictable behavior
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -103,6 +105,8 @@ fn main() {
         .init_resource::<CrosshairMenuState>()
         .init_resource::<TacticalAbilityState>()
         .init_resource::<HitMarkerState>()
+        .init_resource::<SeasonState>()
+        .init_resource::<TreeMaterialHandles>()
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))
@@ -147,6 +151,7 @@ fn main() {
             sync_logical_components,
             sync_resource_nodes, 
             update_falling_trees,
+            update_tree_colors,
             update_berry_visuals, 
             sync_structures, 
             sync_active_projectiles,

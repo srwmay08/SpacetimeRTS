@@ -59,6 +59,17 @@ pub struct ResourceNodeItem {
     pub node_type: String,
 }
 
+#[derive(Component, Debug, Clone, PartialEq, Eq)]
+pub struct TreeComponent {
+    /// 0 = Dead, 1 = Oak, 2 = Pine, 3 = Round
+    pub species: u8,
+    /// Deterministic variant index [0, 5]
+    pub variant: usize,
+}
+
+#[allow(unused_imports)]
+pub use crate::tree_colors::{Season, SeasonState};
+
 #[derive(Component)] pub struct PeasantUnit { pub entity_id: u64 }
 
 // ----------------------------------------------------------------------------

@@ -190,3 +190,83 @@ fn test_multi_hit_resource_health_depletion() {
     node_health = node_health.saturating_sub(1);
     assert_eq!(node_health, 0);
 }
+
+#[test]
+fn test_tree_clustering_zones_and_spacing() {
+    use backend::{get_zone, get_spacing, Zone};
+
+    let forest_radius = 50.0;
+    assert_eq!(get_zone(10.0, forest_radius), Zone::ForestCore);
+    assert_eq!(get_zone(30.0, forest_radius), Zone::ForestEdge);
+    assert_eq!(get_zone(55.0, forest_radius), Zone::Clearing);
+    assert_eq!(get_zone(90.0, forest_radius), Zone::Open);
+
+    let mut seed = 54321;
+    let core_spacing = get_spacing(Zone::ForestCore, &mut seed);
+    assert!(core_spacing >= 2.0 && core_spacing <= 3.0);
+
+    let edge_spacing = get_spacing(Zone::ForestEdge, &mut seed);
+    assert!(edge_spacing >= 4.0 && edge_spacing <= 6.0);
+
+    let clearing_spacing = get_spacing(Zone::Clearing, &mut seed);
+    assert!(clearing_spacing >= 8.0 && clearing_spacing <= 12.0);
+
+    let open_spacing = get_spacing(Zone::Open, &mut seed);
+    assert!(open_spacing >= 15.0 && open_spacing <= 25.0);
+}
+
+#[test]
+fn test_tree_gaussian_rand_distribution() {
+    use backend::gaussian_rand;
+    let mut seed = 98765;
+    let mut mean = 0.0;
+    let n = 500;
+    for _ in 0..n {
+        let val = gaussian_rand(&mut seed);
+        mean += val;
+    }
+    mean /= n as f32;
+    // Box-Muller standard normal distribution should have mean close to 0.0
+    assert!(mean.abs() < 0.25, "Gaussian mean was {}", mean);
+}
+
+#[test]
+fn test_tree_biome_scale_and_type_selection() {
+    use backend::{get_biome, pick_tree_type, Biome};
+
+    assert_eq!(get_biome(4.0), Biome::Lowland);
+    assert_eq!(get_biome(12.0), Biome::Hill);
+    assert_eq!(get_biome(21.0), Biome::Mountain);
+
+    let mut seed = 13579;
+    let mut seen_oak = false;
+    let mut seen_pine = false;
+    for _ in 0..50 {
+        let t = pick_tree_type(Biome::Lowland, &mut seed);
+        if t == "Oak" { seen_oak = true; }
+        if t == "Pine" { seen_pine = true; }
+    }
+    assert!(seen_oak);
+    assert!(seen_pine);
+}
+
+#[test]
+fn test_fallen_log_resource_node() {
+    let log = backend::ResourceNode {
+        node_id: 42,
+        node_type: "FallenLog".to_string(),
+        x: 10.0,
+        y: 4.0,
+        z: -15.0,
+        chunk_x: 0,
+        chunk_z: 0,
+        health: 2,
+        scale: 1.0,
+        required_tool: "None".to_string(),
+    };
+
+    assert_eq!(log.node_type, "FallenLog");
+    assert_eq!(log.health, 2);
+    assert_eq!(log.required_tool, "None");
+}
+
