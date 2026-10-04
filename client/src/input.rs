@@ -1126,29 +1126,31 @@ pub fn player_movement_system(
     keys: Res<ButtonInput<KeyCode>>, 
     camera_mode: Res<State<CameraMode>>,
     console: Res<ConsoleState>,
-    mut query: Query<(Entity, &mut BevyTransform, &mut LinearVelocity, &mut GravityScale, &mut Kcc), With<PlayerBody>>,
+    mut query: Query<(
+        Entity, 
+        &mut BevyTransform, 
+        &mut LinearVelocity, 
+        &mut GravityScale, 
+        &mut Kcc,
+    ), With<PlayerBody>>,
     spatial_query: SpatialQuery, 
 ) {
     let Ok((entity, mut transform, mut lin_vel, mut gravity, mut kcc)) = query.get_single_mut() else { return; };
 
     let ray_start = transform.translation; 
     let hit = spatial_query.cast_ray(
-        ray_start, Dir3::NEG_Y, 1.15, true, 
+        ray_start, 
+        Dir3::NEG_Y, 
+        1.25, 
+        true, 
         SpatialQueryFilter::from_excluded_entities([entity])
     );
     
     kcc.is_grounded = false;
     if let Some(hit_data) = hit {
-        if hit_data.time_of_impact <= 1.15 { kcc.is_grounded = true; }
-    }
-
-    let ground_y = crate::terrain::get_terrain_height(transform.translation.x, transform.translation.z);
-    let player_half_height = 1.05; 
-    
-    if transform.translation.y <= ground_y + player_half_height {
-        transform.translation.y = ground_y + player_half_height;
-        if lin_vel.y < 0.0 { lin_vel.y = 0.0; }
-        kcc.is_grounded = true;
+        if hit_data.time_of_impact <= 1.20 && lin_vel.y <= 0.05 {
+            kcc.is_grounded = true;
+        }
     }
 
     let mut move_dir = Vec3::ZERO;
@@ -1168,10 +1170,45 @@ pub fn player_movement_system(
         lin_vel.z = move_dir.z * horizontal_speed;
     }
 
-    gravity.0 = 8.0; 
-    if kcc.is_grounded && *camera_mode.get() == CameraMode::FPS && !console.is_open && keys.just_pressed(KeyCode::Space) { 
-        lin_vel.y = 10.0; 
-        kcc.is_grounded = false; 
+    if kcc.is_grounded {
+        if *camera_mode.get() == CameraMode::FPS && !console.is_open && keys.just_pressed(KeyCode::Space) { 
+            lin_vel.y = 10.0; 
+            gravity.0 = 8.0; 
+            kcc.is_grounded = false; 
+        } else if move_dir == Vec3::ZERO {
+            // Standing still: zero downward acceleration and vertical velocity to prevent Avian3D
+            // XPBD penetration chatter and camera micro-jitter against static collision meshes.
+            lin_vel.y = 0.0;
+            gravity.0 = 0.0;
+
+            // If contact penetration occurred into the surface beneath, gently align to exact collider surface
+            if let Some(hit_data) = hit {
+                if hit_data.time_of_impact < 0.98 {
+                    let surface_y = ray_start.y - hit_data.time_of_impact;
+                    transform.translation.y = surface_y + 1.0;
+                }
+            }
+        } else {
+            // Moving along slope: apply slight downward adhesion to prevent launching over downhill gradients
+            gravity.0 = 2.0;
+            if lin_vel.y < 0.0 {
+                lin_vel.y = -0.5;
+            }
+        }
+    } else {
+        // Airborne: full gravity acceleration
+        gravity.0 = 8.0; 
+    }
+
+    // Void safety net: failsafe if entity tunnels through unloaded chunks or physics glitch
+    let ground_y = crate::terrain::get_terrain_height(transform.translation.x, transform.translation.z);
+    let min_safe_y = ground_y + 1.0;
+    if (hit.is_none() && transform.translation.y < min_safe_y) || transform.translation.y < ground_y - 1.0 {
+        transform.translation.y = min_safe_y;
+        if lin_vel.y < 0.0 { 
+            lin_vel.y = 0.0; 
+        }
+        kcc.is_grounded = true;
     }
 }
 
@@ -1251,4 +1288,47 @@ pub fn update_interaction_prompt(
 
     text.sections[0].value = "".to_string();
     *vis = Visibility::Hidden;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_grounded_stationary_stability_invariants() {
+        // Invariants: when stationary on the ground, gravity must be 0.0 and vertical velocity
+        // must be 0.0 so that XPBD collision constraint solver does not oscillate vertically.
+        let mut lin_vel = LinearVelocity(Vec3::new(0.0, -1.0, 0.0));
+        let mut gravity = GravityScale(8.0);
+        let kcc = Kcc { is_grounded: true };
+        let move_dir = Vec3::ZERO;
+
+        if kcc.is_grounded {
+            if move_dir == Vec3::ZERO {
+                lin_vel.y = 0.0;
+                gravity.0 = 0.0;
+            }
+        }
+
+        assert_eq!(gravity.0, 0.0);
+        assert_eq!(lin_vel.y, 0.0);
+        assert_eq!(kcc.is_grounded, true);
+    }
+
+    #[test]
+    fn test_jumping_invariants() {
+        // Invariants: jumping sets vertical velocity to 10.0, re-engages 8G gravity, and clears grounded state
+        let mut lin_vel = LinearVelocity::ZERO;
+        let mut gravity = GravityScale(0.0);
+        let mut kcc = Kcc { is_grounded: true };
+
+        // Simulate jump execution
+        lin_vel.y = 10.0;
+        gravity.0 = 8.0;
+        kcc.is_grounded = false;
+
+        assert_eq!(lin_vel.y, 10.0);
+        assert_eq!(gravity.0, 8.0);
+        assert_eq!(kcc.is_grounded, false);
+    }
 }

@@ -34,7 +34,7 @@ pub enum Faction {
 // RENDERING MARKERS & CAMERAS
 // ----------------------------------------------------------------------------
 
-#[derive(Component)] pub struct FPSMesh;
+#[allow(dead_code)] #[derive(Component)] pub struct FPSMesh;
 #[derive(Component)] pub struct RTSProxy;
 #[derive(Component)] pub struct FpsCamera;
 #[derive(Component)] pub struct RtsCameraRig;
@@ -50,7 +50,7 @@ pub enum Faction {
 
 #[derive(Component)] pub struct PlayerBody;
 #[derive(Component)] pub struct PlayerHead;
-#[derive(Component)] pub struct ViewModelArm;
+#[allow(dead_code)] #[derive(Component)] pub struct ViewModelArm;
 #[derive(Component)] pub struct Kcc { pub is_grounded: bool }
 
 #[derive(Component)]

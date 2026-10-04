@@ -473,10 +473,10 @@ pub struct TerrainRenderSettings {
 impl Default for TerrainRenderSettings {
     fn default() -> Self {
         Self {
-            view_distance_chunks: 10, // 160m default
-            unload_distance_chunks: 13,
+            view_distance_chunks: 14, // 224m default (matches terrain LOW_POLY_RADIUS_CHUNKS: 14, 20% reduction)
+            unload_distance_chunks: 15, // 240m default (matches terrain LOW_POLY_UNLOAD_RADIUS_CHUNKS: 15, immediately beyond 230.4m fog limit)
             spawn_full_zone: false,
-            visible_range_meters: 160.0,
+            visible_range_meters: 230.4,
         }
     }
 }
@@ -2637,7 +2637,7 @@ pub fn handle_options_panel_interactions(
     for interaction in recommended_btn_q.iter() {
         if *interaction == Interaction::Pressed {
             render_settings.view_distance_chunks = 16;
-            render_settings.unload_distance_chunks = 19;
+            render_settings.unload_distance_chunks = 17;
             render_settings.spawn_full_zone = false;
             render_settings.visible_range_meters = 256.0;
             crosshair_settings.enabled = true;
@@ -2652,7 +2652,7 @@ pub fn handle_options_panel_interactions(
     for interaction in classic_btn_q.iter() {
         if *interaction == Interaction::Pressed {
             render_settings.view_distance_chunks = 10;
-            render_settings.unload_distance_chunks = 13;
+            render_settings.unload_distance_chunks = 11;
             render_settings.spawn_full_zone = false;
             render_settings.visible_range_meters = 160.0;
             crosshair_settings.enabled = true;
@@ -2690,7 +2690,7 @@ pub fn handle_options_panel_interactions(
     for (interaction, preset_btn) in range_btn_q.iter() {
         if *interaction == Interaction::Pressed {
             render_settings.view_distance_chunks = preset_btn.0;
-            render_settings.unload_distance_chunks = preset_btn.0 + 3;
+            render_settings.unload_distance_chunks = preset_btn.0 + 1;
             render_settings.spawn_full_zone = false;
             render_settings.visible_range_meters = preset_btn.0 as f32 * 16.0;
             info!("Visible Range adjusted to {} chunks ({}m)", preset_btn.0, render_settings.visible_range_meters);
@@ -2779,8 +2779,8 @@ pub fn sync_terrain_render_and_fog_system(
         return;
     }
 
-    let end_dist = render_settings.visible_range_meters * 1.05;
-    let start_dist = end_dist * 0.65;
+    let end_dist = render_settings.visible_range_meters;
+    let start_dist = (end_dist * 0.20).max(40.0);
 
     for mut fog in fog_q.iter_mut() {
         fog.falloff = FogFalloff::Linear {
@@ -2902,8 +2902,8 @@ mod tests {
     #[test]
     fn test_terrain_render_settings_zone_expansion() {
         let mut settings = TerrainRenderSettings::default();
-        assert_eq!(settings.view_distance_chunks, 10);
-        assert_eq!(settings.visible_range_meters, 160.0);
+        assert_eq!(settings.view_distance_chunks, 14);
+        assert_eq!(settings.visible_range_meters, 230.4);
         assert!(!settings.spawn_full_zone);
 
         // Expand to full zone

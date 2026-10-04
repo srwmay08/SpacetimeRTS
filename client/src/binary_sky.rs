@@ -23,7 +23,7 @@
 //    integration dynamically driving Bevy's AmbientLight, ground bounce, and
 //    adaptive DirectionalLight shadow-cascade prioritization.
 // 5. Visual Celestial Objects & Starfield: Visible Host Star A and Companion Star B
-//    stellar discs with emission scaling, plus an astronomical 1,500-star procedural
+//    stellar discs with emission scaling, plus an astronomical 6,000-star procedural
 //    starfield that naturally emerges during twilight and deep night.
 // 6. Atmospheric Weather System: Dynamic presets for ClearSky, AerosolHaze,
 //    StellarWindAurora (binary magnetic interactions), and OvercastPrecipitation.
@@ -272,7 +272,7 @@ impl Default for BinarySkyConfig {
             year_duration_days: 365.0,
             binary_period_years: 18.5,    // Star B moves slowly across seasonal cycles
             axial_tilt_radians: 23.44f32.to_radians(),
-            binary_inclination_radians: 28.5f32.to_radians(),
+            binary_inclination_radians: 14.25f32.to_radians(),
             observer_latitude_radians: 45.0f32.to_radians(),
             observer_longitude_radians: 0.0,
             planet_radius_meters: 6_371_000.0,
@@ -729,15 +729,19 @@ pub fn create_billboard_starfield_mesh(star_count: usize) -> Mesh {
         let u3 = ((xorshift() % 10000) as f32) / 10000.0;
         let u4 = ((xorshift() % 10000) as f32) / 10000.0;
 
+        // Archimedes equal-area celestial projection:
+        // Sampling y = sin(elev) uniformly eliminates polar/zenith pinching,
+        // delivering identical star density per steradian across the entire sky dome.
         let azim = u1 * 2.0 * PI;
-        let elev = -0.04 + u2 * (PI * 0.5 + 0.04);
+        let y_min = -0.04;
+        let y = y_min + u2 * (1.0 - y_min);
+        let r_xz = (1.0 - y * y).max(0.0).sqrt();
 
-        let cos_el = elev.cos();
         let dir = Vec3::new(
-            cos_el * azim.sin(),
-            elev.sin(),
-            -cos_el * azim.cos(),
-        ).normalize();
+            r_xz * azim.sin(),
+            y,
+            -r_xz * azim.cos(),
+        );
 
         let center = dir * radius;
 
@@ -746,33 +750,45 @@ pub fn create_billboard_starfield_mesh(star_count: usize) -> Mesh {
         let right = dir.cross(up).normalize();
         let star_up = right.cross(dir).normalize();
 
-        // Astrometric magnitude hierarchy for pinpoint stars:
-        // Top 3% are prominent guide stars (0.32m - 0.44m)
-        // Next 18% are medium navigational stars (0.20m - 0.28m)
-        // Remaining 79% are background field stars (0.11m - 0.17m)
-        let size = if u3 > 0.97 {
-            0.32 + u4 * 0.12
+        // Astrometric magnitude hierarchy for pinpoint stars (reduced by 15% to eliminate chunky look):
+        // Top 3% are prominent guide stars (0.306m - 0.425m)
+        // Next 18% are medium navigational stars (0.204m - 0.272m)
+        // Remaining 79% are background field stars (0.110m - 0.162m)
+        let base_size = if u3 > 0.97 {
+            0.36 + u4 * 0.14
         } else if u3 > 0.82 {
-            0.20 + u4 * 0.08
+            0.24 + u4 * 0.08
         } else {
-            0.11 + u4 * 0.06
+            0.13 + u4 * 0.06
         };
+        let size = base_size * 0.85;
 
         let color_idx = (xorshift() % (spectral_colors.len() as u64)) as usize;
         let mut c = spectral_colors[color_idx];
         if u3 <= 0.82 {
-            let dim = 0.65 + u4 * 0.35;
+            let dim = 0.80 + u4 * 0.20;
             c[0] *= dim;
             c[1] *= dim;
             c[2] *= dim;
         }
 
-        // Compact symmetric pinprick quad facing observer at origin
+        // Diamond star geometry eliminating square rasterization artifacts:
+        // Generates tapered 4-point diamond facets along randomized celestial axes,
+        // producing natural stellar glints that taper to sharp subpixel points at the tips.
         let half = size * 0.5;
-        let v0 = center - right * half + star_up * half;
-        let v1 = center + right * half + star_up * half;
-        let v2 = center + right * half - star_up * half;
-        let v3 = center - right * half - star_up * half;
+        let rot_angle = u1 * (2.0 * PI);
+        let cos_r = rot_angle.cos();
+        let sin_r = rot_angle.sin();
+        let axis_a = (right * cos_r + star_up * sin_r).normalize();
+        let axis_b = (-right * sin_r + star_up * cos_r).normalize();
+
+        // Slight celestial aspect ratio gives prominent stars natural scintillation spikes (0.72 ratio),
+        // while background stars are symmetric diamonds (0.85 ratio).
+        let aspect = if u3 > 0.82 { 0.72 } else { 0.85 };
+        let v0 = center + axis_a * half;
+        let v1 = center + axis_b * (half * aspect);
+        let v2 = center - axis_a * half;
+        let v3 = center - axis_b * (half * aspect);
 
         let base_idx = (i * 4) as u32;
 
@@ -787,10 +803,10 @@ pub fn create_billboard_starfield_mesh(star_count: usize) -> Mesh {
         normals.push(norm);
         normals.push(norm);
 
-        uvs.push([0.0, 1.0]);
-        uvs.push([1.0, 1.0]);
-        uvs.push([1.0, 0.0]);
-        uvs.push([0.0, 0.0]);
+        uvs.push([0.5, 1.0]);
+        uvs.push([1.0, 0.5]);
+        uvs.push([0.5, 0.0]);
+        uvs.push([0.0, 0.5]);
 
         colors.push(c);
         colors.push(c);
@@ -1128,10 +1144,10 @@ pub fn setup_binary_sky_environment(
         Name::new("Companion Star B Dwarf Disk"),
     ));
 
-    // Spawn Cosmic Background Starfield Dome (1,500 diamond stars with astrometric magnitudes)
+    // Spawn Cosmic Background Starfield Dome (6,000 diamond stars with astrometric magnitudes)
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(create_billboard_starfield_mesh(1500)),
+            mesh: meshes.add(create_billboard_starfield_mesh(6000)),
             material: materials.add(StandardMaterial {
                 base_color: Color::srgba(1.0, 1.0, 1.0, 0.0), // Starts invisible in noon daylight
                 unlit: true,
@@ -1269,14 +1285,15 @@ pub fn update_binary_ephemeris(
     ).normalize_or_zero();
 
     // ------------------------------------------------------------------------
-    // Companion Star B Topocentric Position (Inclined Mutual Orbit)
+    // Companion Star B Topocentric Position (S-Type Companion orbiting Star A)
+    // Synchronized with Star A's celestial longitude with a ~16° angular separation
+    // offset so both stars are prominently visible in the daytime sky simultaneously.
     // ------------------------------------------------------------------------
     let i_b = config.binary_inclination_radians;
     let omega_b = ephemeris.binary_orbit_angle;
 
-    let sin_beta_b = i_b.sin() * omega_b.sin();
-    let beta_b = sin_beta_b.asin();
-    let lambda_b = (i_b.cos() * omega_b.sin()).atan2(omega_b.cos());
+    let beta_b = i_b * omega_b.sin();
+    let lambda_b = lambda_a + 0.275 + 0.07 * omega_b.cos();
 
     let sin_dec_b = eps.cos() * beta_b.sin() + eps.sin() * beta_b.cos() * lambda_b.sin();
     let dec_b = sin_dec_b.clamp(-1.0, 1.0).asin();
@@ -1312,7 +1329,7 @@ pub fn update_binary_ephemeris(
     let el_a_deg = elev_a.to_degrees();
     let el_b_deg = elev_b.to_degrees();
 
-    ephemeris.sky_state = if ephemeris.angular_separation < 15.0f32.to_radians() && (el_a_deg > -2.0 || el_b_deg > -2.0) {
+    ephemeris.sky_state = if ephemeris.angular_separation < 7.5f32.to_radians() && (el_a_deg > -2.0 || el_b_deg > -2.0) {
         DynamicSkyState::BinaryAlignment
     } else if el_a_deg > 0.0 && el_b_deg > 0.0 {
         DynamicSkyState::DualDay
@@ -1404,7 +1421,7 @@ pub fn update_atmospheric_scattering_and_cache(
     // 2. Binary Conjunction Amplification
     // ------------------------------------------------------------------------
     if ephemeris.sky_state == DynamicSkyState::BinaryAlignment {
-        let align_ratio = 1.0 - (ephemeris.angular_separation / 15.0f32.to_radians()).clamp(0.0, 1.0);
+        let align_ratio = 1.0 - (ephemeris.angular_separation / 7.5f32.to_radians()).clamp(0.0, 1.0);
         cache.conjunction_amplification = 1.0 + align_ratio * 0.45;
     } else {
         cache.conjunction_amplification = 1.0;
@@ -1633,8 +1650,18 @@ pub fn sync_celestial_visuals(
         } else {
             *vis_stars = Visibility::Visible;
             if let Some(mat) = materials.get_mut(mat_handle_stars) {
-                mat.base_color = Color::srgba(1.0, 1.0, 1.0, night_factor);
-                mat.emissive = LinearRgba::new(night_factor * 4.0, night_factor * 4.0, night_factor * 4.0, 1.0);
+                let t = time.elapsed_seconds();
+                // Atmospheric scintillation / organic twinkle:
+                // Twinkling rates (frequencies 2.8, 5.4, 9.7 rad/s) are strictly preserved,
+                // while twinkling intensity (amplitudes) is significantly heightened for brilliant glittering.
+                let twinkle = 1.0
+                    + (t * 2.8).sin() * 0.28
+                    + (t * 5.4 + 1.2).sin() * 0.18
+                    + (t * 9.7 + 2.5).cos() * 0.12;
+                let star_luminance = night_factor * 7.5 * twinkle.max(0.15);
+                let alpha_twinkle = (night_factor * (0.75 + twinkle * 0.25)).clamp(0.0, 1.0);
+                mat.base_color = Color::srgba(1.0, 1.0, 1.0, alpha_twinkle);
+                mat.emissive = LinearRgba::new(star_luminance, star_luminance, star_luminance, 1.0);
             }
         }
     }
@@ -1774,13 +1801,14 @@ pub fn handle_sky_time_and_weather_inputs(
 }
 
 /// Updates camera clear color and volumetric atmospheric distance fog
-/// matching the physical participating medium's extinction profiles and radiance cache.
+/// matching the physical participating medium's extinction profiles, view distance, and radiance cache.
 pub fn update_atmospheric_cameras_and_fog(
     _ephemeris: Res<BinaryEphemerisState>,
     cache: Res<AtmosphericRadianceCache>,
     weather: Res<AtmosphericWeather>,
+    render_settings: Option<Res<crate::spellbook::TerrainRenderSettings>>,
     mut commands: Commands,
-    camera_query: Query<Entity, With<AtmosphericCamera>>,
+    mut camera_query: Query<(Entity, Option<&mut FogSettings>), With<AtmosphericCamera>>,
     mut clear_color: ResMut<ClearColor>,
 ) {
     let horizon_rgb = tonemap_atmospheric_radiance(cache.horizon_radiance);
@@ -1801,21 +1829,50 @@ pub fn update_atmospheric_cameras_and_fog(
 
     clear_color.0 = horizon_color;
 
-    let fog_density = match weather.weather_type {
-        WeatherType::ClearSky => 0.0004,
-        WeatherType::AerosolHaze => 0.0017,
-        WeatherType::StellarWindAurora => 0.0005,
-        WeatherType::OvercastPrecipitation => 0.0023,
+    // Synchronize fog range with terrain & entity visible draw distance
+    let base_range = if let Some(ref rs) = render_settings {
+        if rs.spawn_full_zone { 64.0 * 16.0 } else { rs.visible_range_meters.max(160.0) }
+    } else {
+        230.4
     };
 
-    for entity in camera_query.iter() {
-        commands.entity(entity).insert(FogSettings {
-            color: horizon_color,
-            falloff: FogFalloff::ExponentialSquared {
-                density: fog_density,
-            },
-            ..default()
-        });
+    // Calculate linear fog depth gradient: clear foreground for crisp interactions,
+    // progressive atmospheric haze across mid-range, reaching 100% opacity at max draw distance.
+    let (start_dist, end_dist) = match weather.weather_type {
+        WeatherType::ClearSky => ((base_range * 0.20).max(40.0), base_range * 1.0),
+        WeatherType::StellarWindAurora => ((base_range * 0.18).max(35.0), base_range * 0.95),
+        WeatherType::AerosolHaze => ((base_range * 0.10).max(20.0), base_range * 0.75),
+        WeatherType::OvercastPrecipitation => ((base_range * 0.05).max(10.0), base_range * 0.60),
+    };
+
+    let sun_scatter_color = if cache.star_a_illuminance_lux > 10.0 {
+        cache.star_a_color
+    } else if cache.star_b_illuminance_lux > 10.0 {
+        cache.star_b_color
+    } else {
+        Color::NONE
+    };
+
+    for (entity, mut fog_opt) in camera_query.iter_mut() {
+        if let Some(ref mut fog) = fog_opt {
+            fog.color = horizon_color;
+            fog.directional_light_color = sun_scatter_color;
+            fog.directional_light_exponent = 8.0;
+            fog.falloff = FogFalloff::Linear {
+                start: start_dist,
+                end: end_dist,
+            };
+        } else {
+            commands.entity(entity).insert(FogSettings {
+                color: horizon_color,
+                directional_light_color: sun_scatter_color,
+                directional_light_exponent: 8.0,
+                falloff: FogFalloff::Linear {
+                    start: start_dist,
+                    end: end_dist,
+                },
+            });
+        }
     }
 }
 
@@ -2054,11 +2111,45 @@ mod tests {
 
     #[test]
     fn test_starfield_mesh_generation() {
-        let mesh = create_starfield_mesh(100);
+        let mesh = create_starfield_mesh(6000);
         assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+        assert_eq!(mesh.count_vertices(), 6000 * 4);
         assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
         assert!(mesh.indices().is_some());
+    }
+
+    #[test]
+    fn test_starfield_equal_area_distribution() {
+        let star_count = 6000;
+        let mesh = create_billboard_starfield_mesh(star_count);
+        let pos_attr = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
+        let positions = pos_attr.as_float3().unwrap();
+
+        // Sample stars across the upper hemisphere split into lower band (0 <= y < 0.5)
+        // and upper zenith band (0.5 <= y <= 1.0)
+        let mut lower_band = 0;
+        let mut upper_band = 0;
+
+        for chunk in positions.chunks_exact(4) {
+            let center_y = (chunk[0][1] + chunk[1][1] + chunk[2][1] + chunk[3][1]) / 4.0;
+            let norm_y = center_y / 240.0;
+            if (0.0..0.5).contains(&norm_y) {
+                lower_band += 1;
+            } else if norm_y >= 0.5 {
+                upper_band += 1;
+            }
+        }
+
+        // Under Archimedes equal-area projection, equal intervals of y contain equal spherical area!
+        // The ratio between upper_band and lower_band must be 0.5 within ±5% tolerance.
+        let total = lower_band + upper_band;
+        let upper_ratio = upper_band as f32 / total as f32;
+        assert!(
+            (upper_ratio - 0.5).abs() < 0.05,
+            "Stars must be uniformly distributed with zero zenith concentration: upper_ratio was {:.3}",
+            upper_ratio
+        );
     }
 
     #[test]
@@ -2329,6 +2420,40 @@ mod tests {
         assert!(shader_src.contains("aurora_noise"), "Shader must contain procedural domain noise");
         assert!(shader_src.contains("breathe_exponent"), "Shader must contain dynamic breathing exponent");
         assert!(shader_src.contains("x * 0.5, y, x"), "Shader must contain requested spectral color synthesis");
-        assert!(shader_src.contains("pow(s, 70.0) * (1.0 - v)"), "Shader must contain high-energy electron micro-sparkle shimmer");
+        assert!(!shader_src.contains("pow(s, 70.0)"), "Shader must NOT draw stars directly onto the aurora curtain");
+    }
+
+    #[test]
+    fn test_atmospheric_camera_linear_fog_parameters() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<BinarySkyConfig>();
+        app.init_resource::<BinaryEphemerisState>();
+        app.init_resource::<AtmosphericRadianceCache>();
+        app.init_resource::<AtmosphericWeather>();
+        app.init_resource::<AmbientLight>();
+        app.init_resource::<ClearColor>();
+
+        let cam = app.world_mut().spawn((
+            Camera3dBundle::default(),
+            AtmosphericCamera,
+        )).id();
+
+        app.add_systems(Update, (update_binary_ephemeris, update_atmospheric_scattering_and_cache, update_atmospheric_cameras_and_fog).chain());
+        app.update();
+
+        let fog = app.world().get::<FogSettings>(cam).expect("FogSettings must be attached to AtmosphericCamera");
+        match fog.falloff {
+            FogFalloff::Linear { start, end } => {
+                assert!(start >= 40.0, "Fog should start beyond immediate player vicinity: {start}");
+                assert!(start < 100.0, "Fog should begin in mid-range to prevent clear edges: {start}");
+                assert_eq!(end, 230.4, "Fog end must reach 100% opacity at max draw distance (230.4m)");
+            }
+            _ => panic!("Atmospheric camera must use Linear fog falloff"),
+        }
+
+        // Fog color and ClearColor must match the horizon color
+        let clear_color = app.world().resource::<ClearColor>().0;
+        assert_eq!(fog.color, clear_color, "Fog color must match clear color for seamless horizon blending");
     }
 }

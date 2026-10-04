@@ -164,6 +164,36 @@ pub fn pick_tree_type(biome: Biome, seed: &mut u64) -> &'static str {
     }
 }
 
+/// Spatially coherent tree species picker that groups trees into natural groves, clumps, and forests.
+/// Trees within the same spatial grove (~32m to 48m radius) share the dominant species (85%),
+/// with occasional understory or border variation (15%).
+pub fn pick_tree_type_spatial(biome: Biome, x: f32, z: f32, node_id: u64) -> &'static str {
+    // 36-meter natural grove cluster grid
+    let clump_size = 36.0;
+    let cx = (x / clump_size).floor() as i64;
+    let cz = (z / clump_size).floor() as i64;
+
+    // Spatial hash for the clump center to determine dominant grove archetype
+    let mut grove_seed = ((cx as u64).wrapping_mul(0x9e3779b97f4a7c15))
+        ^ ((cz as u64).wrapping_mul(0xc6a4a7935bd1e995))
+        ^ 0x517cc1b727220a95;
+
+    let dominant_species = pick_tree_type(biome, &mut grove_seed);
+
+    // 85% dominant grove species, 15% edge/understory species roll
+    let mut node_seed = (node_id ^ 0x27d4eb2f165667c5).wrapping_mul(0x517cc1b727220a95);
+    node_seed ^= node_seed << 13;
+    node_seed ^= node_seed >> 7;
+    node_seed ^= node_seed << 17;
+    let variation_roll = (node_seed as u32 as f32) / (u32::MAX as f32);
+
+    if variation_roll < 0.85 {
+        dominant_species
+    } else {
+        pick_tree_type(biome, &mut node_seed)
+    }
+}
+
 /// Shared StandardMaterial handles for the 4 tree species to enable O(1) seasonal updates.
 #[derive(Resource, Clone)]
 pub struct TreeMaterialHandles {
@@ -181,24 +211,32 @@ impl FromWorld for TreeMaterialHandles {
                 base_color: Color::linear_rgba(DEAD_PALETTE.summer[0], DEAD_PALETTE.summer[1], DEAD_PALETTE.summer[2], 1.0),
                 perceptual_roughness: 0.85,
                 reflectance: 0.1,
+                cull_mode: None,
+                double_sided: true,
                 ..default()
             }),
             oak: materials.add(StandardMaterial {
                 base_color: Color::linear_rgba(OAK_PALETTE.autumn[0], OAK_PALETTE.autumn[1], OAK_PALETTE.autumn[2], 1.0),
                 perceptual_roughness: 0.85,
                 reflectance: 0.1,
+                cull_mode: None,
+                double_sided: true,
                 ..default()
             }),
             pine: materials.add(StandardMaterial {
                 base_color: Color::linear_rgba(PINE_PALETTE.summer[0], PINE_PALETTE.summer[1], PINE_PALETTE.summer[2], 1.0),
                 perceptual_roughness: 0.85,
                 reflectance: 0.1,
+                cull_mode: None,
+                double_sided: true,
                 ..default()
             }),
             round: materials.add(StandardMaterial {
                 base_color: Color::linear_rgba(ROUND_PALETTE.autumn[0], ROUND_PALETTE.autumn[1], ROUND_PALETTE.autumn[2], 1.0),
                 perceptual_roughness: 0.85,
                 reflectance: 0.1,
+                cull_mode: None,
+                double_sided: true,
                 ..default()
             }),
         }
@@ -248,7 +286,8 @@ pub fn update_tree_colors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::network::*;
+    use crate::trees::*;
+    use crate::voxel_mesh::*;
 
     #[test]
     fn test_biome_elevation_classification() {

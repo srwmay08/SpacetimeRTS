@@ -21,6 +21,11 @@ pub mod tree_colors;
 pub mod zone_editor;
 pub mod spellbook;
 pub mod skills_ui;
+pub mod voxel_mesh;
+pub mod trees;
+pub mod props;
+pub mod creatures;
+pub mod resource_nodes;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -38,6 +43,7 @@ use crate::tuner::*;
 use crate::audio_feedback::*;
 use crate::tactical_abilities::*;
 use crate::tree_colors::*;
+use crate::resource_nodes::*;
 
 // P2 Fix: SystemSets for explicit ordering and predictable behavior
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -57,7 +63,14 @@ pub enum UpdateSet {
 fn main() {
     App::new()
         .add_plugins((
-            DefaultPlugins,
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "SpacetimeRTS".into(),
+                    present_mode: bevy::window::PresentMode::AutoNoVsync,
+                    ..default()
+                }),
+                ..default()
+            }),
             PhysicsPlugins::default(),
             bevy::diagnostic::FrameTimeDiagnosticsPlugin,
             bevy::diagnostic::EntityCountDiagnosticsPlugin,
@@ -114,6 +127,7 @@ fn main() {
         .init_resource::<HitMarkerState>()
         .init_resource::<SeasonState>()
         .init_resource::<TreeMaterialHandles>()
+        .init_resource::<FpsLimiterState>()
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))
@@ -204,6 +218,7 @@ fn main() {
         ).run_if(in_state(CameraMode::RTS).and_then(in_state(GameState::InGame))))
         
         .add_systems(Update, update_diagnostic_overlay.run_if(in_state(GameState::InGame)))
+        .add_systems(Last, enforce_fps_limit)
         
         .run();
 }

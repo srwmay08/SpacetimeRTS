@@ -8,7 +8,8 @@ use spacetimedb_sdk::Table;
 
 use crate::core::GameLayer;
 use crate::components::*;
-use crate::network::{SpacetimeConnection, VoxelBox, build_voxel_mesh};
+use crate::network::SpacetimeConnection;
+use crate::voxel_mesh::{VoxelBox, build_voxel_mesh};
 use crate::module_bindings::place_structure_reducer::place_structure; 
 use crate::module_bindings::structure_table::StructureTableAccess; 
 

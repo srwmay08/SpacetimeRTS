@@ -159,3 +159,96 @@ pub struct DragDropState {
     pub count: u32,
     pub current_pos: Vec2,
 }
+
+// ----------------------------------------------------------------------------
+// FRAMERATE LIMITER STATE & PACING SYSTEM
+// ----------------------------------------------------------------------------
+
+/// Resource controlling client framerate limits and pacing.
+#[derive(Resource, Debug, Clone)]
+pub struct FpsLimiterState {
+    /// Target maximum frames per second. If None or <= 0, framerate is uncapped.
+    pub target_fps: Option<u32>,
+    /// Instant when the previous frame completed execution.
+    pub last_frame_instant: Option<std::time::Instant>,
+}
+
+impl Default for FpsLimiterState {
+    fn default() -> Self {
+        Self {
+            target_fps: None, // Uncapped by default (VSync disabled via AutoNoVsync)
+            last_frame_instant: None,
+        }
+    }
+}
+
+/// Enforces the maximum FPS cap by pacing frame execution in the `Last` schedule.
+/// Uses a hybrid OS-sleep + sub-millisecond spin loop to guarantee microsecond precision
+/// without excessive CPU busy-waiting.
+pub fn enforce_fps_limit(mut limiter: ResMut<FpsLimiterState>) {
+    let Some(target_fps) = limiter.target_fps else {
+        limiter.last_frame_instant = Some(std::time::Instant::now());
+        return;
+    };
+
+    if target_fps == 0 {
+        limiter.last_frame_instant = Some(std::time::Instant::now());
+        return;
+    }
+
+    let target_frame_duration = std::time::Duration::from_secs_f64(1.0 / target_fps as f64);
+
+    if let Some(last_instant) = limiter.last_frame_instant {
+        let elapsed = last_instant.elapsed();
+        if elapsed < target_frame_duration {
+            let remaining = target_frame_duration - elapsed;
+            // Coarse sleep for durations longer than 2ms, preserving CPU budget
+            if remaining > std::time::Duration::from_millis(2) {
+                std::thread::sleep(remaining - std::time::Duration::from_millis(1));
+            }
+            // Sub-millisecond spin-loop for pinpoint frame boundary alignment
+            while last_instant.elapsed() < target_frame_duration {
+                std::hint::spin_loop();
+            }
+        }
+    }
+
+    limiter.last_frame_instant = Some(std::time::Instant::now());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fps_limiter_defaults_uncapped() {
+        let limiter = FpsLimiterState::default();
+        assert_eq!(limiter.target_fps, None);
+        assert!(limiter.last_frame_instant.is_none());
+    }
+
+    #[test]
+    fn test_fps_limiter_pacing_system() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<FpsLimiterState>();
+        app.add_systems(Update, enforce_fps_limit);
+
+        // Run 1 tick uncapped
+        app.update();
+        let limiter = app.world().resource::<FpsLimiterState>();
+        assert!(limiter.last_frame_instant.is_some());
+
+        // Set to 60 FPS
+        app.world_mut().resource_mut::<FpsLimiterState>().target_fps = Some(60);
+        app.update();
+        let limiter = app.world().resource::<FpsLimiterState>();
+        assert_eq!(limiter.target_fps, Some(60));
+
+        // Uncap again
+        app.world_mut().resource_mut::<FpsLimiterState>().target_fps = None;
+        app.update();
+        let limiter = app.world().resource::<FpsLimiterState>();
+        assert_eq!(limiter.target_fps, None);
+    }
+}

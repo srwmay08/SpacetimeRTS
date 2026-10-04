@@ -85,16 +85,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Emerald/Cyan/Violet spectral synthesis: x*0.5 (red), y (green), x (blue)
     color += vec3<f32>(x * 0.5, y, x) * v;
 
-    // 5. High-energy ionized particle micro-sparkle twinkle
-    let seed = in.position.xy;
-    var r: vec2<f32>;
-    r.x = fract(sin(seed.x * 12.9898 + seed.y * 78.2330) * 43758.5453);
-    r.y = fract(sin(seed.x * 53.7842 + seed.y * 47.5134) * 43758.5453);
-
-    let s = mix(r.x, (sin((t * 2.5 + 60.0) * r.y) * 0.5 + 0.5) * ((r.y * r.y) * (r.y * r.y)), 0.04);
-    color += vec3<f32>(pow(s, 70.0) * (1.0 - v));
-
-    // 6. Modulation by vertex color, color tint, atmospheric weather intensity, and diurnal night factor
+    // 5. Modulation by vertex color, color tint, atmospheric weather intensity, and diurnal night factor
     #ifdef VERTEX_COLORS
     color = color * in.color.rgb;
     #endif

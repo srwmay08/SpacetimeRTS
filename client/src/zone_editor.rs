@@ -22,9 +22,9 @@ use tracing::info;
 
 use crate::core::*;
 use crate::components::*;
-use crate::network::{
-    create_voxel_oak_mesh, create_voxel_pine_mesh, create_voxel_dead_tree_mesh,
-    create_voxel_rock_mesh, create_voxel_bush_mesh, create_voxel_flint_mesh,
+use crate::trees::{create_voxel_oak_mesh, create_voxel_pine_mesh, create_voxel_dead_tree_mesh};
+use crate::props::{create_voxel_rock_mesh, create_voxel_bush_mesh, create_voxel_flint_mesh};
+use crate::creatures::{
     create_voxel_peasant_mesh, create_voxel_goblin_mesh, create_voxel_deer_mesh,
     create_voxel_boar_mesh,
 };

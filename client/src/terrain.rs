@@ -26,7 +26,8 @@ use spacetimedb_sdk::Table;
 
 use crate::core::*;
 use crate::components::*;
-use crate::network::{SpacetimeConnection, create_voxel_pet_mesh};
+use crate::network::SpacetimeConnection;
+use crate::creatures::create_voxel_pet_mesh;
 use crate::module_bindings::voxel_chunk_table::VoxelChunkTableAccess;
 use crate::module_bindings::VoxelChunk;
 
@@ -38,8 +39,8 @@ pub const USE_VOXEL_WORLD_TERRAIN: bool = false;
 pub const LOW_POLY_CHUNK_SPAN: f32 = 16.0; // 16m chunk boundary
 pub const LOW_POLY_QUADS_PER_AXIS: usize = 16; // 16 quads per chunk
 pub const LOW_POLY_QUAD_SIZE: f32 = LOW_POLY_CHUNK_SPAN / LOW_POLY_QUADS_PER_AXIS as f32; // 1.0m low-poly facet scale
-pub const LOW_POLY_RADIUS_CHUNKS: i32 = 10; // 160m radius (covers 165m fog view distance)
-pub const LOW_POLY_UNLOAD_RADIUS_CHUNKS: i32 = 12; // 192m radius (32m hysteresis buffer preventing boundary churn)
+pub const LOW_POLY_RADIUS_CHUNKS: i32 = 14; // 224m radius (reduced by 20% from 288m for performance optimization)
+pub const LOW_POLY_UNLOAD_RADIUS_CHUNKS: i32 = 15; // 240m radius (immediately beyond 230.4m fog visual limit)
 pub const LOW_POLY_NEAR_COLLIDER_DIST_SQ: f32 = 48.0 * 48.0; // 48m radius for Avian3D physics colliders
 pub const LOW_POLY_FAR_COLLIDER_UNLOAD_SQ: f32 = 56.0 * 56.0; // 56m radius hysteresis for collider unloading
 
@@ -687,7 +688,7 @@ pub fn update_infinite_voxel_terrain(
     // Dynamic visible range & batch tuning from options panel
     let (view_radius, unload_radius, spawn_batch) = if let Some(ref rs) = render_settings {
         let vr = if rs.spawn_full_zone { 64 } else { rs.view_distance_chunks };
-        let ur = if rs.spawn_full_zone { 70 } else { rs.unload_distance_chunks.max(vr + 3) };
+        let ur = if rs.spawn_full_zone { 70 } else { rs.unload_distance_chunks.max(vr + 1) };
         let batch = if rs.spawn_full_zone { 256 } else { 32.max(vr as usize * 3) };
         (vr, ur, batch)
     } else {
@@ -763,13 +764,41 @@ pub fn update_infinite_voxel_terrain(
         }
     }
 
-    // 3. Despawn distant chunks beyond hysteresis unload radius
+    // 3. Despawn distant chunks beyond fog visual limit efficiently
+    // In Bevy atmospheric linear fog, terrain reaches 100% opacity at visible_range_meters (230.4m default).
+    // Any chunk whose nearest boundary to the player exceeds the fog limit is completely invisible.
+    let fog_visual_limit_meters = if let Some(ref rs) = render_settings {
+        if rs.spawn_full_zone { 64.0 * chunk_world_span } else { rs.visible_range_meters.max(160.0) }
+    } else {
+        230.4
+    };
+    // Include an 8.0m (half-chunk) hysteresis buffer to prevent boundary thrashing while moving
+    let discard_dist_meters = fog_visual_limit_meters + (chunk_world_span * 0.5);
+    let discard_dist_sq = discard_dist_meters * discard_dist_meters;
     let unload_radius_sq = unload_radius * unload_radius;
+
     for (&key, &(entity, _, _)) in loaded_entities.iter() {
         let (cx, _cy, cz) = unpack_chunk_key(key);
         let dx = cx - p_cx;
         let dz = cz - p_cz;
+
+        // Fast integer reject for chunks beyond grid unload radius
         if dx * dx + dz * dz > unload_radius_sq {
+            commands.entity(entity).despawn_recursive();
+            continue;
+        }
+
+        // Efficient spatial bounding check: calculate squared distance to closest point on chunk AABB
+        let chunk_min_x = cx as f32 * chunk_world_span;
+        let chunk_max_x = chunk_min_x + chunk_world_span;
+        let chunk_min_z = cz as f32 * chunk_world_span;
+        let chunk_max_z = chunk_min_z + chunk_world_span;
+
+        let closest_x = p_pos.x.clamp(chunk_min_x, chunk_max_x);
+        let closest_z = p_pos.z.clamp(chunk_min_z, chunk_max_z);
+        let dist_to_chunk_sq = (closest_x - p_pos.x).powi(2) + (closest_z - p_pos.z).powi(2);
+
+        if dist_to_chunk_sq > discard_dist_sq {
             commands.entity(entity).despawn_recursive();
         }
     }

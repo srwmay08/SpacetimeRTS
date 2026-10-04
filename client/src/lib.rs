@@ -24,3 +24,8 @@ pub mod tree_colors;
 pub mod zone_editor;
 pub mod spellbook;
 pub mod skills_ui;
+pub mod voxel_mesh;
+pub mod trees;
+pub mod props;
+pub mod creatures;
+pub mod resource_nodes;

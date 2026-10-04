@@ -259,6 +259,8 @@ pub fn fps_look(
     if mouse_buttons.just_pressed(MouseButton::Left) {
         window.cursor.grab_mode = CursorGrabMode::Locked;
         window.cursor.visible = false;
+        let center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+        window.set_cursor_position(Some(center));
     }
     if keys.just_pressed(KeyCode::Escape) {
         window.cursor.grab_mode = CursorGrabMode::None;
@@ -266,11 +268,17 @@ pub fn fps_look(
     }
 
     if window.cursor.grab_mode == CursorGrabMode::Locked {
-        let center_x = window.width() / 2.0;
-        let center_y = window.height() / 2.0;
-        window.set_cursor_position(Some(Vec2::new(center_x, center_y)));
+        let center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
+        if let Some(cursor_pos) = window.cursor_position() {
+            if (cursor_pos - center).length_squared() > 64.0 * 64.0 {
+                window.set_cursor_position(Some(center));
+            }
+        }
 
         for event in mouse_motion.read() {
+            if event.delta.length_squared() < 1e-4 {
+                continue;
+            }
             body_transform.rotate_y(-event.delta.x * 0.002);
             
             let mut current_pitch = head_transform.rotation.to_euler(EulerRot::YXZ).1;

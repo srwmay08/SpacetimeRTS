@@ -212,3 +212,138 @@ pub fn play_sound(commands: &mut Commands, handle: &Handle<AudioSource>) {
         settings: PlaybackSettings::DESPAWN,
     });
 }
+
+// ----------------------------------------------------------------------------
+// COMBAT EVENT DISPATCHER & SENSORY FEEDBACK SYSTEM
+// ----------------------------------------------------------------------------
+
+use avian3d::prelude::{LinearVelocity, RigidBody};
+use spacetimedb_sdk::Table;
+use crate::network::SpacetimeConnection;
+use crate::core::EventTracker;
+use crate::components::{HitMarkerState, Particle};
+use crate::module_bindings::combat_event_table::CombatEventTableAccess;
+
+pub fn process_combat_events(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    conn: Res<SpacetimeConnection>,
+    mut tracker: ResMut<EventTracker>,
+    audio_handles: Option<Res<CombatAudioHandles>>,
+    mut hit_marker_state: Option<ResMut<HitMarkerState>>,
+) {
+    let mut highest_id = tracker.last_event_id;
+
+    for event in conn.db.db.combat_event().iter() {
+        if event.id > tracker.last_event_id {
+            highest_id = highest_id.max(event.id);
+            let pos = Vec3::new(event.x, event.y, event.z);
+
+            match event.event_type.as_str() {
+                "HitTree" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 8,
+                        Color::srgb(0.35, 0.22, 0.12),
+                        Color::srgb(0.20, 0.55, 0.20),
+                        0.08,
+                    );
+                }
+                "HitRock" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 8,
+                        Color::srgb(0.48, 0.48, 0.50),
+                        Color::srgb(0.65, 0.65, 0.68),
+                        0.08,
+                    );
+                }
+                "VoxelCollapse" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 24,
+                        Color::srgb(0.45, 0.32, 0.20),
+                        Color::srgb(0.50, 0.50, 0.52),
+                        0.10,
+                    );
+                }
+                "ExplosionBlast" | "SiegeImpact" | "MeteorImpact" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 36,
+                        Color::srgb(0.85, 0.45, 0.10),
+                        Color::srgb(0.25, 0.25, 0.25),
+                        0.10,
+                    );
+                    crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "KABOOM!", true);
+                }
+                _ => {
+                    let event_str = event.event_type.as_str();
+
+                    // Auditory Cues & Reticle-Adjacent Hit Confirmation
+                    if event_str.starts_with("Crit") {
+                        if let Some(ref handles) = audio_handles {
+                            play_sound(&mut commands, &handles.dink);
+                        }
+                        if let Some(ref mut hm) = hit_marker_state {
+                            hm.timer = Timer::from_seconds(0.09, TimerMode::Once);
+                            hm.is_crit = true;
+                            hm.is_armor = false;
+                        }
+                        crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "CRIT! 160", true);
+                    } else if event_str.contains("Clang") || event_str.contains("Armor") {
+                        if let Some(ref handles) = audio_handles {
+                            play_sound(&mut commands, &handles.armor_break);
+                        }
+                        if let Some(ref mut hm) = hit_marker_state {
+                            hm.timer = Timer::from_seconds(0.09, TimerMode::Once);
+                            hm.is_crit = false;
+                            hm.is_armor = true;
+                        }
+                        crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "CLANG!", false);
+                    } else if event_str == "HitPlayer" {
+                        if let Some(ref handles) = audio_handles {
+                            play_sound(&mut commands, &handles.bodyshot_tick);
+                        }
+                        if let Some(ref mut hm) = hit_marker_state {
+                            hm.timer = Timer::from_seconds(0.07, TimerMode::Once);
+                            hm.is_crit = false;
+                            hm.is_armor = false;
+                        }
+                        crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "-35", false);
+                    } else if event_str.contains("Bonk") {
+                        crate::tuner::spawn_comic_damage_floater(&mut commands, pos, "BONK!", false);
+                    }
+
+                    let color = match event_str {
+                        "HitBush" => Color::srgb(0.2, 0.6, 0.2), 
+                        "HitPlayer" => Color::srgb(0.9, 0.1, 0.1), 
+                        _ => Color::WHITE,
+                    };
+
+                    let velocities = [
+                        Vec3::new(1.0, 3.0, 1.0), Vec3::new(-1.0, 3.5, 0.5), Vec3::new(0.5, 2.5, -1.0),
+                        Vec3::new(-0.5, 4.0, -0.5), Vec3::new(0.0, 3.0, 0.0),
+                    ];
+
+                    for vel in velocities {
+                        commands.spawn((
+                            PbrBundle {
+                                mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.1, 0.1, 0.1)),
+                                material: materials.add(StandardMaterial { base_color: color, unlit: event.event_type == "HitPlayer", ..default() }),
+                                transform: Transform::from_xyz(event.x, event.y + 0.5, event.z),
+                                ..default()
+                            },
+                            RigidBody::Kinematic,
+                            LinearVelocity(vel),
+                            Particle { timer: Timer::from_seconds(0.5, TimerMode::Once) }, 
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    
+    tracker.last_event_id = highest_id;
+}

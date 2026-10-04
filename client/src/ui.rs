@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::window::{CursorGrabMode, PrimaryWindow};
+use bevy::window::{CursorGrabMode, PrimaryWindow, WindowMode};
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::ButtonState;
 use tracing::{info, error};
@@ -181,6 +181,17 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "equip",
     "skills",
     "spellbook",
+    "res",
+    "resolution",
+    "fullscreen",
+    "fs",
+    "windowed",
+    "win",
+    "maxfps",
+    "fpslimit",
+    "fps_max",
+    "limitfps",
+    "vsync",
     "help",
 ];
 
@@ -1364,6 +1375,8 @@ pub fn handle_console_input(
     mut sky_weather: Option<ResMut<crate::binary_sky::AtmosphericWeather>>,
     mut hud_pill_query: Query<&mut Style, With<CelestialHudRoot>>,
     mut diag_pill_query: Query<&mut Style, (With<DiagnosticOverlayRoot>, Without<CelestialHudRoot>)>,
+    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
+    mut fps_limiter: ResMut<FpsLimiterState>,
 ) {
     if !console.is_open {
         return;
@@ -1676,9 +1689,135 @@ pub fn handle_console_input(
                     console.logs.push("[HUD] Celestial HUD element not found.".into());
                 }
             }
+            "maxfps" | "fpslimit" | "fps_max" | "limitfps" => {
+                if tokens.len() == 1 {
+                    let limit_str = match fps_limiter.target_fps {
+                        Some(fps) => format!("capped at {} FPS", fps),
+                        None => "UNCAPPED (unlimited)".to_string(),
+                    };
+                    let vsync_str = if let Ok(window) = window_query.get_single() {
+                        match window.present_mode {
+                            bevy::window::PresentMode::AutoNoVsync => "OFF (AutoNoVsync)",
+                            bevy::window::PresentMode::Immediate => "OFF (Immediate)",
+                            bevy::window::PresentMode::AutoVsync => "ON (AutoVsync)",
+                            bevy::window::PresentMode::Fifo => "ON (Fifo VSync)",
+                            bevy::window::PresentMode::FifoRelaxed => "ON (FifoRelaxed)",
+                            bevy::window::PresentMode::Mailbox => "Mailbox (No tearing, uncapped)",
+                        }
+                    } else {
+                        "Unknown"
+                    };
+                    console.logs.push(format!("[Framerate] Max FPS limit: {} | VSync: {}", limit_str, vsync_str));
+                    console.logs.push("Usage: maxfps <fps|0|off|uncapped> (e.g. 'maxfps 60', 'maxfps 144', 'maxfps 0')".into());
+                    console.logs.push("       vsync <on|off>".into());
+                } else {
+                    let arg = tokens[1].to_lowercase();
+                    match arg.as_str() {
+                        "0" | "off" | "uncap" | "uncapped" | "none" | "unlimited" => {
+                            fps_limiter.target_fps = None;
+                            console.logs.push("[Framerate] Max FPS limit REMOVED. Client running completely UNCAPPED.".into());
+                        }
+                        _ => {
+                            if let Ok(fps) = arg.parse::<u32>() {
+                                if fps == 0 {
+                                    fps_limiter.target_fps = None;
+                                    console.logs.push("[Framerate] Max FPS limit REMOVED. Client running completely UNCAPPED.".into());
+                                } else if fps < 10 {
+                                    console.logs.push("[Syntax Error] Minimum target FPS limit is 10.".into());
+                                } else {
+                                    fps_limiter.target_fps = Some(fps);
+                                    console.logs.push(format!("[Framerate] Max FPS limit set to {} FPS.", fps));
+                                }
+                            } else {
+                                console.logs.push(format!("[Syntax Error] Invalid FPS limit '{}'. Usage: maxfps <number|0|off|uncapped>", tokens[1]));
+                            }
+                        }
+                    }
+                }
+            }
+            "vsync" => {
+                if let Ok(mut window) = window_query.get_single_mut() {
+                    let sub = tokens.get(1).map(|s| s.to_lowercase());
+                    match sub.as_deref() {
+                        Some("on") | Some("1") | Some("true") | Some("enable") => {
+                            window.present_mode = bevy::window::PresentMode::AutoVsync;
+                            console.logs.push("[Window] VSync ENABLED (display refresh rate lock).".into());
+                        }
+                        Some("off") | Some("0") | Some("false") | Some("disable") => {
+                            window.present_mode = bevy::window::PresentMode::AutoNoVsync;
+                            console.logs.push("[Window] VSync DISABLED (unlocked presentation rate).".into());
+                        }
+                        Some("immediate") => {
+                            window.present_mode = bevy::window::PresentMode::Immediate;
+                            console.logs.push("[Window] Present mode set to Immediate (lowest latency, tearing possible).".into());
+                        }
+                        Some("mailbox") => {
+                            window.present_mode = bevy::window::PresentMode::Mailbox;
+                            console.logs.push("[Window] Present mode set to Mailbox (lowest latency, tear-free).".into());
+                        }
+                        None => {
+                            let mode_str = match window.present_mode {
+                                bevy::window::PresentMode::AutoNoVsync => "OFF (AutoNoVsync)",
+                                bevy::window::PresentMode::Immediate => "OFF (Immediate)",
+                                bevy::window::PresentMode::AutoVsync => "ON (AutoVsync)",
+                                bevy::window::PresentMode::Fifo => "ON (Fifo VSync)",
+                                bevy::window::PresentMode::FifoRelaxed => "ON (FifoRelaxed)",
+                                bevy::window::PresentMode::Mailbox => "Mailbox (No tearing, uncapped)",
+                            };
+                            console.logs.push(format!("[Window] VSync is currently {}. Usage: vsync <on|off|immediate|mailbox>", mode_str));
+                        }
+                        _ => {
+                            console.logs.push("[Syntax Error] Usage: vsync <on|off|immediate|mailbox>".into());
+                        }
+                    }
+                } else {
+                    console.logs.push("[Window Error] Primary window not found.".into());
+                }
+            }
             "f3" | "fps" | "diag" | "diagnostics" => {
                 let sub = tokens.get(1).map(|s| s.to_lowercase());
-                if let Ok(mut style) = diag_pill_query.get_single_mut() {
+
+                // If user typed 'fps <number>' or 'fps max <number>' or 'fps limit <number>' or 'fps uncap'
+                let is_fps_limit_cmd = if cmd == "fps" {
+                    if let Some(ref s) = sub {
+                        s == "max" || s == "limit" || s == "uncap" || s == "uncapped" || s.parse::<u32>().is_ok()
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                if is_fps_limit_cmd {
+                    let target_arg = if sub.as_deref() == Some("max") || sub.as_deref() == Some("limit") {
+                        tokens.get(2).map(|s| s.to_lowercase())
+                    } else {
+                        sub
+                    };
+                    match target_arg.as_deref() {
+                        Some("0") | Some("off") | Some("uncap") | Some("uncapped") | Some("none") => {
+                            fps_limiter.target_fps = None;
+                            console.logs.push("[Framerate] Max FPS limit REMOVED. Client running completely UNCAPPED.".into());
+                        }
+                        Some(val) => {
+                            if let Ok(target) = val.parse::<u32>() {
+                                if target == 0 {
+                                    fps_limiter.target_fps = None;
+                                    console.logs.push("[Framerate] Max FPS limit REMOVED. Client running completely UNCAPPED.".into());
+                                } else {
+                                    let clamped = target.max(10);
+                                    fps_limiter.target_fps = Some(clamped);
+                                    console.logs.push(format!("[Framerate] Max FPS limit set to {} FPS.", clamped));
+                                }
+                            } else {
+                                console.logs.push(format!("[Syntax Error] Usage: fps <number> or maxfps <number>"));
+                            }
+                        }
+                        None => {
+                            console.logs.push("[Syntax Error] Usage: fps <number> or maxfps <number>".into());
+                        }
+                    }
+                } else if let Ok(mut style) = diag_pill_query.get_single_mut() {
                     match sub.as_deref() {
                         Some("on") | Some("show") | Some("1") | Some("true") => {
                             style.display = Display::Flex;
@@ -1695,7 +1834,7 @@ pub fn handle_console_input(
                             console.logs.push(format!("[Diagnostics] F3 telemetry overlay {}.", action_str));
                         }
                         _ => {
-                            console.logs.push("[Syntax Error] Usage: f3 [on|off|toggle] (or press [F3])".into());
+                            console.logs.push("[Syntax Error] Usage: f3 [on|off|toggle] (or press [F3]) | fps <target_fps>".into());
                         }
                     }
                 } else {
@@ -1993,8 +2132,81 @@ pub fn handle_console_input(
                 console.logs.push("clearinv               : Empties inventory slots completely".into());
                 console.logs.push("killall                : Destroys all active NPC brains".into());
                 console.logs.push("tuner / weapontool     : Opens Weapon & Spell Tuner [F6]".into());
-                console.logs.push("crosshair              : Opens Crosshair Customizer info [F7]".into());
+                console.logs.push("res [w h | preset]     : Sets resolution (e.g. res 1080p, res 1920 1080)".into());
+                console.logs.push("fullscreen / windowed  : Toggles or sets fullscreen / windowed display mode".into());
+                console.logs.push("maxfps <fps|0|off>     : Sets frame rate cap (0 or off = uncapped)".into());
+                console.logs.push("vsync <on|off>         : Toggles vertical sync (AutoNoVsync default)".into());
                 console.logs.push("abilities              : Displays tactical abilities directory".into());
+            }
+            "resolution" | "res" => {
+                if let Ok(mut window) = window_query.get_single_mut() {
+                    if tokens.len() == 1 {
+                        let cur_w = window.resolution.width();
+                        let cur_h = window.resolution.height();
+                        let phys_w = window.resolution.physical_width();
+                        let phys_h = window.resolution.physical_height();
+                        let mode_str = match window.mode {
+                            WindowMode::Windowed => "Windowed",
+                            WindowMode::BorderlessFullscreen => "Borderless Fullscreen",
+                            WindowMode::Fullscreen => "Exclusive Fullscreen",
+                            _ => "Other",
+                        };
+                        console.logs.push(format!("[Window] Resolution: {:.0}x{:.0} (Physical: {}x{}), Mode: {}", cur_w, cur_h, phys_w, phys_h, mode_str));
+                        console.logs.push("[Window] Usage: res <w> <h> | res <720p|1080p|1440p|4k> | fullscreen | windowed".into());
+                    } else if tokens.len() == 2 {
+                        let preset = tokens[1].to_lowercase();
+                        let (w, h) = match preset.as_str() {
+                            "720p" | "720" => (1280.0, 720.0),
+                            "1080p" | "1080" | "fhd" => (1920.0, 1080.0),
+                            "1440p" | "1440" | "2k" | "qhd" => (2560.0, 1440.0),
+                            "4k" | "2160p" | "2160" | "uhd" => (3840.0, 2160.0),
+                            _ => (0.0, 0.0),
+                        };
+                        if w > 0.0 {
+                            window.resolution.set(w, h);
+                            console.logs.push(format!("[Window] Set resolution to {:.0}x{:.0} ({})", w, h, preset));
+                        } else {
+                            console.logs.push(format!("[Syntax Error] Unknown preset '{}'. Use 720p, 1080p, 1440p, 4k or 'res <width> <height>'", tokens[1]));
+                        }
+                    } else if tokens.len() >= 3 {
+                        if let (Ok(w), Ok(h)) = (tokens[1].parse::<f32>(), tokens[2].parse::<f32>()) {
+                            if w >= 640.0 && h >= 360.0 {
+                                window.resolution.set(w, h);
+                                console.logs.push(format!("[Window] Set resolution to {:.0}x{:.0}", w, h));
+                            } else {
+                                console.logs.push("[Syntax Error] Minimum resolution is 640x360.".into());
+                            }
+                        } else {
+                            console.logs.push("[Syntax Error] Width and height must be valid numbers.".into());
+                        }
+                    }
+                } else {
+                    console.logs.push("[Window Error] Primary window not found.".into());
+                }
+            }
+            "fullscreen" | "fs" => {
+                if let Ok(mut window) = window_query.get_single_mut() {
+                    match window.mode {
+                        WindowMode::Windowed => {
+                            window.mode = WindowMode::BorderlessFullscreen;
+                            console.logs.push("[Window] Display mode set to Borderless Fullscreen.".into());
+                        }
+                        _ => {
+                            window.mode = WindowMode::Windowed;
+                            console.logs.push("[Window] Display mode set to Windowed.".into());
+                        }
+                    }
+                } else {
+                    console.logs.push("[Window Error] Primary window not found.".into());
+                }
+            }
+            "windowed" | "win" => {
+                if let Ok(mut window) = window_query.get_single_mut() {
+                    window.mode = WindowMode::Windowed;
+                    console.logs.push("[Window] Display mode set to Windowed.".into());
+                } else {
+                    console.logs.push("[Window Error] Primary window not found.".into());
+                }
             }
             _ => {
                 console.logs.push(format!("[Error] Unknown command '{}'. Enter 'help' for directory.", tokens[0]));
@@ -3268,6 +3480,25 @@ mod tests {
         assert!(CONSOLE_COMMANDS.contains(&"f3"), "CONSOLE_COMMANDS must contain 'f3'");
         assert!(CONSOLE_COMMANDS.contains(&"fps"), "CONSOLE_COMMANDS must contain 'fps'");
         assert!(CONSOLE_COMMANDS.contains(&"diag"), "CONSOLE_COMMANDS must contain 'diag'");
+    }
+
+    #[test]
+    fn test_console_commands_contains_resolution() {
+        assert!(CONSOLE_COMMANDS.contains(&"res"), "CONSOLE_COMMANDS must contain 'res'");
+        assert!(CONSOLE_COMMANDS.contains(&"resolution"), "CONSOLE_COMMANDS must contain 'resolution'");
+        assert!(CONSOLE_COMMANDS.contains(&"fullscreen"), "CONSOLE_COMMANDS must contain 'fullscreen'");
+        assert!(CONSOLE_COMMANDS.contains(&"fs"), "CONSOLE_COMMANDS must contain 'fs'");
+        assert!(CONSOLE_COMMANDS.contains(&"windowed"), "CONSOLE_COMMANDS must contain 'windowed'");
+        assert!(CONSOLE_COMMANDS.contains(&"win"), "CONSOLE_COMMANDS must contain 'win'");
+    }
+
+    #[test]
+    fn test_console_commands_contains_fps_limit() {
+        assert!(CONSOLE_COMMANDS.contains(&"maxfps"), "CONSOLE_COMMANDS must contain 'maxfps'");
+        assert!(CONSOLE_COMMANDS.contains(&"fpslimit"), "CONSOLE_COMMANDS must contain 'fpslimit'");
+        assert!(CONSOLE_COMMANDS.contains(&"fps_max"), "CONSOLE_COMMANDS must contain 'fps_max'");
+        assert!(CONSOLE_COMMANDS.contains(&"limitfps"), "CONSOLE_COMMANDS must contain 'limitfps'");
+        assert!(CONSOLE_COMMANDS.contains(&"vsync"), "CONSOLE_COMMANDS must contain 'vsync'");
     }
 
     #[test]

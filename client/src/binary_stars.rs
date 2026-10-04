@@ -154,7 +154,7 @@ impl Default for BinaryOrbitConfig {
             observer_longitude_radians: 0.0,
 
             binary_orbital_period_days: 16.0,
-            binary_inclination_radians: 24.0f32.to_radians(),
+            binary_inclination_radians: 12.0f32.to_radians(),
             binary_separation_au: 28.0,
 
             time_scale: 1.0,
@@ -423,9 +423,8 @@ pub fn update_binary_star_orbital_progression(
     let binary_orbit_angle = ((config.simulation_time_seconds / total_binary_cycle_sec) * 2.0 * std::f64::consts::PI) as f32;
     let i_b = config.binary_inclination_radians;
 
-    let sin_beta_b = i_b.sin() * binary_orbit_angle.sin();
-    let beta_b = sin_beta_b.asin();
-    let lambda_b = (i_b.cos() * binary_orbit_angle.sin()).atan2(binary_orbit_angle.cos());
+    let beta_b = i_b * binary_orbit_angle.sin();
+    let lambda_b = lambda_a + 0.275 + 0.07 * binary_orbit_angle.cos();
 
     let sin_dec_b = eps.cos() * beta_b.sin() + eps.sin() * beta_b.cos() * lambda_b.sin();
     let dec_b = sin_dec_b.clamp(-1.0, 1.0).asin();

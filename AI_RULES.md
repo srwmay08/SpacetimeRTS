@@ -37,13 +37,26 @@ SpacetimeDB's rollback and multi-node determinism guarantees depend entirely on 
 5. **Mandatory Human Review:** 
    - Treat ANY agent-authored reducer or logic change as needing explicit human review specifically for determinism. Even if tests pass, desyncs from these bugs surface late.
 
-### 3. Documentation, Change Tracking & Version Control
+### 3. Prefer Engine & Library Built-ins Over Manual Synchronization / Workarounds
+- **Avian3D & Bevy Physics Built-ins:**
+  - Rely on Avian3D's built-in transform synchronization pipeline (`transform_to_position` in `PhysicsSet::Prepare` and `position_to_transform` in `PhysicsSet::Sync`) rather than manually querying or mutating internal physics components (e.g., `avian3d::prelude::Position`, `Rotation`) alongside `Transform` in gameplay systems.
+  - Never query components mutably if built-in system parameters in the same system access them immutably. For example, `SpatialQuery` internally queries `&Position`; requesting `&mut Position` in the same system causes Bevy's `B0001` concurrent access panic.
+  - Rely on built-in collision solvers, contact manifolds, and gravity scales rather than writing manual mathematical height overrides that fight the physics contact resolution.
+- **Bevy Engine Built-ins:**
+  - Utilize built-in engine schedules (`Update`, `FixedUpdate`, `PostUpdate`), change detection (`Changed<T>`, `Added<T>`), and standard system parameters (`ParamSet`, `Local`, etc.) rather than rolling custom synchronization loops or manual state tracking flags.
+  - Use standard window cursor grab modes and input events rather than manual per-frame cursor warping or OS-level coordinate overrides that cause input jitter.
+- **SpacetimeDB SDK Built-ins:**
+  - Always utilize official generated table accessors (`ctx.db.*`, `conn.db.*`), lifecycle reducers, and subscription listeners instead of custom manual state caching or ad-hoc out-of-band networking.
+- **General Principle:**
+  - When encountering synchronization, physics, rendering, or input issues, always check for and prefer first-party built-in features, plugins, and systems over custom manual workarounds. Built-ins preserve framework invariants, prevent ECS system parameter collisions, and integrate cleanly with the engine lifecycle.
+
+### 4. Documentation, Change Tracking & Version Control
 - Provide descriptive, in-line commentary for *every* architectural choice or logic modification. 
 - Clearly explain *why* a change was made directly above the modified block. Keep the reasoning tied to game mechanics, multiplayer sync efficiency, or schema design.
 - Document table schemas thoroughly, explaining the purpose of specific indexes and relational mappings.
 - **GitHub Commit Summaries:** Whenever you execute large architectural changes, refactors, or multi-file updates, you must automatically provide a structured GitHub commit title and description at the end of your response. This summary should clearly outline the scope of the changes, the specific files touched, and the architectural reasoning, making it easy to copy and paste directly into a version control UI.
 
-### 4. Output Formatting (CRITICAL RULE)
+### 5. Output Formatting (CRITICAL RULE)
 - **NO LAZINESS.** You must output **fully updated files** in their entirety. 
 - Never use placeholders like `// ... existing code ...` or truncate files. If you modify a file, you must return the complete, ready-to-compile file from top to bottom.
 
