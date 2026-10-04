@@ -31,8 +31,8 @@ pub const VOXEL_SIZE: f32 = 0.25;
 
 static PERLIN: OnceLock<Perlin> = OnceLock::new();
 
-// P0 Fix 1: Terrain height cache to avoid redundant Perlin noise calculations
-// Key: (x, z) quantized to 0.25m grid (VOXEL_SIZE), Value: terrain height
+// P0 Fix 1: Exact grid terrain height cache to avoid redundant Perlin noise calculations
+// Key: (gx, gz) exact integer voxel grid indices, Value: terrain height
 static TERRAIN_HEIGHT_CACHE: OnceLock<std::sync::RwLock<std::collections::HashMap<(i32, i32), f32>>> = OnceLock::new();
 
 #[inline]
@@ -45,42 +45,9 @@ pub fn get_perlin() -> &'static Perlin {
     PERLIN.get_or_init(|| Perlin::new(42))
 }
 
-// P0 Fix 1: Cached terrain height lookup — quantizes to 0.25m grid for cache efficiency
-pub fn get_terrain_height(x: f32, z: f32) -> f32 {
-    // Quantize to 0.25m grid for cache key
-    let qx = (x / VOXEL_SIZE).round() as i32;
-    let qz = (z / VOXEL_SIZE).round() as i32;
-    
-    // Try cache first (read lock)
-    {
-        let cache = get_terrain_height_cache();
-        if let Ok(cache) = cache.read() {
-            if let Some(&height) = cache.get(&(qx, qz)) {
-                return height;
-            }
-        }
-    }
-    
-    // Cache miss — compute height
-    let height = compute_terrain_height(x, z);
-    
-    // Store in cache (write lock)
-    {
-        let cache = get_terrain_height_cache();
-        if let Ok(mut cache) = cache.write() {
-            // Limit cache size to prevent unbounded growth
-            if cache.len() > 50000 {
-                cache.clear();
-            }
-            cache.insert((qx, qz), height);
-        }
-    }
-    
-    height
-}
-
-// Original terrain height computation (renamed for internal use)
-fn compute_terrain_height(x: f32, z: f32) -> f32 {
+/// Computes raw continuous terrain height via multi-octave Perlin noise and deterministic geography.
+/// Completely deterministic and side-effect-free.
+pub fn compute_terrain_height(x: f32, z: f32) -> f32 {
     let scale = 0.015; 
     let base_height_amp = 18.0; 
     let noise = get_perlin();
@@ -107,6 +74,52 @@ fn compute_terrain_height(x: f32, z: f32) -> f32 {
     }
 
     y
+}
+
+/// Retrieves cached terrain height for discrete integer grid vertices (gx, gz) on the VOXEL_SIZE (0.25m) grid.
+/// Key is the exact integer grid coordinate `(gx, gz)`.
+pub fn get_grid_terrain_height(gx: i32, gz: i32) -> f32 {
+    // Try cache first (read lock)
+    {
+        let cache = get_terrain_height_cache();
+        if let Ok(c) = cache.read() {
+            if let Some(&height) = c.get(&(gx, gz)) {
+                return height;
+            }
+        }
+    }
+
+    // Cache miss — compute height at exact grid point
+    let wx = gx as f32 * VOXEL_SIZE;
+    let wz = gz as f32 * VOXEL_SIZE;
+    let height = compute_terrain_height(wx, wz);
+
+    // Store in cache (write lock)
+    {
+        let cache = get_terrain_height_cache();
+        if let Ok(mut c) = cache.write() {
+            if c.len() > 50000 {
+                c.clear();
+            }
+            c.insert((gx, gz), height);
+        }
+    }
+
+    height
+}
+
+/// Continuous terrain height lookup for general queries (entities, raycasts, falling trees).
+/// If (x, z) falls precisely on the 0.25m grid, it utilizes the grid cache.
+/// Off-grid coordinates evaluate continuous noise directly without polluting the grid cache.
+pub fn get_terrain_height(x: f32, z: f32) -> f32 {
+    let qx = (x / VOXEL_SIZE).round();
+    let qz = (z / VOXEL_SIZE).round();
+    const EPSILON: f32 = 1e-4;
+    if (x - qx * VOXEL_SIZE).abs() < EPSILON && (z - qz * VOXEL_SIZE).abs() < EPSILON {
+        get_grid_terrain_height(qx as i32, qz as i32)
+    } else {
+        compute_terrain_height(x, z)
+    }
 }
 
 #[inline]
@@ -150,10 +163,12 @@ pub fn mesh_voxel_chunk_surface_nets(
             let local_z = lz as f32 * VOXEL_SIZE;
             let wx = chunk_base_x + local_x;
             let wz = chunk_base_z + local_z;
-            let mut world_y = get_terrain_height(wx, wz);
+            let gx = cx * VOXEL_CHUNK_SIZE as i32 + lx as i32;
+            let gz = cz * VOXEL_CHUNK_SIZE as i32 + lz as i32;
+            let mut world_y = get_grid_terrain_height(gx, gz);
 
-            let vx = (wx / VOXEL_SIZE).floor() as i32;
-            let vz = (wz / VOXEL_SIZE).floor() as i32;
+            let vx = gx;
+            let vz = gz;
             let v_cx = vx.div_euclid(VOXEL_CHUNK_SIZE as i32);
             let v_cz = vz.div_euclid(VOXEL_CHUNK_SIZE as i32);
             let v_lx = vx.rem_euclid(VOXEL_CHUNK_SIZE as i32) as usize;
@@ -179,10 +194,10 @@ pub fn mesh_voxel_chunk_surface_nets(
 
             positions.push([local_x, world_y, local_z]);
 
-            let h_l = get_terrain_height(wx - DELTA, wz);
-            let h_r = get_terrain_height(wx + DELTA, wz);
-            let h_d = get_terrain_height(wx, wz - DELTA);
-            let h_u = get_terrain_height(wx, wz + DELTA);
+            let h_l = compute_terrain_height(wx - DELTA, wz);
+            let h_r = compute_terrain_height(wx + DELTA, wz);
+            let h_d = compute_terrain_height(wx, wz - DELTA);
+            let h_u = compute_terrain_height(wx, wz + DELTA);
 
             let normal = Vec3::new(h_l - h_r, 2.0 * DELTA, h_d - h_u).normalize_or_zero();
             normals.push(normal.to_array());
