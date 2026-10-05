@@ -287,9 +287,9 @@ impl Default for BinarySkyConfig {
             ozone_absorption_coefficients: Vec3::new(0.00065, 0.00240, 0.000085),
             ground_albedo: 0.18,
             star_a_temperature_kelvin: 5800.0,
-            star_a_base_illuminance_lux: 75_000.0,
-            star_b_temperature_kelvin: 3600.0,
-            star_b_base_illuminance_lux: 55_000.0,
+            star_a_base_illuminance_lux: 50_000.0,
+            star_b_temperature_kelvin: 3900.0,
+            star_b_base_illuminance_lux: 35_000.0,
             star_a_color_override: None,
             star_b_color_override: None,
             star_a_shadows_enabled: true,
@@ -1430,12 +1430,38 @@ pub fn update_atmospheric_scattering_and_cache(
 
     cache.zenith_radiance = (sky_scatter_a + sky_scatter_b + starlight_airglow * 0.5) * cache.conjunction_amplification;
 
-    // Horizon Radiance:
-    // a) Forward Mie aerosol scattering of transmitted direct beams (Amber Gold & Blaze Orange sunset):
-    let horizon_mie_a = filtered_rgb_a * (cache.star_a_illuminance_lux * 0.000045);
-    let horizon_mie_b = filtered_rgb_b * (cache.star_b_illuminance_lux * 0.000050);
+    // Horizon Radiance Integration:
+    // a) Daytime Rayleigh Horizon Skylight:
+    // Multiple-scattered Rayleigh blue light across dozens of optical air masses,
+    // combined with atmospheric forward aerosol haze, creates a luminous, airy cyan-blue horizon.
+    let total_daylight_lux = cache.star_a_illuminance_lux + cache.star_b_illuminance_lux;
+    let day_ratio = (total_daylight_lux / 25_000.0).clamp(0.0, 1.0);
+    // Smooth C^1 Hermite curve for daytime skylight transition
+    let smooth_day = day_ratio * day_ratio * (3.0 - 2.0 * day_ratio);
 
-    // b) Stratospheric Ozone Twilight Arch (Belt of Venus: Hot Fuchsia #ff0054 & Dark Raspberry #9e0059):
+    // Desaturated luminous azure horizon (higher optical depth than zenith):
+    let horizon_rayleigh = Vec3::new(
+        config.rayleigh_scattering_coefficients.x * 2.2,
+        config.rayleigh_scattering_coefficients.y * 1.55,
+        config.rayleigh_scattering_coefficients.z * 1.0,
+    ) * (total_daylight_lux * 0.000038) * smooth_day;
+
+    // b) Forward Mie aerosol scattering of transmitted direct beams:
+    // Seamlessly emerges via C^1 Hermite curve as each star approaches the horizon [0.0°, 20.0°].
+    // Overhead stars (>20°) do not wash the ground horizon in orange; only setting/rising stars
+    // cast their blaze-orange / golden amber aureole along the horizon rim:
+    let elev_deg_a = effective_elev_a.to_degrees();
+    let sunset_factor_a = ((20.0 - elev_deg_a) / 20.0).clamp(0.0, 1.0);
+    let sunset_mie_weight_a = sunset_factor_a * sunset_factor_a * (3.0 - 2.0 * sunset_factor_a);
+
+    let elev_deg_b = effective_elev_b.to_degrees();
+    let sunset_factor_b = ((20.0 - elev_deg_b) / 20.0).clamp(0.0, 1.0);
+    let sunset_mie_weight_b = sunset_factor_b * sunset_factor_b * (3.0 - 2.0 * sunset_factor_b);
+
+    let horizon_mie_a = filtered_rgb_a * (cache.star_a_illuminance_lux * 0.000045) * sunset_mie_weight_a;
+    let horizon_mie_b = filtered_rgb_b * (cache.star_b_illuminance_lux * 0.000045) * sunset_mie_weight_b;
+
+    // c) Stratospheric Ozone Twilight Arch (Belt of Venus: Hot Fuchsia #ff0054 & Dark Raspberry #9e0059):
     // Sunlight grazing horizontally through the stratospheric ozone layer has green (550nm) heavily absorbed,
     // while high-altitude Rayleigh scattering scatters blue and grazing red penetrates:
     let twilight_a = {
@@ -1446,7 +1472,7 @@ pub fn update_atmospheric_scattering_and_cache(
             0.85 * ((-elev_deg * 0.10).exp()).min(1.2),
             0.005, // Depleted green by Chappuis band
             0.35 * ((elev_deg + 10.0) / 10.0).clamp(0.0, 1.0),
-        ) * bell * (config.star_a_base_illuminance_lux / 75_000.0)
+        ) * bell * (config.star_a_base_illuminance_lux / 50_000.0)
     };
     let twilight_b = {
         let elev_deg = effective_elev_b.to_degrees();
@@ -1455,10 +1481,10 @@ pub fn update_atmospheric_scattering_and_cache(
             0.65 * ((-elev_deg * 0.10).exp()).min(1.0),
             0.003,
             0.25 * ((elev_deg + 10.0) / 10.0).clamp(0.0, 1.0),
-        ) * bell * (config.star_b_base_illuminance_lux / 55_000.0)
+        ) * bell * (config.star_b_base_illuminance_lux / 35_000.0)
     };
 
-    cache.horizon_radiance = (horizon_mie_a + horizon_mie_b + twilight_a + twilight_b + starlight_airglow * 1.5) * cache.conjunction_amplification;
+    cache.horizon_radiance = (horizon_rayleigh + horizon_mie_a + horizon_mie_b + twilight_a + twilight_b + starlight_airglow * 1.5) * cache.conjunction_amplification;
 
     // ------------------------------------------------------------------------
     // 4. Scene Ambient Light & Ground Bounce Irradiance
@@ -1996,6 +2022,9 @@ mod tests {
             assert!(cache.zenith_radiance.z > cache.zenith_radiance.x * 2.5, "Zenith sky must be Rayleigh blue at noon");
             // Direct Star A should be warm solar white:
             assert!(cache.star_a_transmittance.x > 0.8 && cache.star_a_transmittance.z > 0.6);
+            // Horizon must be Rayleigh blue/cyan biased at high noon:
+            let horizon_col = tonemap_atmospheric_radiance(cache.horizon_radiance);
+            assert!(horizon_col.z > horizon_col.x, "Horizon must be Rayleigh blue/cyan biased at high noon (blue > red)");
         }
 
         // 2. Test Sunset (18.0h):
