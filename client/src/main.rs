@@ -26,6 +26,7 @@ pub mod trees;
 pub mod props;
 pub mod creatures;
 pub mod resource_nodes;
+pub mod grass;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -82,6 +83,7 @@ fn main() {
         .add_plugins(zone_editor::ZoneEditorPlugin)
         .add_plugins(spellbook::SpellbookPlugin)
         .add_plugins(skills_ui::SkillsSheetPlugin)
+        .add_plugins(grass::GrassPlugin)
         .insert_resource(Msaa::Off)
         
         // Architectural Note: Luminous Sky Clear Color.

@@ -27,7 +27,7 @@ use crate::components::*;
 use crate::core::GameLayer;
 use crate::trees::{TreeMeshCache, create_lowpoly_fallen_log_mesh};
 use crate::props::{
-    create_lowpoly_rock_mesh, create_voxel_rock_mesh, create_lowpoly_bush_foliage_mesh, create_lowpoly_bush_berries_mesh,
+    create_lowpoly_rock_mesh, create_lowpoly_bush_foliage_mesh, create_lowpoly_bush_berries_mesh,
     create_lowpoly_branch_mesh, create_lowpoly_flint_mesh, create_lowpoly_stone_mesh,
 };
 
