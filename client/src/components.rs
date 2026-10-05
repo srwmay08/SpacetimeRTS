@@ -144,7 +144,7 @@ pub struct InteriorProp;
 #[derive(Component)] pub struct CraftRecipeButton(pub String);
 #[derive(Component)] #[allow(dead_code)] pub struct CraftRecipeText;
 
-#[derive(Component)] pub struct HotbarRoot;
+#[derive(Component)] #[allow(dead_code)] pub struct HotbarRoot;
 #[derive(Component)] pub struct HotbarSlotUi(pub usize);
 #[derive(Component)] pub struct HotbarSlotName(pub usize);
 #[derive(Component)] pub struct HotbarSlotCount(pub usize);

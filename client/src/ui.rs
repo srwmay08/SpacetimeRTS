@@ -219,6 +219,7 @@ pub struct ClientEquippedBags {
 #[derive(Component)] pub struct CelestialHudText;
 #[derive(Component)] pub struct DiagnosticOverlayRoot;
 #[derive(Component)] pub struct DiagnosticOverlayText;
+#[derive(Component)] pub struct RequiresWorkbenchRecipe;
 
 pub fn setup_ui(mut commands: Commands) {
     commands.spawn(Camera2dBundle {
@@ -231,65 +232,8 @@ pub fn setup_ui(mut commands: Commands) {
     });
 
     // ------------------------------------------------------------------------
-    // 1. PERSISTENT TOP-LEFT HOTBAR (Slots 0..7 / Row 1)
+    // 1. TOP-LEFT HOTBAR REMOVED (Consolidated into central bottom hotbar)
     // ------------------------------------------------------------------------
-    commands.spawn((
-        NodeBundle {
-            style: Style {
-                position_type: PositionType::Absolute,
-                top: Val::Px(15.0),
-                left: Val::Px(15.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(6.0),
-                ..default()
-            },
-            z_index: ZIndex::Global(10),
-            ..default()
-        },
-        HotbarRoot,
-    )).with_children(|bar| {
-        for slot_idx in 0..8 {
-            bar.spawn((
-                NodeBundle {
-                    style: Style {
-                        width: Val::Px(55.0),
-                        height: Val::Px(55.0),
-                        flex_direction: FlexDirection::Column,
-                        justify_content: JustifyContent::SpaceBetween,
-                        align_items: AlignItems::Center,
-                        padding: UiRect::all(Val::Px(3.0)),
-                        border: UiRect::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    border_color: Color::srgba(0.4, 0.4, 0.4, 0.8).into(),
-                    background_color: Color::srgba(0.1, 0.1, 0.1, 0.85).into(),
-                    ..default()
-                },
-                HotbarSlotUi(slot_idx),
-            )).with_children(|slot| {
-                slot.spawn(TextBundle::from_section(
-                    (slot_idx + 1).to_string(),
-                    TextStyle { font_size: 11.0, color: Color::srgb(0.7, 0.7, 0.3), ..default() }
-                ).with_style(Style { align_self: AlignSelf::FlexStart, ..default() }));
-
-                slot.spawn((
-                    TextBundle::from_section(
-                        "",
-                        TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }
-                    ),
-                    HotbarSlotName(slot_idx),
-                ));
-
-                slot.spawn((
-                    TextBundle::from_section(
-                        "",
-                        TextStyle { font_size: 12.0, color: Color::srgb(0.9, 0.9, 0.9), ..default() }
-                    ).with_style(Style { align_self: AlignSelf::FlexEnd, ..default() }),
-                    HotbarSlotCount(slot_idx),
-                ));
-            });
-        }
-    });
 
     // ------------------------------------------------------------------------
     // 2. BOTTOM-LEFT HUD HEALTH BAR
@@ -743,7 +687,8 @@ pub fn setup_ui(mut commands: Commands) {
             ];
 
             for (item_name, cost) in recipes {
-                crafting.spawn((
+                let is_field_craft = item_name == "Torch" || item_name == "Club" || item_name == "Hammer";
+                let mut btn_entity = crafting.spawn((
                     ButtonBundle {
                         style: Style {
                             width: Val::Percent(100.0),
@@ -753,6 +698,7 @@ pub fn setup_ui(mut commands: Commands) {
                             align_items: AlignItems::FlexStart,
                             padding: UiRect::horizontal(Val::Px(8.0)),
                             border: UiRect::all(Val::Px(1.0)),
+                            display: if is_field_craft { Display::Flex } else { Display::None },
                             ..default()
                         },
                         border_color: Color::srgb(0.3, 0.3, 0.3).into(),
@@ -760,7 +706,11 @@ pub fn setup_ui(mut commands: Commands) {
                         ..default()
                     },
                     CraftRecipeButton(item_name.to_string()),
-                )).with_children(|btn| {
+                ));
+                if !is_field_craft {
+                    btn_entity.insert(RequiresWorkbenchRecipe);
+                }
+                btn_entity.with_children(|btn| {
                     btn.spawn(TextBundle::from_section(
                         item_name,
                         TextStyle { font_size: 12.0, color: Color::WHITE, ..default() }
@@ -779,6 +729,7 @@ pub fn setup_ui(mut commands: Commands) {
     // ------------------------------------------------------------------------
     commands.spawn((
         NodeBundle {
+            focus_policy: bevy::ui::FocusPolicy::Pass,
             style: Style {
                 position_type: PositionType::Absolute,
                 width: Val::Px(55.0),
@@ -2904,6 +2855,7 @@ pub fn update_inventory_ui(
     mut bag_text_q: Query<(&mut Text, &PaperdollBagText), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagTooltip>)>,
     mut bag_tooltip_q: Query<(&mut Text, &PaperdollBagTooltip), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>)>,
     mut capacity_header_q: Query<&mut Text, (With<InventoryCapacityHeader>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut workbench_recipe_styles: Query<&mut Style, With<RequiresWorkbenchRecipe>>,
 ) {
     let Some(identity) = &conn.identity else { return; };
     if let Some(player) = conn.db.db.player().identity().find(identity) {
@@ -2983,24 +2935,33 @@ pub fn update_inventory_ui(
         }
     }
 
-    if let Ok(player_t) = player_query.get_single() {
-        let near_workbench = conn.db.db.structure().iter().any(|s| {
+    let near_workbench = if let Ok(player_t) = player_query.get_single() {
+        conn.db.db.structure().iter().any(|s| {
             if s.piece_type == "Workbench" && !s.is_blueprint {
                 let dist_sq = (s.x - player_t.translation.x).powi(2) + (s.z - player_t.translation.z).powi(2);
                 dist_sq <= 400.0
             } else {
                 false
             }
-        });
+        })
+    } else {
+        false
+    };
 
-        for mut header in header_q.iter_mut() {
-            if near_workbench {
-                header.sections[0].value = "CRAFTING RECIPES [WORKBENCH ACTIVE]".to_string();
-                header.sections[0].style.color = Color::srgb(1.0, 0.85, 0.2);
-            } else {
-                header.sections[0].value = "CRAFTING RECIPES [FIELD CRAFTING]".to_string();
-                header.sections[0].style.color = Color::srgb(0.7, 0.7, 0.7);
-            }
+    for mut header in header_q.iter_mut() {
+        if near_workbench {
+            header.sections[0].value = "CRAFTING RECIPES [WORKBENCH ACTIVE]".to_string();
+            header.sections[0].style.color = Color::srgb(1.0, 0.85, 0.2);
+        } else {
+            header.sections[0].value = "FIELD CRAFTING [HAND CRAFTING]".to_string();
+            header.sections[0].style.color = Color::srgb(0.7, 0.7, 0.7);
+        }
+    }
+
+    let desired_display = if near_workbench { Display::Flex } else { Display::None };
+    for mut style in workbench_recipe_styles.iter_mut() {
+        if style.display != desired_display {
+            style.display = desired_display;
         }
     }
 }
@@ -3541,5 +3502,54 @@ mod tests {
         // 3. Toggle OFF -> Display::None
         style.display = Display::None;
         assert_eq!(style.display, Display::None);
+    }
+
+    #[test]
+    fn test_field_vs_workbench_crafting_recipe_visibility() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+
+        // Spawn core field recipes (Torch, Club, Hammer)
+        let core_items = ["Torch", "Club", "Hammer"];
+        for name in core_items {
+            app.world_mut().spawn((
+                NodeBundle {
+                    style: Style { display: Display::Flex, ..default() },
+                    ..default()
+                },
+                CraftRecipeButton(name.to_string()),
+            ));
+        }
+
+        // Spawn advanced workbench recipes
+        let wb_items = ["Crossbow", "Revolver", "Wooden Shield"];
+        for name in wb_items {
+            app.world_mut().spawn((
+                NodeBundle {
+                    style: Style { display: Display::None, ..default() },
+                    ..default()
+                },
+                CraftRecipeButton(name.to_string()),
+                RequiresWorkbenchRecipe,
+            ));
+        }
+
+        // Away from workbench: workbench recipes must be hidden (Display::None)
+        let mut wb_q = app.world_mut().query_filtered::<&Style, With<RequiresWorkbenchRecipe>>();
+        for style in wb_q.iter(app.world()) {
+            assert_eq!(style.display, Display::None, "Workbench recipes must be hidden when away from workbench");
+        }
+
+        // Near workbench: toggle display to Display::Flex
+        let mut wb_mut_q = app.world_mut().query_filtered::<&mut Style, With<RequiresWorkbenchRecipe>>();
+        for mut style in wb_mut_q.iter_mut(app.world_mut()) {
+            style.display = Display::Flex;
+        }
+
+        // Verify active workbench visibility
+        let mut wb_q2 = app.world_mut().query_filtered::<&Style, With<RequiresWorkbenchRecipe>>();
+        for style in wb_q2.iter(app.world()) {
+            assert_eq!(style.display, Display::Flex, "Workbench recipes must be visible when workbench is active");
+        }
     }
 }

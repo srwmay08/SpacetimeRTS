@@ -555,13 +555,12 @@ pub fn setup_prepared_hotbar_ui(
             style: Style {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(16.0),
-                left: Val::Percent(50.0),
-                margin: UiRect::left(Val::Px(-360.0)),
-                width: Val::Px(720.0),
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                width: Val::Auto,
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
-                column_gap: Val::Px(8.0),
                 ..default()
             },
             z_index: ZIndex::Global(200),
@@ -602,12 +601,12 @@ pub fn setup_prepared_hotbar_ui(
                         row_ui.spawn((
                             ButtonBundle {
                                 style: Style {
-                                    width: Val::Px(72.0),
-                                    height: Val::Px(36.0),
+                                    width: Val::Px(50.0),
+                                    height: Val::Px(50.0),
                                     flex_direction: FlexDirection::Column,
                                     justify_content: JustifyContent::SpaceBetween,
                                     align_items: AlignItems::Center,
-                                    padding: UiRect::all(Val::Px(2.0)),
+                                    padding: UiRect::all(Val::Px(3.0)),
                                     border: UiRect::all(Val::Px(1.5)),
                                     ..default()
                                 },
@@ -617,7 +616,7 @@ pub fn setup_prepared_hotbar_ui(
                             },
                             HotbarSlotButton(slot_idx),
                         )).with_children(|slot| {
-                            // Top bar: Hotkey badge & slot index
+                            // Top bar: Hotkey badge & cooldown
                             slot.spawn(NodeBundle {
                                 style: Style {
                                     width: Val::Percent(100.0),
@@ -630,14 +629,14 @@ pub fn setup_prepared_hotbar_ui(
                                 top.spawn((
                                     TextBundle::from_section(
                                         format!("[{}]", key_label),
-                                        TextStyle { font_size: 9.0, color: Color::srgb(1.0, 0.85, 0.3), ..default() }
+                                        TextStyle { font_size: 10.0, color: Color::srgb(1.0, 0.85, 0.3), ..default() }
                                     ),
                                     HotbarSlotKeyText(slot_idx),
                                 ));
                                 top.spawn((
                                     TextBundle::from_section(
                                         "",
-                                        TextStyle { font_size: 9.0, color: Color::srgb(0.9, 0.3, 0.3), ..default() }
+                                        TextStyle { font_size: 10.0, color: Color::srgb(0.9, 0.3, 0.3), ..default() }
                                     ),
                                     HotbarSlotCooldownText(slot_idx),
                                 ));
@@ -647,7 +646,7 @@ pub fn setup_prepared_hotbar_ui(
                             slot.spawn((
                                 TextBundle::from_section(
                                     icon_text,
-                                    TextStyle { font_size: 11.0, color: icon_color, ..default() }
+                                    TextStyle { font_size: 12.0, color: icon_color, ..default() }
                                 ),
                                 HotbarSlotNameText(slot_idx),
                             ));
@@ -656,44 +655,16 @@ pub fn setup_prepared_hotbar_ui(
                 });
             }
         });
-
-        // Open Spellbook Grimoire button on the right
-        root.spawn((
-            ButtonBundle {
-                style: Style {
-                    width: Val::Px(78.0),
-                    height: Val::Px(76.0),
-                    flex_direction: FlexDirection::Column,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::all(Val::Px(4.0)),
-                    border: UiRect::all(Val::Px(2.0)),
-                    ..default()
-                },
-                border_color: BorderColor(Color::srgb(0.7, 0.55, 0.3)),
-                background_color: BackgroundColor(Color::srgb(0.22, 0.15, 0.10)),
-                ..default()
-            },
-            HotbarOpenSpellbookButton,
-        )).with_children(|btn| {
-            btn.spawn(TextBundle::from_section(
-                "GRIMOIRE",
-                TextStyle { font_size: 10.0, color: Color::srgb(0.95, 0.85, 0.5), ..default() }
-            ));
-            btn.spawn(TextBundle::from_section(
-                "[K]",
-                TextStyle { font_size: 12.0, color: Color::WHITE, ..default() }
-            ));
-        });
     });
 
     // Floating Drag Ghost UI for Dragged Spells
     commands.spawn((
         NodeBundle {
+            focus_policy: bevy::ui::FocusPolicy::Pass,
             style: Style {
                 position_type: PositionType::Absolute,
-                width: Val::Px(72.0),
-                height: Val::Px(36.0),
+                width: Val::Px(50.0),
+                height: Val::Px(50.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 border: UiRect::all(Val::Px(1.5)),
@@ -1895,6 +1866,7 @@ pub fn handle_hotbar_casting_system(
                 let slot = slot_btn.0;
                 if let Some(selected_spell) = spellbook_state.selected_spell_for_slotting.take() {
                     hotbar.slots[slot] = Some(selected_spell);
+                    hotbar.cooldowns[slot] = 0.0;
                     info!("Prepared spell into Hotbar Slot {}", slot + 1);
                 } else {
                     // Cast from slot
@@ -2403,7 +2375,7 @@ pub fn handle_spell_drag_and_drop(
     if mouse.just_pressed(MouseButton::Right) {
         for (slot_btn, transform, node, interaction) in hotbar_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            let is_hit = rect.inflate(4.0).contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
             if is_hit {
                 if hotbar.slots[slot_btn.0].is_some() {
                     info!("Unprepared spell from Hotbar Slot {}", slot_btn.0 + 1);
@@ -2416,12 +2388,13 @@ pub fn handle_spell_drag_and_drop(
     }
 
     // Left-Click: Begin Drag from Spellbook Card OR Hotbar Slot
+    // (Click-to-slot of a selected grimoire spell is owned by handle_hotbar_casting_system.)
     if mouse.just_pressed(MouseButton::Left) {
         // Check spellbook cards if spellbook is open
         if spellbook_state.is_open {
             for (card, transform, node, interaction) in card_query.iter() {
                 let rect = ui_node_screen_rect(transform, node, window);
-                let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+                let is_hit = rect.inflate(4.0).contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
                 if is_hit {
                     let spell_idx = spellbook_state.current_page * 12 + card.0;
                     if spell_idx < filtered.len() {
@@ -2440,7 +2413,7 @@ pub fn handle_spell_drag_and_drop(
         // Check hotbar slots to drag/reorder prepared spells
         for (slot_btn, transform, node, interaction) in hotbar_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            let is_hit = rect.inflate(4.0).contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
             if is_hit {
                 if let Some(spell_id) = &hotbar.slots[slot_btn.0] {
                     spell_drag.is_dragging = true;
@@ -2461,7 +2434,7 @@ pub fn handle_spell_drag_and_drop(
         let mut target_slot = None;
         for (slot_btn, transform, node, interaction) in hotbar_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
-            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            let is_hit = rect.inflate(4.0).contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
             if is_hit {
                 target_slot = Some(slot_btn.0);
                 break;
@@ -2510,8 +2483,8 @@ pub fn update_spell_drag_ghost_ui(
 
     if spell_drag.is_dragging {
         style.display = Display::Flex;
-        style.left = Val::Px(spell_drag.current_pos.x - 36.0);
-        style.top = Val::Px(spell_drag.current_pos.y - 18.0);
+        style.left = Val::Px(spell_drag.current_pos.x - 25.0);
+        style.top = Val::Px(spell_drag.current_pos.y - 25.0);
         let label = if let Some(spell_id) = &spell_drag.spell_id {
             if let Some(def) = get_spell_by_id(spell_id) {
                 def.name
@@ -2940,5 +2913,42 @@ mod tests {
         // Validates that Bevy ECS initializes and runs update_spellbook_display_system
         // with zero B0001 query conflicts
         app.update();
+    }
+
+    #[test]
+    fn test_prepared_hotbar_drag_and_drop_slotting() {
+        let mut hotbar = PreparedHotbarState::default();
+        let mut spellbook_state = SpellbookWindowState::default();
+        let mut spell_drag = SpellDragState::default();
+
+        // 1. Initial State: all 16 slots are empty
+        assert_eq!(hotbar.slots[0], None);
+        assert_eq!(hotbar.slots[1], None);
+
+        // 2. Select a spell via click-to-slot from the grimoire
+        spellbook_state.selected_spell_for_slotting = Some("fireball".to_string());
+        assert_eq!(spellbook_state.selected_spell_for_slotting.as_deref(), Some("fireball"));
+
+        // Simulate click on slot 0: slots selected spell and clears selection
+        let selected = spellbook_state.selected_spell_for_slotting.take().unwrap();
+        hotbar.slots[0] = Some(selected);
+        hotbar.cooldowns[0] = 0.0;
+        assert_eq!(hotbar.slots[0].as_deref(), Some("fireball"));
+        assert_eq!(spellbook_state.selected_spell_for_slotting, None);
+
+        // 3. Drag spell from spellbook to slot 1
+        spell_drag.is_dragging = true;
+        spell_drag.spell_id = Some("frost_nova".to_string());
+        let dragged = spell_drag.spell_id.take().unwrap();
+        hotbar.slots[1] = Some(dragged);
+        spell_drag.is_dragging = false;
+        assert_eq!(hotbar.slots[1].as_deref(), Some("frost_nova"));
+
+        // 4. Swap slots 0 and 1
+        let temp = hotbar.slots[1].take();
+        hotbar.slots[1] = hotbar.slots[0].take();
+        hotbar.slots[0] = temp;
+        assert_eq!(hotbar.slots[0].as_deref(), Some("frost_nova"));
+        assert_eq!(hotbar.slots[1].as_deref(), Some("fireball"));
     }
 }
