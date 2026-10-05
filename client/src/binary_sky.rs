@@ -1902,7 +1902,7 @@ pub struct BinarySkyPlugin;
 
 impl Plugin for BinarySkyPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(DirectionalLightShadowMap { size: 4096 })
+        app.insert_resource(DirectionalLightShadowMap { size: 2048 })
             .init_resource::<BinarySkyConfig>()
             .init_resource::<BinaryEphemerisState>()
             .init_resource::<AtmosphericRadianceCache>()
@@ -2415,6 +2415,10 @@ mod tests {
         assert!(light_b_layers.intersects(&RenderLayers::layer(0)), "Star B light must intersect world layer 0");
         assert!(light_b_layers.intersects(&RenderLayers::layer(2)), "Star B light must intersect player layer 2 to cast player character shadow");
         assert!(!light_b_layers.intersects(&RenderLayers::layer(1)), "Star B light must NOT intersect viewmodel layer 1");
+
+        // 5. Verify DirectionalLightShadowMap is configured to 2048
+        let shadow_map = app.world().resource::<DirectionalLightShadowMap>();
+        assert_eq!(shadow_map.size, 2048, "Shadow map resolution must be 2048 for optimal frame performance");
     }
 
     #[test]
