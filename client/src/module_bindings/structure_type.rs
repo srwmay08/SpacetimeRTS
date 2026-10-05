@@ -11,6 +11,7 @@ pub struct Structure {
     pub parent_id: Option<u64>,
     pub piece_type: String,
     pub stability: u32,
+    pub current_support: f32,
     pub is_grounded: bool,
     pub is_blueprint: bool,
     pub construction_progress: u32,
@@ -38,6 +39,7 @@ pub struct StructureCols {
     pub parent_id: __sdk::__query_builder::Col<Structure, Option<u64>>,
     pub piece_type: __sdk::__query_builder::Col<Structure, String>,
     pub stability: __sdk::__query_builder::Col<Structure, u32>,
+    pub current_support: __sdk::__query_builder::Col<Structure, f32>,
     pub is_grounded: __sdk::__query_builder::Col<Structure, bool>,
     pub is_blueprint: __sdk::__query_builder::Col<Structure, bool>,
     pub construction_progress: __sdk::__query_builder::Col<Structure, u32>,
@@ -61,6 +63,7 @@ impl __sdk::__query_builder::HasCols for Structure {
             parent_id: __sdk::__query_builder::Col::new(table_name, "parent_id"),
             piece_type: __sdk::__query_builder::Col::new(table_name, "piece_type"),
             stability: __sdk::__query_builder::Col::new(table_name, "stability"),
+            current_support: __sdk::__query_builder::Col::new(table_name, "current_support"),
             is_grounded: __sdk::__query_builder::Col::new(table_name, "is_grounded"),
             is_blueprint: __sdk::__query_builder::Col::new(table_name, "is_blueprint"),
             construction_progress: __sdk::__query_builder::Col::new(

@@ -1348,11 +1348,7 @@ pub fn update_interaction_prompt(
                 } else if s.piece_type == "Workbench" && !s.is_blueprint {
                     text.sections[0].value = "[E] Open Workbench".to_string();
                 } else if s.is_blueprint {
-                    text.sections[0].value = if is_hammer { 
-                        format!("[E] Build {} ({}%)", s.piece_type, s.construction_progress) 
-                    } else { 
-                        "Equip Hammer to Build".to_string() 
-                    };
+                    text.sections[0].value = format!("Autobuilding {} ({}%)...", s.piece_type, s.construction_progress);
                 } else if s.current_health < s.max_health {
                     text.sections[0].value = if is_hammer {
                         format!("[E] Repair Structure ({:.0}/{:.0} HP)", s.current_health, s.max_health)

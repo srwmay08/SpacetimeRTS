@@ -517,6 +517,7 @@ pub fn init(ctx: &ReducerContext) {
     ctx.db.global_state().insert(GlobalState { id: 0, time_of_day: 8.0, last_npc_check: 0 });
 
     seed_authoritative_recipes(ctx);
+    crate::building::seed_default_materials(ctx);
     ensure_npc_population(ctx);
 }
 
@@ -746,6 +747,7 @@ pub fn high_frequency_tick(ctx: &ReducerContext, _timer: HighFrequencyTimer) {
 pub fn low_frequency_tick(ctx: &ReducerContext, _timer: LowFrequencyTimer) {
     crate::ai::process_ai_tick(ctx);
     crate::ai::process_npc_brain_tick(ctx, 0.1);
+    crate::building::process_autobuild_tick(ctx);
 
     if let Some(mut state) = ctx.db.global_state().id().find(0) {
         state.time_of_day += 0.005;
@@ -1071,6 +1073,7 @@ pub fn client_connected(ctx: &ReducerContext) {
             parent_id: None,
             piece_type: "Foundation".into(),
             stability: 100,
+            current_support: 150.0,
             is_grounded: true,
             x: base_x,
             y: base_y,
@@ -1091,6 +1094,7 @@ pub fn client_connected(ctx: &ReducerContext) {
             parent_id: Some(1),
             piece_type: "Workbench".into(),
             stability: 100,
+            current_support: 100.0,
             is_grounded: false,
             x: base_x,
             y: base_y + 0.6,

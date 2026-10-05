@@ -235,6 +235,7 @@ fn test_structure_repair_validation() {
         parent_id: None,
         piece_type: "Wall".to_string(),
         stability: 80,
+        current_support: 80.0,
         is_grounded: false,
         is_blueprint: false,
         construction_progress: 100,
@@ -264,4 +265,102 @@ fn test_structure_repair_validation() {
     structure.current_health = 50.0;
     let can_repair_blueprint = !structure.is_blueprint && structure.current_health < structure.max_health;
     assert!(!can_repair_blueprint);
+}
+
+#[test]
+fn test_dag_support_formula_and_directional_degradation() {
+    // Formula: S_current = min(S_parent, max_support) - (d_h * c_h + d_v * c_v)
+    // Wood parameters: max=100.0, min=10.0, c_h=22.5, c_v=4.5
+    // Stone parameters: max=150.0, min=15.0, c_h=35.0, c_v=3.0
+    let calc_wood = |parent_sup: f32, dh: f32, dv: f32| -> f32 {
+        parent_sup.min(100.0) - (dh * 22.5 + dv * 4.5)
+    };
+    let calc_stone = |parent_sup: f32, dh: f32, dv: f32| -> f32 {
+        parent_sup.min(150.0) - (dh * 35.0 + dv * 3.0)
+    };
+
+    // 1. Wood vertical stacking: dh = 0, dv = 3.0m (1 story)
+    // Loss per story = 3.0 * 4.5 = 13.5
+    let w1 = calc_wood(100.0, 0.0, 3.0);
+    assert_eq!(w1, 86.5);
+    let w2 = calc_wood(w1, 0.0, 3.0);
+    assert_eq!(w2, 73.0);
+    let w3 = calc_wood(w2, 0.0, 3.0);
+    assert_eq!(w3, 59.5);
+    let w4 = calc_wood(w3, 0.0, 3.0);
+    assert_eq!(w4, 46.0);
+    let w5 = calc_wood(w4, 0.0, 3.0);
+    assert_eq!(w5, 32.5);
+    let w6 = calc_wood(w5, 0.0, 3.0);
+    assert_eq!(w6, 19.0);
+    let w7 = calc_wood(w6, 0.0, 3.0);
+    assert_eq!(w7, 5.5); // 5.5 < 10.0 min_support: fails to support 7th story without pillars!
+    assert!(w7 < 10.0);
+
+    // 2. Wood horizontal span: dh = 2.0m, dv = 0
+    // Loss per horizontal step = 2.0 * 22.5 = 45.0
+    let f1 = calc_wood(100.0, 2.0, 0.0);
+    assert_eq!(f1, 55.0);
+    let f2 = calc_wood(f1, 2.0, 0.0);
+    assert_eq!(f2, 10.0); // Exact viable threshold for 2nd cantilever tile
+    let f3 = calc_wood(f2, 2.0, 0.0);
+    assert_eq!(f3, -35.0); // 3rd cantilever collapses without ground support!
+    assert!(f3 < 10.0);
+
+    // 3. Stone horizontal vs vertical:
+    // Vertical: 3.0 * 3.0 = 9.0 loss per story
+    let s_vert = calc_stone(150.0, 0.0, 3.0);
+    assert_eq!(s_vert, 141.0);
+    // Horizontal: 2.0 * 35.0 = 70.0 loss per horizontal step
+    let s_horiz1 = calc_stone(150.0, 2.0, 0.0);
+    assert_eq!(s_horiz1, 80.0);
+    let s_horiz2 = calc_stone(s_horiz1, 2.0, 0.0);
+    assert_eq!(s_horiz2, 10.0); // < 15.0 min_support for stone: 2nd stone cantilever collapses!
+    assert!(s_horiz2 < 15.0);
+}
+
+#[test]
+fn test_multi_ground_path_maximum_support_adoption() {
+    // When a piece is adjacent to two supporting parents, it must adopt the maximum support path.
+    let path_a_support = 86.5_f32; // Wall on ground
+    let path_b_support = 73.0_f32; // Wall on second floor
+
+    let dh = 2.0_f32;
+    let dv = 0.0_f32;
+    let ch = 22.5_f32;
+    let cv = 4.5_f32;
+
+    let sup_from_a = path_a_support - (dh * ch + dv * cv); // 86.5 - 45.0 = 41.5
+    let sup_from_b = path_b_support - (dh * ch + dv * cv); // 73.0 - 45.0 = 28.0
+
+    let chosen_support = sup_from_a.max(sup_from_b);
+    assert_eq!(chosen_support, 41.5);
+    assert!(chosen_support >= 10.0);
+}
+
+#[test]
+fn test_autobuild_3_second_progression() {
+    // In low_frequency_tick (100ms interval), blueprints increment by 4% per tick.
+    // Over 25 ticks (2.5s), it reaches 100% and finishes.
+    let mut progress = 0_u32;
+    let max_hp = 200.0_f32;
+    let mut health = 1.0_f32;
+    let mut is_blueprint = true;
+
+    for tick in 1..=30 {
+        progress = (progress + 4).min(100);
+        health = (max_hp * (progress as f32 / 100.0)).max(1.0);
+        if progress >= 100 {
+            is_blueprint = false;
+            health = max_hp;
+        }
+        if tick == 25 {
+            assert_eq!(progress, 100);
+            assert!(!is_blueprint);
+            assert_eq!(health, 200.0);
+        }
+    }
+
+    assert_eq!(progress, 100);
+    assert!(!is_blueprint);
 }

@@ -25,6 +25,30 @@ pub struct SocketDef {
     pub offset_z: f32,
 }
 
+#[table(accessor = material_properties, public)]
+#[derive(Clone, Debug)]
+pub struct MaterialProperties {
+    #[primary_key]
+    pub material_name: String,
+    pub max_support: f32,
+    pub min_support: f32,
+    pub horizontal_loss_coeff: f32,
+    pub vertical_loss_coeff: f32,
+}
+
+#[table(accessor = structure_edge, public)]
+#[derive(Clone, Debug)]
+pub struct StructureEdge {
+    #[primary_key] #[auto_inc]
+    pub edge_id: u64,
+    #[index(btree)]
+    pub parent_id: u64,
+    #[index(btree)]
+    pub child_id: u64,
+    pub distance_h: f32,
+    pub distance_v: f32,
+}
+
 #[table(accessor = structure, public)]
 #[derive(Clone)]
 pub struct Structure {
@@ -34,6 +58,7 @@ pub struct Structure {
     pub parent_id: Option<u64>,
     pub piece_type: String,
     pub stability: u32,
+    pub current_support: f32,
     pub is_grounded: bool,
 
     pub is_blueprint: bool,
@@ -132,6 +157,82 @@ pub fn get_piece_cost(piece_type: &str) -> (u32, u32) {
         "Ramp" => (16, 0),
         _ => (4, 0),
     }
+}
+
+/// Material classification for structural calculations.
+pub fn get_piece_material(piece_type: &str) -> &'static str {
+    match base_piece_type(piece_type) {
+        "Foundation" => "Stone",
+        _ => "Wood",
+    }
+}
+
+/// Looks up material properties from DB or supplies authoritative physics presets:
+/// - Wood: max_support = 100.0, min_support = 10.0, horizontal_loss_coeff = 22.5, vertical_loss_coeff = 4.5
+/// - Stone: max_support = 150.0, min_support = 15.0, horizontal_loss_coeff = 35.0, vertical_loss_coeff = 3.0
+pub fn get_material_properties_or_default(ctx: &ReducerContext, material_name: &str) -> (f32, f32, f32, f32) {
+    if let Some(mat) = ctx.db.material_properties().material_name().find(&material_name.to_string()) {
+        (mat.max_support, mat.min_support, mat.horizontal_loss_coeff, mat.vertical_loss_coeff)
+    } else {
+        match material_name {
+            "Stone" => (150.0, 15.0, 35.0, 3.0),
+            _ => (100.0, 10.0, 22.5, 4.5), // Wood
+        }
+    }
+}
+
+pub fn seed_default_materials(ctx: &ReducerContext) {
+    if ctx.db.material_properties().material_name().find(&"Wood".to_string()).is_none() {
+        ctx.db.material_properties().insert(MaterialProperties {
+            material_name: "Wood".to_string(),
+            max_support: 100.0,
+            min_support: 10.0,
+            horizontal_loss_coeff: 22.5,
+            vertical_loss_coeff: 4.5,
+        });
+    }
+    if ctx.db.material_properties().material_name().find(&"Stone".to_string()).is_none() {
+        ctx.db.material_properties().insert(MaterialProperties {
+            material_name: "Stone".to_string(),
+            max_support: 150.0,
+            min_support: 15.0,
+            horizontal_loss_coeff: 35.0,
+            vertical_loss_coeff: 3.0,
+        });
+    }
+}
+
+/// Computes support inherited by a child piece from a supporting parent piece using the DAG formula:
+/// S_current = min(S_parent, max_support) - (d_h * c_h + d_v * c_v)
+pub fn calculate_inherited_support(
+    ctx: &ReducerContext,
+    parent: &Structure,
+    child_piece_type: &str,
+    child_x: f32,
+    child_y: f32,
+    child_z: f32,
+) -> (f32, f32, f32, bool) {
+    let material = get_piece_material(child_piece_type);
+    let (max_support, min_support, c_h, c_v) = get_material_properties_or_default(ctx, material);
+
+    // If parent is a Foundation, child rests directly on the foundation's 4m x 4m footprint
+    let (d_h, d_v) = if base_piece_type(&parent.piece_type) == "Foundation" {
+        let raw_dh = ((child_x - parent.x).powi(2) + (child_z - parent.z).powi(2)).sqrt();
+        let eff_dh = (raw_dh - 2.0).max(0.0);
+        let eff_dv = ((child_y - parent.y).abs() - 2.0).max(0.0);
+        (eff_dh, eff_dv)
+    } else {
+        let dh = ((child_x - parent.x).powi(2) + (child_z - parent.z).powi(2)).sqrt();
+        let dv = (child_y - parent.y).abs();
+        (dh, dv)
+    };
+
+    let base_support = parent.current_support.min(max_support);
+    let degradation = d_h * c_h + d_v * c_v;
+    let support = base_support - degradation;
+    let is_viable = support >= min_support;
+
+    (support, d_h, d_v, is_viable)
 }
 
 /// Whether a structure of this type still stops projectiles / hitscan rays.
@@ -282,13 +383,7 @@ pub fn place_structure(
         }
     }
 
-    // Architectural Note: Decay is looked up through the shared `get_piece_decay` table so
-    // player-placed pieces and scripted NPC buildings obey identical stability rules.
-    let decay_penalty = get_piece_decay(piece_type.as_str())
-        .ok_or_else(|| format!("Unknown piece type: {}", piece_type))?;
-
-    let stability: u32;
-    let is_grounded: bool;
+    let (support, d_h, d_v, stability, is_grounded, chosen_parent_id);
 
     if matches!(base_piece_type(piece_type.as_str()), "Foundation" | "Ramp" | "Workbench" | "Campfire") && parent_id.is_none() {
         let ground_y = crate::get_terrain_height(x, z);
@@ -296,7 +391,13 @@ pub fn place_structure(
 
         if (y - ground_y).abs() < 4.0 || voxel_mat.is_solid() {
             is_grounded = true;
+            let material = get_piece_material(&piece_type);
+            let (max_sup, _, _, _) = get_material_properties_or_default(ctx, material);
+            support = max_sup;
             stability = 100;
+            chosen_parent_id = None;
+            d_h = 0.0;
+            d_v = 0.0;
         } else {
             return Err("Foundations, Workbenches, and Campfires must anchor to terrain or solid voxels.".to_string());
         }
@@ -304,22 +405,53 @@ pub fn place_structure(
         let parent = ctx.db.structure().structure_id().find(pid)
             .ok_or_else(|| "Parent structure not found in database.".to_string())?;
 
-        if parent.stability <= decay_penalty {
-            return Err("Structural integrity depleted. Cannot support additional mass.".to_string());
+        let (init_sup, init_dh, init_dv, _) = calculate_inherited_support(ctx, &parent, &piece_type, x, y, z);
+        let mut best_sup = init_sup;
+        let mut best_dh = init_dh;
+        let mut best_dv = init_dv;
+        let mut best_pid = pid;
+
+        // Multi-ground path evaluation: adopt maximum support path from any candidate supporting parent
+        for other in ctx.db.structure().iter() {
+            if other.structure_id != pid && !other.is_blueprint {
+                let dist_sq = (other.x - x).powi(2) + (other.z - z).powi(2);
+                if dist_sq <= 25.0 && (other.y - y).abs() <= 4.0 {
+                    let (cand_sup, cand_dh, cand_dv, cand_viable) = calculate_inherited_support(ctx, &other, &piece_type, x, y, z);
+                    if cand_viable && cand_sup > best_sup {
+                        best_sup = cand_sup;
+                        best_dh = cand_dh;
+                        best_dv = cand_dv;
+                        best_pid = other.structure_id;
+                    }
+                }
+            }
         }
-        stability = parent.stability.saturating_sub(decay_penalty);
+
+        let material = get_piece_material(&piece_type);
+        let (max_sup, min_sup, _, _) = get_material_properties_or_default(ctx, material);
+
+        if best_sup < min_sup {
+            return Err(format!("Structural integrity depleted ({:.1} < {:.1}). Cannot support additional mass.", best_sup, min_sup));
+        }
+
+        support = best_sup;
+        stability = (best_sup / max_sup * 100.0).clamp(1.0, 100.0) as u32;
         is_grounded = false;
+        chosen_parent_id = Some(best_pid);
+        d_h = best_dh;
+        d_v = best_dv;
     } else {
         return Err("Piece must anchor to terrain/voxels or snap to a valid parent structure.".to_string());
     }
 
     let max_hp = get_piece_max_health(&piece_type);
 
-    ctx.db.structure().insert(Structure {
+    let new_row = ctx.db.structure().insert(Structure {
         structure_id: 0,
-        parent_id,
+        parent_id: chosen_parent_id,
         piece_type: piece_type.clone(),
         stability,
+        current_support: support,
         is_grounded,
         x,
         y,
@@ -334,6 +466,16 @@ pub fn place_structure(
         current_health: 1.0,
         max_health: max_hp,
     });
+
+    if let Some(pid) = chosen_parent_id {
+        ctx.db.structure_edge().insert(StructureEdge {
+            edge_id: 0,
+            parent_id: pid,
+            child_id: new_row.structure_id,
+            distance_h: d_h,
+            distance_v: d_v,
+        });
+    }
 
     ctx.db.waypoint().insert(crate::Waypoint {
         waypoint_id: 0,
@@ -475,23 +617,112 @@ pub fn invalidate_structures_at(ctx: &ReducerContext, vx: f32, vy: f32, vz: f32)
     }
 }
 
-pub fn destroy_structure_internal(ctx: &ReducerContext, target_structure_id: u64) -> Result<(), String> {
-    let mut collapse_queue = vec![target_structure_id];
-    let mut index = 0;
+/// Recalculates support values across the DAG of Support using BFS multi-source relaxation.
+/// Identifies and collapses any structures disconnected from ground or whose support drops below min_support.
+pub fn recalculate_structural_integrity(ctx: &ReducerContext) -> Vec<u64> {
+    use std::collections::BTreeMap;
 
-    while index < collapse_queue.len() {
-        let current_id = collapse_queue[index];
-        for child in ctx.db.structure().iter().filter(|s| s.parent_id == Some(current_id)) {
-            collapse_queue.push(child.structure_id);
-        }
-        index += 1;
+    let mut structures: BTreeMap<u64, Structure> = ctx.db.structure().iter().map(|s| (s.structure_id, s)).collect();
+    if structures.is_empty() {
+        return Vec::new();
     }
 
-    for id in &collapse_queue {
+    let mut current_supports: BTreeMap<u64, f32> = BTreeMap::new();
+    let mut best_parents: BTreeMap<u64, Option<u64>> = BTreeMap::new();
+    let mut queue = Vec::new();
+
+    for (id, s) in &structures {
+        if s.is_grounded {
+            let material = get_piece_material(&s.piece_type);
+            let (max_support, _, _, _) = get_material_properties_or_default(ctx, material);
+            current_supports.insert(*id, max_support);
+            best_parents.insert(*id, None);
+            queue.push(*id);
+        } else {
+            current_supports.insert(*id, 0.0);
+            best_parents.insert(*id, s.parent_id);
+        }
+    }
+
+    let mut outgoing_edges: BTreeMap<u64, Vec<(u64, f32, f32)>> = BTreeMap::new();
+    for edge in ctx.db.structure_edge().iter() {
+        outgoing_edges.entry(edge.parent_id).or_default().push((edge.child_id, edge.distance_h, edge.distance_v));
+    }
+
+    // Fallback: also map existing parent_id links from structure table
+    for (id, s) in &structures {
+        if let Some(pid) = s.parent_id {
+            if let Some(parent) = structures.get(&pid) {
+                let has_edge = outgoing_edges.get(&pid).map_or(false, |list| list.iter().any(|(cid, _, _)| *cid == *id));
+                if !has_edge {
+                    let (_, dh, dv, _) = calculate_inherited_support(ctx, parent, &s.piece_type, s.x, s.y, s.z);
+                    outgoing_edges.entry(pid).or_default().push((*id, dh, dv));
+                }
+            }
+        }
+    }
+
+    let mut head = 0;
+    while head < queue.len() {
+        let parent_id = queue[head];
+        head += 1;
+
+        let parent_sup = current_supports.get(&parent_id).copied().unwrap_or(0.0);
+
+        if let Some(edges) = outgoing_edges.get(&parent_id) {
+            for &(child_id, dh, dv) in edges {
+                if let Some(child) = structures.get(&child_id) {
+                    if child.is_grounded {
+                        continue;
+                    }
+                    let child_mat = get_piece_material(&child.piece_type);
+                    let (max_sup, min_sup, c_h, c_v) = get_material_properties_or_default(ctx, child_mat);
+                    let inherited = parent_sup.min(max_sup) - (dh * c_h + dv * c_v);
+
+                    if inherited >= min_sup {
+                        let existing = current_supports.get(&child_id).copied().unwrap_or(0.0);
+                        if inherited > existing {
+                            current_supports.insert(child_id, inherited);
+                            best_parents.insert(child_id, Some(parent_id));
+                            queue.push(child_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut collapsed = Vec::new();
+    for (id, s) in structures.iter_mut() {
+        if s.is_grounded {
+            continue;
+        }
+        let child_mat = get_piece_material(&s.piece_type);
+        let (max_sup, min_sup, _, _) = get_material_properties_or_default(ctx, child_mat);
+        let final_support = current_supports.get(id).copied().unwrap_or(0.0);
+
+        if final_support < min_sup {
+            collapsed.push(*id);
+        } else {
+            s.current_support = final_support;
+            s.stability = (final_support / max_sup * 100.0).clamp(1.0, 100.0) as u32;
+            s.parent_id = best_parents.get(id).copied().flatten();
+            ctx.db.structure().structure_id().update(s.clone());
+        }
+    }
+
+    for id in &collapsed {
         if let Some(structure) = ctx.db.structure().structure_id().find(*id) {
             ctx.db.structure().structure_id().delete(*id);
-            // Architectural Note: Drop any door state so destroyed doors never leave stale rows.
             ctx.db.door_state().structure_id().delete(*id);
+
+            let edge_ids: Vec<u64> = ctx.db.structure_edge().iter()
+                .filter(|e| e.parent_id == *id || e.child_id == *id)
+                .map(|e| e.edge_id)
+                .collect();
+            for eid in edge_ids {
+                ctx.db.structure_edge().edge_id().delete(eid);
+            }
 
             ctx.db.combat_event().insert(CombatEvent {
                 id: 0,
@@ -512,7 +743,75 @@ pub fn destroy_structure_internal(ctx: &ReducerContext, target_structure_id: u64
             });
         }
     }
+
+    collapsed
+}
+
+pub fn destroy_structure_internal(ctx: &ReducerContext, target_structure_id: u64) -> Result<(), String> {
+    if let Some(structure) = ctx.db.structure().structure_id().find(target_structure_id) {
+        ctx.db.structure().structure_id().delete(target_structure_id);
+        ctx.db.door_state().structure_id().delete(target_structure_id);
+
+        let edge_ids: Vec<u64> = ctx.db.structure_edge().iter()
+            .filter(|e| e.parent_id == target_structure_id || e.child_id == target_structure_id)
+            .map(|e| e.edge_id)
+            .collect();
+        for eid in edge_ids {
+            ctx.db.structure_edge().edge_id().delete(eid);
+        }
+
+        ctx.db.combat_event().insert(CombatEvent {
+            id: 0,
+            event_type: "StructureCollapse".to_string(),
+            x: structure.x,
+            y: structure.y,
+            z: structure.z,
+        });
+
+        ctx.db.nav_event().insert(crate::NavEvent {
+            id: 0,
+            min_x: structure.x - 3.0,
+            min_y: structure.y - 3.0,
+            min_z: structure.z - 3.0,
+            max_x: structure.x + 3.0,
+            max_y: structure.y + 3.0,
+            max_z: structure.z + 3.0,
+        });
+
+        recalculate_structural_integrity(ctx);
+    }
     Ok(())
+}
+
+/// Ticks automatic construction progress for all blueprints over a 3-second period.
+/// Blueprints advance by 4% per 100ms tick, completing smoothly and restoring full health.
+pub fn process_autobuild_tick(ctx: &ReducerContext) {
+    let mut completed_nav_events = Vec::new();
+    for mut s in ctx.db.structure().iter().filter(|s| s.is_blueprint) {
+        let increment = 4; // Completes in 25 ticks (2.5s - 3.0s)
+        s.construction_progress = (s.construction_progress + increment).min(100);
+        s.current_health = (s.max_health * (s.construction_progress as f32 / 100.0)).max(1.0);
+
+        if s.construction_progress >= 100 {
+            s.is_blueprint = false;
+            s.construction_progress = 100;
+            s.current_health = s.max_health;
+            completed_nav_events.push((s.x, s.y, s.z));
+        }
+        ctx.db.structure().structure_id().update(s);
+    }
+
+    for (x, y, z) in completed_nav_events {
+        ctx.db.nav_event().insert(crate::NavEvent {
+            id: 0,
+            min_x: x - 3.0,
+            min_y: y - 3.0,
+            min_z: z - 3.0,
+            max_x: x + 3.0,
+            max_y: y + 3.0,
+            max_z: z + 3.0,
+        });
+    }
 }
 
 #[reducer]

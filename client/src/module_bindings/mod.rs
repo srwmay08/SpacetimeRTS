@@ -67,6 +67,8 @@ pub mod inventory_type;
 pub mod issue_waypoint_reducer;
 pub mod low_frequency_timer_type;
 pub mod magic_spell_type_type;
+pub mod material_properties_table;
+pub mod material_properties_type;
 pub mod nav_event_table;
 pub mod nav_event_type;
 pub mod node_facing_table;
@@ -104,6 +106,8 @@ pub mod siege_weapon_type_type;
 pub mod snapshot_type;
 pub mod spawn_peasant_reducer;
 pub mod spawn_template_blueprint_reducer;
+pub mod structure_edge_table;
+pub mod structure_edge_type;
 pub mod structure_table;
 pub mod structure_type;
 pub mod swap_inventory_slots_reducer;
@@ -181,6 +185,8 @@ pub use inventory_type::Inventory;
 pub use issue_waypoint_reducer::issue_waypoint;
 pub use low_frequency_timer_type::LowFrequencyTimer;
 pub use magic_spell_type_type::MagicSpellType;
+pub use material_properties_table::*;
+pub use material_properties_type::MaterialProperties;
 pub use nav_event_table::*;
 pub use nav_event_type::NavEvent;
 pub use node_facing_table::*;
@@ -218,6 +224,8 @@ pub use siege_weapon_type_type::SiegeWeaponType;
 pub use snapshot_type::Snapshot;
 pub use spawn_peasant_reducer::spawn_peasant;
 pub use spawn_template_blueprint_reducer::spawn_template_blueprint;
+pub use structure_edge_table::*;
+pub use structure_edge_type::StructureEdge;
 pub use structure_table::*;
 pub use structure_type::Structure;
 pub use swap_inventory_slots_reducer::swap_inventory_slots;
@@ -859,6 +867,7 @@ pub struct DbUpdate {
     health: __sdk::TableUpdate<Health>,
     hitbox_history: __sdk::TableUpdate<HitboxHistory>,
     inventory: __sdk::TableUpdate<Inventory>,
+    material_properties: __sdk::TableUpdate<MaterialProperties>,
     nav_event: __sdk::TableUpdate<NavEvent>,
     node_facing: __sdk::TableUpdate<NodeFacing>,
     npc_brain: __sdk::TableUpdate<NpcBrain>,
@@ -871,6 +880,7 @@ pub struct DbUpdate {
     recipe_definition: __sdk::TableUpdate<RecipeDefinition>,
     resource_node: __sdk::TableUpdate<ResourceNode>,
     structure: __sdk::TableUpdate<Structure>,
+    structure_edge: __sdk::TableUpdate<StructureEdge>,
     transform: __sdk::TableUpdate<Transform>,
     voxel_chunk: __sdk::TableUpdate<VoxelChunk>,
     waypoint: __sdk::TableUpdate<Waypoint>,
@@ -916,6 +926,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "inventory" => db_update
                     .inventory
                     .append(inventory_table::parse_table_update(table_update)?),
+                "material_properties" => db_update
+                    .material_properties
+                    .append(material_properties_table::parse_table_update(table_update)?),
                 "nav_event" => db_update
                     .nav_event
                     .append(nav_event_table::parse_table_update(table_update)?),
@@ -952,6 +965,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "structure" => db_update
                     .structure
                     .append(structure_table::parse_table_update(table_update)?),
+                "structure_edge" => db_update
+                    .structure_edge
+                    .append(structure_edge_table::parse_table_update(table_update)?),
                 "transform" => db_update
                     .transform
                     .append(transform_table::parse_table_update(table_update)?),
@@ -1026,6 +1042,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.inventory = cache
             .apply_diff_to_table::<Inventory>("inventory", &self.inventory)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.material_properties = cache
+            .apply_diff_to_table::<MaterialProperties>(
+                "material_properties",
+                &self.material_properties,
+            )
+            .with_updates_by_pk(|row| &row.material_name);
         diff.nav_event = cache
             .apply_diff_to_table::<NavEvent>("nav_event", &self.nav_event)
             .with_updates_by_pk(|row| &row.id);
@@ -1065,6 +1087,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.structure = cache
             .apply_diff_to_table::<Structure>("structure", &self.structure)
             .with_updates_by_pk(|row| &row.structure_id);
+        diff.structure_edge = cache
+            .apply_diff_to_table::<StructureEdge>("structure_edge", &self.structure_edge)
+            .with_updates_by_pk(|row| &row.edge_id);
         diff.transform = cache
             .apply_diff_to_table::<Transform>("transform", &self.transform)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -1117,6 +1142,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "inventory" => db_update
                     .inventory
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "material_properties" => db_update
+                    .material_properties
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "nav_event" => db_update
                     .nav_event
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1152,6 +1180,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "structure" => db_update
                     .structure
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "structure_edge" => db_update
+                    .structure_edge
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "transform" => db_update
                     .transform
@@ -1211,6 +1242,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "inventory" => db_update
                     .inventory
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "material_properties" => db_update
+                    .material_properties
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "nav_event" => db_update
                     .nav_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1246,6 +1280,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "structure" => db_update
                     .structure
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "structure_edge" => db_update
+                    .structure_edge
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "transform" => db_update
                     .transform
@@ -1285,6 +1322,7 @@ pub struct AppliedDiff<'r> {
     health: __sdk::TableAppliedDiff<'r, Health>,
     hitbox_history: __sdk::TableAppliedDiff<'r, HitboxHistory>,
     inventory: __sdk::TableAppliedDiff<'r, Inventory>,
+    material_properties: __sdk::TableAppliedDiff<'r, MaterialProperties>,
     nav_event: __sdk::TableAppliedDiff<'r, NavEvent>,
     node_facing: __sdk::TableAppliedDiff<'r, NodeFacing>,
     npc_brain: __sdk::TableAppliedDiff<'r, NpcBrain>,
@@ -1297,6 +1335,7 @@ pub struct AppliedDiff<'r> {
     recipe_definition: __sdk::TableAppliedDiff<'r, RecipeDefinition>,
     resource_node: __sdk::TableAppliedDiff<'r, ResourceNode>,
     structure: __sdk::TableAppliedDiff<'r, Structure>,
+    structure_edge: __sdk::TableAppliedDiff<'r, StructureEdge>,
     transform: __sdk::TableAppliedDiff<'r, Transform>,
     voxel_chunk: __sdk::TableAppliedDiff<'r, VoxelChunk>,
     waypoint: __sdk::TableAppliedDiff<'r, Waypoint>,
@@ -1353,6 +1392,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<Inventory>("inventory", &self.inventory, event);
+        callbacks.invoke_table_row_callbacks::<MaterialProperties>(
+            "material_properties",
+            &self.material_properties,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<NavEvent>("nav_event", &self.nav_event, event);
         callbacks.invoke_table_row_callbacks::<NodeFacing>("node_facing", &self.node_facing, event);
         callbacks.invoke_table_row_callbacks::<NpcBrain>("npc_brain", &self.npc_brain, event);
@@ -1385,6 +1429,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<Structure>("structure", &self.structure, event);
+        callbacks.invoke_table_row_callbacks::<StructureEdge>(
+            "structure_edge",
+            &self.structure_edge,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Transform>("transform", &self.transform, event);
         callbacks.invoke_table_row_callbacks::<VoxelChunk>("voxel_chunk", &self.voxel_chunk, event);
         callbacks.invoke_table_row_callbacks::<Waypoint>("waypoint", &self.waypoint, event);
@@ -2064,6 +2113,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         health_table::register_table(client_cache);
         hitbox_history_table::register_table(client_cache);
         inventory_table::register_table(client_cache);
+        material_properties_table::register_table(client_cache);
         nav_event_table::register_table(client_cache);
         node_facing_table::register_table(client_cache);
         npc_brain_table::register_table(client_cache);
@@ -2076,6 +2126,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         recipe_definition_table::register_table(client_cache);
         resource_node_table::register_table(client_cache);
         structure_table::register_table(client_cache);
+        structure_edge_table::register_table(client_cache);
         transform_table::register_table(client_cache);
         voxel_chunk_table::register_table(client_cache);
         waypoint_table::register_table(client_cache);
@@ -2093,6 +2144,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "health",
         "hitbox_history",
         "inventory",
+        "material_properties",
         "nav_event",
         "node_facing",
         "npc_brain",
@@ -2105,6 +2157,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "recipe_definition",
         "resource_node",
         "structure",
+        "structure_edge",
         "transform",
         "voxel_chunk",
         "waypoint",

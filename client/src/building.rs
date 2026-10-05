@@ -102,8 +102,13 @@ impl ModularPieceType {
                 Socket { name: "South".into(), local_offset: Vec3::new(0.0, 2.0, 2.0), local_rotation: Quat::from_rotation_y(std::f32::consts::PI), is_occupied: false },
                 Socket { name: "East".into(), local_offset: Vec3::new(2.0, 2.0, 0.0), local_rotation: Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2), is_occupied: false },
                 Socket { name: "West".into(), local_offset: Vec3::new(-2.0, 2.0, 0.0), local_rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), is_occupied: false },
+                Socket { name: "FoundationNorth".into(), local_offset: Vec3::new(0.0, 0.0, -4.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "FoundationSouth".into(), local_offset: Vec3::new(0.0, 0.0, 4.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "FoundationEast".into(), local_offset: Vec3::new(4.0, 0.0, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
+                Socket { name: "FoundationWest".into(), local_offset: Vec3::new(-4.0, 0.0, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
             ],
             Self::Wall | Self::Window | Self::Door => vec![
+                Socket { name: "WallTop".into(), local_offset: Vec3::new(0.0, 3.0, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
                 Socket { name: "TopCenter".into(), local_offset: Vec3::new(0.0, 1.5, 0.0), local_rotation: Quat::IDENTITY, is_occupied: false },
                 Socket { name: "TopForward".into(), local_offset: Vec3::new(0.0, 1.5, -2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
                 Socket { name: "TopBackward".into(), local_offset: Vec3::new(0.0, 1.5, 2.0), local_rotation: Quat::IDENTITY, is_occupied: false },
@@ -121,6 +126,27 @@ impl ModularPieceType {
             ],
             Self::Workbench => vec![],
             Self::Campfire => vec![],
+        }
+    }
+}
+
+pub fn is_socket_compatible(piece_type: ModularPieceType, socket_name: &str) -> bool {
+    match piece_type {
+        ModularPieceType::Wall | ModularPieceType::Window | ModularPieceType::Door => {
+            // Walls, windows, and doors snap to foundation perimeter edges and top of walls
+            matches!(socket_name, "North" | "South" | "East" | "West" | "WallTop" | "TopCenter")
+        }
+        ModularPieceType::Foundation => {
+            matches!(socket_name, "FoundationNorth" | "FoundationSouth" | "FoundationEast" | "FoundationWest")
+        }
+        ModularPieceType::Floor | ModularPieceType::Roof => {
+            matches!(socket_name, "Top" | "TopCenter" | "TopForward" | "TopBackward" | "Bottom")
+        }
+        ModularPieceType::Ramp => {
+            matches!(socket_name, "North" | "South" | "East" | "West" | "Top" | "Bottom")
+        }
+        ModularPieceType::Workbench | ModularPieceType::Campfire => {
+            matches!(socket_name, "Top")
         }
     }
 }
@@ -1259,8 +1285,8 @@ pub fn update_build_hologram(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut hologram_query: Query<(Entity, &mut Transform, &Handle<StandardMaterial>), With<BuildHologram>>,
     structure_query: Query<&NetworkStructure>,
-    children_query: Query<&Children>,
-    socket_query: Query<(&GlobalTransform, &Socket)>,
+    parent_query: Query<&Parent>,
+    socket_query: Query<(Entity, &GlobalTransform, &Socket)>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     conn: Res<SpacetimeConnection>,
     mut cache: Local<Option<BuildingMeshCache>>,
@@ -1335,24 +1361,30 @@ pub fn update_build_hologram(
     let manual_rotation_offset = Quat::from_rotation_y(build_state.rotation_steps as f32 * std::f32::consts::FRAC_PI_2);
 
     if let Some(hit) = ray_hit {
-        if let Ok(net_struct) = structure_query.get(hit.entity) {
-            target_parent_id = Some(net_struct.structure_id);
-        }
+        let hit_point = ray_origin + ray_dir * hit.time_of_impact;
+        let mut closest_dist = 25.0; // 5.0m max snapping radius
 
-        if let Ok(children) = children_query.get(hit.entity) {
-            let hit_point = ray_origin + ray_dir * hit.time_of_impact;
-            let mut closest_dist = 16.0; 
-            
-            for &child in children.iter() {
-                if let Ok((socket_t, socket)) = socket_query.get(child) {
-                    if !socket.is_occupied {
-                        let dist = socket_t.translation().distance_squared(hit_point);
-                        if dist < closest_dist {
-                            closest_dist = dist;
-                            target_transform.translation = socket_t.translation();
-                            let (_, rotation, _) = socket_t.to_scale_rotation_translation();
-                            target_transform.rotation = rotation * manual_rotation_offset; 
-                            snapped = true;
+        for (child_ent, socket_t, socket) in socket_query.iter() {
+            if !socket.is_occupied && is_socket_compatible(build_state.selected_piece, &socket.name) {
+                let socket_pos = socket_t.translation();
+                let dx = socket_pos.x - hit_point.x;
+                let dz = socket_pos.z - hit_point.z;
+                let dy = (socket_pos.y - hit_point.y).abs();
+
+                // Allow up to 3.5m vertical difference, strongly prioritize 2D horizontal proximity to edge
+                if dy <= 3.5 && (dx * dx + dz * dz) <= 25.0 {
+                    let dist_metric = dx * dx + dz * dz + (dy * 0.35).powi(2);
+                    if dist_metric < closest_dist {
+                        closest_dist = dist_metric;
+                        target_transform.translation = socket_pos;
+                        let (_, rotation, _) = socket_t.to_scale_rotation_translation();
+                        target_transform.rotation = rotation * manual_rotation_offset;
+                        snapped = true;
+
+                        if let Ok(parent) = parent_query.get(child_ent) {
+                            if let Ok(net_struct) = structure_query.get(parent.get()) {
+                                target_parent_id = Some(net_struct.structure_id);
+                            }
                         }
                     }
                 }
