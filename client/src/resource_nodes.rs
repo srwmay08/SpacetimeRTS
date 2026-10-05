@@ -27,7 +27,7 @@ use crate::components::*;
 use crate::core::GameLayer;
 use crate::trees::{TreeMeshCache, create_lowpoly_fallen_log_mesh};
 use crate::props::{
-    create_voxel_rock_mesh, create_lowpoly_bush_foliage_mesh, create_lowpoly_bush_berries_mesh,
+    create_lowpoly_rock_mesh, create_voxel_rock_mesh, create_lowpoly_bush_foliage_mesh, create_lowpoly_bush_berries_mesh,
     create_lowpoly_branch_mesh, create_lowpoly_flint_mesh, create_lowpoly_stone_mesh,
 };
 
@@ -61,6 +61,7 @@ pub struct CachedResourceMeshes {
     pub tree_cache: TreeMeshCache,
     pub fallen_log: Handle<Mesh>,
     pub rock: Handle<Mesh>,
+    pub rock_variants: Vec<Handle<Mesh>>,
     #[allow(dead_code)] pub bush: Handle<Mesh>,
     pub bush_variants: Vec<Handle<Mesh>>,
     pub bush_foliage_variants: Vec<Handle<Mesh>>,
@@ -74,6 +75,14 @@ impl CachedResourceMeshes {
     pub fn new(meshes: &mut Assets<Mesh>) -> Self {
         let tree_cache = TreeMeshCache::new(meshes);
         let fallen_log = meshes.add(create_lowpoly_fallen_log_mesh(5050));
+
+        let rock_variants = vec![
+            meshes.add(create_lowpoly_rock_mesh(1337)),
+            meshes.add(create_lowpoly_rock_mesh(2468)),
+            meshes.add(create_lowpoly_rock_mesh(3579)),
+            meshes.add(create_lowpoly_rock_mesh(4680)),
+        ];
+        let rock = rock_variants[0].clone();
 
         let bush_foliage_variants = vec![
             meshes.add(create_lowpoly_bush_foliage_mesh(1337)),
@@ -93,7 +102,8 @@ impl CachedResourceMeshes {
         Self {
             tree_cache,
             fallen_log,
-            rock: meshes.add(create_voxel_rock_mesh()),
+            rock,
+            rock_variants,
             bush,
             bush_variants,
             bush_foliage_variants,
@@ -322,7 +332,7 @@ pub fn sync_resource_nodes(
                 None,
             ),
             "Rock" => (
-                cache.rock.clone(),
+                cache.rock_variants[(node.node_id % 4) as usize].clone(),
                 Collider::cuboid(1.5, 1.4, 1.4),
                 0.0,
                 None,
@@ -374,7 +384,7 @@ pub fn sync_resource_nodes(
             node_mat.clone()
         };
 
-        let (tree_rotation, tree_scale) = if tree_comp_opt.is_some() {
+        let (tree_rotation, tree_scale) = if tree_comp_opt.is_some() || clean_type == "Rock" {
             // Stable deterministic pseudo-random hash based on node_id
             let hash1 = ((node.node_id.wrapping_mul(2654435761) ^ (node.node_id >> 16)) % 10000) as f32 / 10000.0;
             let hash2 = (((node.node_id.wrapping_mul(1664525) + 1013904223) ^ (node.node_id >> 11)) % 10000) as f32 / 10000.0;
@@ -382,9 +392,15 @@ pub fn sync_resource_nodes(
             // Randomized degree of rotation around vertical axis (0 to 360 degrees)
             let yaw = hash1 * std::f32::consts::TAU;
 
-            // Randomized height range: up to 20% taller or shorter than default sizes (0.80 to 1.20)
-            let height_var = 0.80 + (hash2 * 0.40);
-            let width_var = 0.90 + (hash1 * 0.20);
+            let (width_var, height_var) = if clean_type == "Rock" {
+                let h = 0.85 + (hash2 * 0.30);
+                let w = 0.90 + (hash1 * 0.20);
+                (w, h)
+            } else {
+                let h = 0.80 + (hash2 * 0.40);
+                let w = 0.90 + (hash1 * 0.20);
+                (w, h)
+            };
 
             (Quat::from_rotation_y(yaw), Vec3::new(width_var, height_var, width_var))
         } else {
@@ -551,6 +567,10 @@ mod tests {
         assert_eq!(cache.bush_variants.len(), 4);
         assert_eq!(cache.bush_foliage_variants.len(), 4);
         assert_eq!(cache.bush_berries_variants.len(), 4);
+        assert_eq!(cache.rock_variants.len(), 4);
+        for rock_handle in &cache.rock_variants {
+            assert!(meshes.get(rock_handle).is_some());
+        }
         assert!(meshes.get(&cache.fallen_log).is_some());
         assert!(meshes.get(&cache.rock).is_some());
         assert!(meshes.get(&cache.branch).is_some());
