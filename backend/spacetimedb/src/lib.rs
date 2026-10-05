@@ -818,8 +818,8 @@ pub fn spawn_world_resource_nodes(ctx: &ReducerContext) {
         }
     };
 
-    // 1. Generate 72-96 forest centers across the world map (balanced woodland density)
-    let num_forests = 72 + (prng(&mut seed) * 24.0) as usize;
+    // 1. Generate 32-44 forest centers across the world map (distinct woodland landmark groves)
+    let num_forests = 32 + (prng(&mut seed) * 12.0) as usize;
     let mut forest_centers: Vec<(f32, f32, f32, &'static str)> = Vec::with_capacity(num_forests);
 
     for _ in 0..num_forests {
@@ -837,9 +837,9 @@ pub fn spawn_world_resource_nodes(ctx: &ReducerContext) {
         forest_centers.push((fx, fz, fr, species));
     }
 
-    // 2. Spawn trees around forest centers with gaussian falloff (balanced natural groves: 140-220 trees per cluster)
+    // 2. Spawn trees around forest centers with gaussian falloff (spacious natural groves: 60-100 trees per cluster)
     for &(fx, fz, fr, dominant_species) in &forest_centers {
-        let cluster_size = (140.0 + prng(&mut seed) * 80.0) as usize;
+        let cluster_size = (60.0 + prng(&mut seed) * 40.0) as usize;
 
         for _ in 0..cluster_size {
             let angle = prng(&mut seed) * std::f32::consts::TAU;
@@ -852,7 +852,7 @@ pub fn spawn_world_resource_nodes(ctx: &ReducerContext) {
             }
 
             let zone = get_zone(dist, fr);
-            let req_spacing = get_spacing(zone, &mut seed) * 0.44;
+            let req_spacing = get_spacing(zone, &mut seed) * 0.75;
 
             if check_overlap(rx, rz, req_spacing, &grid) {
                 continue;
@@ -954,11 +954,11 @@ pub fn spawn_world_resource_nodes(ctx: &ReducerContext) {
         }
     }
 
-    // 3. Add scattered lone trees outside forests (1,700 lone trees across the map)
-    for _ in 0..1700 {
+    // 3. Add scattered lone trees outside forests (600 lone trees across the map)
+    for _ in 0..600 {
         let rx = (prng(&mut seed) * 380.0) - 190.0;
         let rz = (prng(&mut seed) * 380.0) - 190.0;
-        let req_spacing = get_spacing(Zone::Open, &mut seed) * 0.44;
+        let req_spacing = get_spacing(Zone::Open, &mut seed) * 0.75;
 
         if check_overlap(rx, rz, req_spacing, &grid) {
             continue;
@@ -998,9 +998,9 @@ pub fn spawn_world_resource_nodes(ctx: &ReducerContext) {
         }
     }
 
-    // 4. Spawn non-tree mineral and foraging resources up to target density (~24,000 nodes)
+    // 4. Spawn non-tree mineral and foraging resources up to target density (~8,000 nodes)
     let mut attempts = 0;
-    while total_spawned < 24000 && attempts < 32000 {
+    while total_spawned < 8000 && attempts < 12000 {
         attempts += 1;
         let rx = (prng(&mut seed) * 390.0) - 195.0;
         let rz = (prng(&mut seed) * 390.0) - 195.0;
@@ -1059,7 +1059,7 @@ pub fn client_connected(ctx: &ReducerContext) {
     let sender = ctx.sender();
 
     let node_count = ctx.db.resource_node().iter().count();
-    if node_count < 14000 {
+    if node_count < 4500 {
         spawn_world_resource_nodes(ctx);
     }
 
