@@ -615,7 +615,6 @@ pub fn setup_prepared_hotbar_ui(
                                 background_color: BackgroundColor(Color::srgba(0.08, 0.08, 0.10, 0.92)),
                                 ..default()
                             },
-                            Interaction::default(),
                             HotbarSlotButton(slot_idx),
                         )).with_children(|slot| {
                             // Top bar: Hotkey badge & slot index
@@ -1059,7 +1058,6 @@ fn spawn_spellbook_slot(builder: &mut ChildBuilder, slot_idx: usize) {
             background_color: BackgroundColor(Color::srgba(0.84, 0.77, 0.64, 0.40)),
             ..default()
         },
-        Interaction::default(),
         SpellbookSlotCard(slot_idx),
     )).with_children(|card| {
         // Square Icon Box

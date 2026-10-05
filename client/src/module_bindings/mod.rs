@@ -14,6 +14,7 @@ pub mod admin_give_item_reducer;
 pub mod admin_god_mode_reducer;
 pub mod admin_heal_reducer;
 pub mod admin_kill_all_npcs_reducer;
+pub mod admin_respawn_resources_reducer;
 pub mod admin_set_time_reducer;
 pub mod admin_spawn_npc_reducer;
 pub mod admin_teleport_reducer;
@@ -111,6 +112,7 @@ pub use admin_give_item_reducer::admin_give_item;
 pub use admin_god_mode_reducer::admin_god_mode;
 pub use admin_heal_reducer::admin_heal;
 pub use admin_kill_all_npcs_reducer::admin_kill_all_npcs;
+pub use admin_respawn_resources_reducer::admin_respawn_resources;
 pub use admin_set_time_reducer::admin_set_time;
 pub use admin_spawn_npc_reducer::admin_spawn_npc;
 pub use admin_teleport_reducer::admin_teleport;
@@ -222,6 +224,7 @@ pub enum Reducer {
         amount: f32,
     },
     AdminKillAllNpcs,
+    AdminRespawnResources,
     AdminSetTime {
         time_of_day: f32,
     },
@@ -381,6 +384,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::AdminGodMode => "admin_god_mode",
             Reducer::AdminHeal { .. } => "admin_heal",
             Reducer::AdminKillAllNpcs => "admin_kill_all_npcs",
+            Reducer::AdminRespawnResources => "admin_respawn_resources",
             Reducer::AdminSetTime { .. } => "admin_set_time",
             Reducer::AdminSpawnNpc { .. } => "admin_spawn_npc",
             Reducer::AdminTeleport { .. } => "admin_teleport",
@@ -441,6 +445,9 @@ impl __sdk::Reducer for Reducer {
             Reducer::AdminKillAllNpcs => {
                 __sats::bsatn::to_vec(&admin_kill_all_npcs_reducer::AdminKillAllNpcsArgs {})
             }
+            Reducer::AdminRespawnResources => __sats::bsatn::to_vec(
+                &admin_respawn_resources_reducer::AdminRespawnResourcesArgs {},
+            ),
             Reducer::AdminSetTime { time_of_day } => {
                 __sats::bsatn::to_vec(&admin_set_time_reducer::AdminSetTimeArgs {
                     time_of_day: time_of_day.clone(),
