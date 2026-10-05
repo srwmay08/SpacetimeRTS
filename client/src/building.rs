@@ -1153,6 +1153,15 @@ impl BuildingAssetManifest {
     }
 }
 
+impl FromWorld for BuildingAssetManifest {
+    fn from_world(world: &mut World) -> Self {
+        world.resource_scope(|world, mut meshes: Mut<Assets<Mesh>>| {
+            let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+            BuildingAssetManifest::new(&mut meshes, &mut materials)
+        })
+    }
+}
+
 // ----------------------------------------------------------------------------
 // BUILD MODE & SNAPPING SYSTEMS
 // ----------------------------------------------------------------------------
@@ -1673,13 +1682,25 @@ pub fn spawn_modular_building_entity(
 pub fn spawn_modular_building_system(
     mut commands: Commands,
     mut events: EventReader<SpawnBuildingEvent>,
-    manifest: Res<BuildingAssetManifest>,
+    manifest: Option<Res<BuildingAssetManifest>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut cache: Local<Option<BuildingMeshCache>>,
 ) {
+    let local_cache;
+    let manifest_ref: &BuildingAssetManifest = match manifest {
+        Some(ref m) => m.as_ref(),
+        None => {
+            local_cache = cache.get_or_insert_with(|| BuildingMeshCache::new(&mut meshes, &mut materials));
+            local_cache
+        }
+    };
+
     for ev in events.read() {
         let transform = Transform::from_translation(ev.position).with_rotation(ev.rotation);
         spawn_modular_building_entity(
             &mut commands,
-            &manifest,
+            manifest_ref,
             ev.entity_id,
             ev.faction,
             ev.piece,

@@ -133,6 +133,7 @@ fn main() {
         .init_resource::<SeasonState>()
         .init_resource::<TreeMaterialHandles>()
         .init_resource::<FpsLimiterState>()
+        .init_resource::<BuildingAssetManifest>()
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))

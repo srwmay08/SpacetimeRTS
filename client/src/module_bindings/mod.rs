@@ -22,6 +22,7 @@ pub mod admin_spawn_template_instant_reducer;
 pub mod admin_teleport_reducer;
 pub mod ai_state_type;
 pub mod ai_type_type;
+pub mod assign_npc_task_reducer;
 pub mod brain_state_type;
 pub mod camera_mode_type_type;
 pub mod cast_high_tier_magic_reducer;
@@ -70,8 +71,11 @@ pub mod nav_event_table;
 pub mod nav_event_type;
 pub mod node_facing_table;
 pub mod node_facing_type;
+pub mod npc_action_type;
 pub mod npc_brain_table;
 pub mod npc_brain_type;
+pub mod npc_state_table;
+pub mod npc_state_type;
 pub mod peasant_table;
 pub mod peasant_type;
 pub mod pet_component_table;
@@ -104,6 +108,7 @@ pub mod structure_table;
 pub mod structure_type;
 pub mod swap_inventory_slots_reducer;
 pub mod swing_tool_reducer;
+pub mod tick_npc_ai_reducer;
 pub mod toggle_door_reducer;
 pub mod transform_table;
 pub mod transform_type;
@@ -131,6 +136,7 @@ pub use admin_spawn_template_instant_reducer::admin_spawn_template_instant;
 pub use admin_teleport_reducer::admin_teleport;
 pub use ai_state_type::AiState;
 pub use ai_type_type::AiType;
+pub use assign_npc_task_reducer::assign_npc_task;
 pub use brain_state_type::BrainState;
 pub use camera_mode_type_type::CameraModeType;
 pub use cast_high_tier_magic_reducer::cast_high_tier_magic;
@@ -179,8 +185,11 @@ pub use nav_event_table::*;
 pub use nav_event_type::NavEvent;
 pub use node_facing_table::*;
 pub use node_facing_type::NodeFacing;
+pub use npc_action_type::NpcAction;
 pub use npc_brain_table::*;
 pub use npc_brain_type::NpcBrain;
+pub use npc_state_table::*;
+pub use npc_state_type::NpcState;
 pub use peasant_table::*;
 pub use peasant_type::Peasant;
 pub use pet_component_table::*;
@@ -213,6 +222,7 @@ pub use structure_table::*;
 pub use structure_type::Structure;
 pub use swap_inventory_slots_reducer::swap_inventory_slots;
 pub use swing_tool_reducer::swing_tool;
+pub use tick_npc_ai_reducer::tick_npc_ai;
 pub use toggle_door_reducer::toggle_door;
 pub use transform_table::*;
 pub use transform_type::Transform;
@@ -269,6 +279,14 @@ pub enum Reducer {
     AdminTeleport {
         x: f32,
         z: f32,
+    },
+    AssignNpcTask {
+        npc_id: u64,
+        action: NpcAction,
+        task_entity_id: Option<u64>,
+        target_x: Option<f32>,
+        target_y: Option<f32>,
+        target_z: Option<f32>,
     },
     CastHighTierMagic {
         spell_type: MagicSpellType,
@@ -406,6 +424,9 @@ pub enum Reducer {
         dy: f32,
         dz: f32,
     },
+    TickNpcAi {
+        npc_id: u64,
+    },
     ToggleDoor {
         structure_id: u64,
     },
@@ -433,6 +454,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::AdminSpawnNpc { .. } => "admin_spawn_npc",
             Reducer::AdminSpawnTemplateInstant { .. } => "admin_spawn_template_instant",
             Reducer::AdminTeleport { .. } => "admin_teleport",
+            Reducer::AssignNpcTask { .. } => "assign_npc_task",
             Reducer::CastHighTierMagic { .. } => "cast_high_tier_magic",
             Reducer::ChangePetStance { .. } => "change_pet_stance",
             Reducer::CommandPeasant { .. } => "command_peasant",
@@ -458,6 +480,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SpawnTemplateBlueprint { .. } => "spawn_template_blueprint",
             Reducer::SwapInventorySlots { .. } => "swap_inventory_slots",
             Reducer::SwingTool { .. } => "swing_tool",
+            Reducer::TickNpcAi { .. } => "tick_npc_ai",
             Reducer::ToggleDoor { .. } => "toggle_door",
             Reducer::UnequipWeapon { .. } => "unequip_weapon",
             _ => unreachable!(),
@@ -522,18 +545,35 @@ impl __sdk::Reducer for Reducer {
                 faction_name,
                 origin_x,
                 origin_z,
-            } => __sats::bsatn::to_vec(&admin_spawn_template_instant_reducer::AdminSpawnTemplateInstantArgs {
-                template_name: template_name.clone(),
-                faction_name: faction_name.clone(),
-                origin_x: origin_x.clone(),
-                origin_z: origin_z.clone(),
-            }),
+            } => __sats::bsatn::to_vec(
+                &admin_spawn_template_instant_reducer::AdminSpawnTemplateInstantArgs {
+                    template_name: template_name.clone(),
+                    faction_name: faction_name.clone(),
+                    origin_x: origin_x.clone(),
+                    origin_z: origin_z.clone(),
+                },
+            ),
             Reducer::AdminTeleport { x, z } => {
                 __sats::bsatn::to_vec(&admin_teleport_reducer::AdminTeleportArgs {
                     x: x.clone(),
                     z: z.clone(),
                 })
             }
+            Reducer::AssignNpcTask {
+                npc_id,
+                action,
+                task_entity_id,
+                target_x,
+                target_y,
+                target_z,
+            } => __sats::bsatn::to_vec(&assign_npc_task_reducer::AssignNpcTaskArgs {
+                npc_id: npc_id.clone(),
+                action: action.clone(),
+                task_entity_id: task_entity_id.clone(),
+                target_x: target_x.clone(),
+                target_y: target_y.clone(),
+                target_z: target_z.clone(),
+            }),
             Reducer::CastHighTierMagic {
                 spell_type,
                 target_x,
@@ -755,12 +795,14 @@ impl __sdk::Reducer for Reducer {
                 faction_name,
                 origin_x,
                 origin_z,
-            } => __sats::bsatn::to_vec(&spawn_template_blueprint_reducer::SpawnTemplateBlueprintArgs {
-                template_name: template_name.clone(),
-                faction_name: faction_name.clone(),
-                origin_x: origin_x.clone(),
-                origin_z: origin_z.clone(),
-            }),
+            } => __sats::bsatn::to_vec(
+                &spawn_template_blueprint_reducer::SpawnTemplateBlueprintArgs {
+                    template_name: template_name.clone(),
+                    faction_name: faction_name.clone(),
+                    origin_x: origin_x.clone(),
+                    origin_z: origin_z.clone(),
+                },
+            ),
             Reducer::SwapInventorySlots { from_slot, to_slot } => {
                 __sats::bsatn::to_vec(&swap_inventory_slots_reducer::SwapInventorySlotsArgs {
                     from_slot: from_slot.clone(),
@@ -782,6 +824,11 @@ impl __sdk::Reducer for Reducer {
                 dy: dy.clone(),
                 dz: dz.clone(),
             }),
+            Reducer::TickNpcAi { npc_id } => {
+                __sats::bsatn::to_vec(&tick_npc_ai_reducer::TickNpcAiArgs {
+                    npc_id: npc_id.clone(),
+                })
+            }
             Reducer::ToggleDoor { structure_id } => {
                 __sats::bsatn::to_vec(&toggle_door_reducer::ToggleDoorArgs {
                     structure_id: structure_id.clone(),
@@ -815,6 +862,7 @@ pub struct DbUpdate {
     nav_event: __sdk::TableUpdate<NavEvent>,
     node_facing: __sdk::TableUpdate<NodeFacing>,
     npc_brain: __sdk::TableUpdate<NpcBrain>,
+    npc_state: __sdk::TableUpdate<NpcState>,
     peasant: __sdk::TableUpdate<Peasant>,
     pet_component: __sdk::TableUpdate<PetComponent>,
     player: __sdk::TableUpdate<Player>,
@@ -877,6 +925,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "npc_brain" => db_update
                     .npc_brain
                     .append(npc_brain_table::parse_table_update(table_update)?),
+                "npc_state" => db_update
+                    .npc_state
+                    .append(npc_state_table::parse_table_update(table_update)?),
                 "peasant" => db_update
                     .peasant
                     .append(peasant_table::parse_table_update(table_update)?),
@@ -984,6 +1035,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.npc_brain = cache
             .apply_diff_to_table::<NpcBrain>("npc_brain", &self.npc_brain)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.npc_state = cache
+            .apply_diff_to_table::<NpcState>("npc_state", &self.npc_state)
+            .with_updates_by_pk(|row| &row.entity_id);
         diff.peasant = cache
             .apply_diff_to_table::<Peasant>("peasant", &self.peasant)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -1071,6 +1125,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "npc_brain" => db_update
                     .npc_brain
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "npc_state" => db_update
+                    .npc_state
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "peasant" => db_update
                     .peasant
@@ -1163,6 +1220,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "npc_brain" => db_update
                     .npc_brain
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "npc_state" => db_update
+                    .npc_state
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "peasant" => db_update
                     .peasant
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1228,6 +1288,7 @@ pub struct AppliedDiff<'r> {
     nav_event: __sdk::TableAppliedDiff<'r, NavEvent>,
     node_facing: __sdk::TableAppliedDiff<'r, NodeFacing>,
     npc_brain: __sdk::TableAppliedDiff<'r, NpcBrain>,
+    npc_state: __sdk::TableAppliedDiff<'r, NpcState>,
     peasant: __sdk::TableAppliedDiff<'r, Peasant>,
     pet_component: __sdk::TableAppliedDiff<'r, PetComponent>,
     player: __sdk::TableAppliedDiff<'r, Player>,
@@ -1295,6 +1356,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<NavEvent>("nav_event", &self.nav_event, event);
         callbacks.invoke_table_row_callbacks::<NodeFacing>("node_facing", &self.node_facing, event);
         callbacks.invoke_table_row_callbacks::<NpcBrain>("npc_brain", &self.npc_brain, event);
+        callbacks.invoke_table_row_callbacks::<NpcState>("npc_state", &self.npc_state, event);
         callbacks.invoke_table_row_callbacks::<Peasant>("peasant", &self.peasant, event);
         callbacks.invoke_table_row_callbacks::<PetComponent>(
             "pet_component",
@@ -2005,6 +2067,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         nav_event_table::register_table(client_cache);
         node_facing_table::register_table(client_cache);
         npc_brain_table::register_table(client_cache);
+        npc_state_table::register_table(client_cache);
         peasant_table::register_table(client_cache);
         pet_component_table::register_table(client_cache);
         player_table::register_table(client_cache);
@@ -2033,6 +2096,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "nav_event",
         "node_facing",
         "npc_brain",
+        "npc_state",
         "peasant",
         "pet_component",
         "player",

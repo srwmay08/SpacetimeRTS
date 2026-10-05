@@ -46,7 +46,13 @@ pub trait spawn_template_blueprint {
         origin_x: f32,
         origin_z: f32,
     ) -> __sdk::Result<()> {
-        self.spawn_template_blueprint_then(template_name, faction_name, origin_x, origin_z, |_, _| {})
+        self.spawn_template_blueprint_then(
+            template_name,
+            faction_name,
+            origin_x,
+            origin_z,
+            |_, _| {},
+        )
     }
 
     /// Request that the remote module invoke the reducer `spawn_template_blueprint` to run as soon as possible,
@@ -80,15 +86,14 @@ impl spawn_template_blueprint for super::RemoteReducers {
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(
-                SpawnTemplateBlueprintArgs {
-                    template_name,
-                    faction_name,
-                    origin_x,
-                    origin_z,
-                },
-                callback,
-            )
+        self.imp.invoke_reducer_with_callback(
+            SpawnTemplateBlueprintArgs {
+                template_name,
+                faction_name,
+                origin_x,
+                origin_z,
+            },
+            callback,
+        )
     }
 }

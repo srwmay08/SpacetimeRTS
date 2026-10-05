@@ -46,7 +46,13 @@ pub trait admin_spawn_template_instant {
         origin_x: f32,
         origin_z: f32,
     ) -> __sdk::Result<()> {
-        self.admin_spawn_template_instant_then(template_name, faction_name, origin_x, origin_z, |_, _| {})
+        self.admin_spawn_template_instant_then(
+            template_name,
+            faction_name,
+            origin_x,
+            origin_z,
+            |_, _| {},
+        )
     }
 
     /// Request that the remote module invoke the reducer `admin_spawn_template_instant` to run as soon as possible,
@@ -80,15 +86,14 @@ impl admin_spawn_template_instant for super::RemoteReducers {
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(
-                AdminSpawnTemplateInstantArgs {
-                    template_name,
-                    faction_name,
-                    origin_x,
-                    origin_z,
-                },
-                callback,
-            )
+        self.imp.invoke_reducer_with_callback(
+            AdminSpawnTemplateInstantArgs {
+                template_name,
+                faction_name,
+                origin_x,
+                origin_z,
+            },
+            callback,
+        )
     }
 }
