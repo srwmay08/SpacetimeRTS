@@ -12,19 +12,55 @@
 // ----------------------------------------------------------------------------
 
 use bevy::prelude::*;
-use crate::voxel_mesh::{MicroVoxelGrid, Prng};
+use crate::voxel_mesh::Prng;
 use crate::trees::LowPolyMeshBuilder;
 
-pub fn create_voxel_rock_mesh() -> Mesh {
-    let mut grid = MicroVoxelGrid::new(0.045);
-    let slate = [0.35, 0.35, 0.38, 1.0];
-    let granite_mid = [0.50, 0.50, 0.53, 1.0];
-    let highlight = [0.75, 0.75, 0.78, 1.0];
+/// Procedural low-poly granite boulder matching the BlendSwap #9440 geometric aesthetic.
+/// Employs multi-lobe faceted polyhedra with chiseled planar facets, weathered quartz highlights,
+/// and natural grounding geometry (~360 vertices).
+pub fn create_lowpoly_rock_mesh(seed: u64) -> Mesh {
+    let mut rng = Prng::new(seed);
+    let mut builder = LowPolyMeshBuilder::new();
 
-    grid.fill_sphere(0, 10, 0, 17.0, slate);
-    grid.fill_sphere(0, 15, 0, 13.0, granite_mid);
-    grid.fill_sphere(-3, 20, -3, 8.0, highlight);
-    grid.build_mesh()
+    // Natural geological granite color palette:
+    // Dark slate shadow base, mid-tone granite body, feldspar/quartz crest highlight
+    let slate_base = [0.38, 0.39, 0.42, 1.0];
+    let granite_mid = [0.50, 0.51, 0.54, 1.0];
+    let highlight = [0.65, 0.66, 0.70, 1.0];
+
+    // 1. Primary Central Boulder Mass (Subdivisions = 1: 80 facets for distinct planar cleavage planes)
+    let rx = rng.range(0.70, 0.85);
+    let ry = rng.range(0.60, 0.75);
+    let rz = rng.range(0.70, 0.85);
+    // Center raised slightly so bottom facets sit submerged/grounded into terrain
+    let center = Vec3::new(0.0, ry * 0.72, 0.0);
+    builder.add_faceted_blob(center, Vec3::new(rx, ry, rz), granite_mid, 1, &mut rng, 0.20);
+
+    // 2. Secondary Flank Crag (Subdivisions = 0: 20 broader planar facets for an asymmetric jutting shelf)
+    let flank_ang = rng.range(0.0, std::f32::consts::TAU);
+    let flank_dist = rng.range(0.38, 0.52);
+    let flank_pos = Vec3::new(flank_ang.cos() * flank_dist, ry * 0.45, flank_ang.sin() * flank_dist);
+    let frx = rng.range(0.40, 0.52);
+    let fry = rng.range(0.32, 0.42);
+    let frz = rng.range(0.40, 0.52);
+    builder.add_faceted_blob(flank_pos, Vec3::new(frx, fry, frz), slate_base, 0, &mut rng, 0.22);
+
+    // 3. Tertiary Weathered Ridge / Crown Crest (Subdivisions = 0: 20 facets on the upper crest)
+    let crest_pos = Vec3::new(
+        rng.range(-0.16, 0.16),
+        ry * 0.95 + rng.range(0.05, 0.12),
+        rng.range(-0.16, 0.16),
+    );
+    let crx = rng.range(0.32, 0.44);
+    let cry = rng.range(0.24, 0.34);
+    let crz = rng.range(0.32, 0.44);
+    builder.add_faceted_blob(crest_pos, Vec3::new(crx, cry, crz), highlight, 0, &mut rng, 0.18);
+
+    builder.build()
+}
+
+pub fn create_voxel_rock_mesh() -> Mesh {
+    create_lowpoly_rock_mesh(1337)
 }
 
 /// Procedural low-poly faceted berry bush matching the BlendSwap #9440 geometric tree style.
@@ -340,7 +376,30 @@ mod tests {
     }
 
     #[test]
+    fn test_lowpoly_rock_mesh() {
+        let rock = create_lowpoly_rock_mesh(1337);
+        assert!(rock.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert!(rock.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
+        assert!(rock.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+        assert!(rock.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
+        assert!(rock.indices().is_some());
+
+        let vert_count = rock.count_vertices();
+        assert!(vert_count >= 150, "Rock should have faceted detail: {vert_count}");
+        assert!(vert_count <= 800, "Rock exceeds low-poly budget: {vert_count}");
+
+        let r1 = create_lowpoly_rock_mesh(1111);
+        let r2 = create_lowpoly_rock_mesh(2222);
+        let pos1 = r1.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
+        let pos2 = r2.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
+        assert_ne!(pos1[0], pos2[0], "Different seeds should produce varied rock geometry");
+    }
+
+    #[test]
     fn test_voxel_forwarders_compatibility() {
+        let rock = create_voxel_rock_mesh();
+        assert!(rock.count_vertices() >= 150);
+
         let bush = create_voxel_bush_mesh();
         assert!(bush.count_vertices() >= 100);
 

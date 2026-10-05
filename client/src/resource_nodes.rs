@@ -27,15 +27,41 @@ use crate::components::*;
 use crate::core::GameLayer;
 use crate::trees::{TreeMeshCache, create_lowpoly_fallen_log_mesh};
 use crate::props::{
-    create_voxel_rock_mesh, create_lowpoly_bush_foliage_mesh, create_lowpoly_bush_berries_mesh,
+    create_lowpoly_rock_mesh, create_lowpoly_bush_foliage_mesh, create_lowpoly_bush_berries_mesh,
     create_lowpoly_branch_mesh, create_lowpoly_flint_mesh, create_lowpoly_stone_mesh,
 };
+
+/// Near distance threshold (m) within which trees and foliage cast directional shadows (cascades 0 & 1).
+pub const TREE_SHADOW_NEAR_DIST: f32 = 56.0;
+pub const TREE_SHADOW_NEAR_DIST_SQ: f32 = TREE_SHADOW_NEAR_DIST * TREE_SHADOW_NEAR_DIST; // 3,136 m^2
+
+/// Far distance threshold (m) beyond which tree and foliage shadows are culled via `NotShadowCaster`.
+pub const TREE_SHADOW_FAR_DIST: f32 = 64.0;
+pub const TREE_SHADOW_FAR_DIST_SQ: f32 = TREE_SHADOW_FAR_DIST * TREE_SHADOW_FAR_DIST; // 4,096 m^2
+
+/// Identifies whether a resource node is a tree species or bush foliage eligible for distance shadow culling.
+#[inline]
+pub fn is_tree_or_bush_type(node_type: &str) -> bool {
+    let clean = node_type.trim();
+    clean == "Bush"
+        || clean == "Tree"
+        || clean == "Oak"
+        || clean == "Pine"
+        || clean == "Dead"
+        || clean == "Round"
+        || clean.starts_with("Tree")
+        || clean.ends_with(":Oak")
+        || clean.ends_with(":Pine")
+        || clean.ends_with(":Dead")
+        || clean.ends_with(":Round")
+}
 
 /// Cached GPU mesh handles for harvestable resource nodes and environment clutter.
 pub struct CachedResourceMeshes {
     pub tree_cache: TreeMeshCache,
     pub fallen_log: Handle<Mesh>,
     pub rock: Handle<Mesh>,
+    pub rock_variants: Vec<Handle<Mesh>>,
     #[allow(dead_code)] pub bush: Handle<Mesh>,
     pub bush_variants: Vec<Handle<Mesh>>,
     pub bush_foliage_variants: Vec<Handle<Mesh>>,
@@ -49,6 +75,14 @@ impl CachedResourceMeshes {
     pub fn new(meshes: &mut Assets<Mesh>) -> Self {
         let tree_cache = TreeMeshCache::new(meshes);
         let fallen_log = meshes.add(create_lowpoly_fallen_log_mesh(5050));
+
+        let rock_variants = vec![
+            meshes.add(create_lowpoly_rock_mesh(1337)),
+            meshes.add(create_lowpoly_rock_mesh(2468)),
+            meshes.add(create_lowpoly_rock_mesh(3579)),
+            meshes.add(create_lowpoly_rock_mesh(4680)),
+        ];
+        let rock = rock_variants[0].clone();
 
         let bush_foliage_variants = vec![
             meshes.add(create_lowpoly_bush_foliage_mesh(1337)),
@@ -68,7 +102,8 @@ impl CachedResourceMeshes {
         Self {
             tree_cache,
             fallen_log,
-            rock: meshes.add(create_voxel_rock_mesh()),
+            rock,
+            rock_variants,
             bush,
             bush_variants,
             bush_foliage_variants,
@@ -85,7 +120,7 @@ pub fn sync_resource_nodes(
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
-    node_query: Query<(Entity, &ResourceNodeItem, &BevyTransform)>, 
+    node_query: Query<(Entity, &ResourceNodeItem, &BevyTransform, Has<NotShadowCaster>)>, 
     player_query: Query<&BevyTransform, With<PlayerBody>>,
     conn: Res<SpacetimeConnection>,
     tree_mats: Option<Res<crate::tree_colors::TreeMaterialHandles>>,
@@ -127,7 +162,7 @@ pub fn sync_resource_nodes(
 
     local_nodes.clear();
 
-    for (entity, node_item, transform) in node_query.iter() {
+    for (entity, node_item, transform, has_not_shadow) in node_query.iter() {
         let origin = transform.translation;
         let dist_sq = (origin.x - player_pos.x).powi(2) + (origin.z - player_pos.z).powi(2);
 
@@ -231,6 +266,19 @@ pub fn sync_resource_nodes(
             commands.entity(entity).despawn_recursive();
         } else {
             local_nodes.insert(node_item.node_id);
+
+            // Dynamic shadow caster distance culling with 8m hysteresis (56m near / 64m far):
+            // Trees and bushes beyond 64m are stripped of shadow casting to eliminate thousands
+            // of redundant draw calls from cascaded shadow map passes.
+            // When moving closer (<56m), shadow casting is restored.
+            // Small ground clutter (Branch, Flint, LooseStone) permanently retains NotShadowCaster.
+            if is_tree_or_bush_type(&node_item.node_type) {
+                if !has_not_shadow && dist_sq > TREE_SHADOW_FAR_DIST_SQ {
+                    commands.entity(entity).insert(NotShadowCaster);
+                } else if has_not_shadow && dist_sq < TREE_SHADOW_NEAR_DIST_SQ {
+                    commands.entity(entity).remove::<NotShadowCaster>();
+                }
+            }
         }
     }
 
@@ -284,7 +332,7 @@ pub fn sync_resource_nodes(
                 None,
             ),
             "Rock" => (
-                cache.rock.clone(),
+                cache.rock_variants[(node.node_id % 4) as usize].clone(),
                 Collider::cuboid(1.5, 1.4, 1.4),
                 0.0,
                 None,
@@ -336,7 +384,7 @@ pub fn sync_resource_nodes(
             node_mat.clone()
         };
 
-        let (tree_rotation, tree_scale) = if tree_comp_opt.is_some() {
+        let (tree_rotation, tree_scale) = if tree_comp_opt.is_some() || clean_type == "Rock" {
             // Stable deterministic pseudo-random hash based on node_id
             let hash1 = ((node.node_id.wrapping_mul(2654435761) ^ (node.node_id >> 16)) % 10000) as f32 / 10000.0;
             let hash2 = (((node.node_id.wrapping_mul(1664525) + 1013904223) ^ (node.node_id >> 11)) % 10000) as f32 / 10000.0;
@@ -344,9 +392,15 @@ pub fn sync_resource_nodes(
             // Randomized degree of rotation around vertical axis (0 to 360 degrees)
             let yaw = hash1 * std::f32::consts::TAU;
 
-            // Randomized height range: up to 20% taller or shorter than default sizes (0.80 to 1.20)
-            let height_var = 0.80 + (hash2 * 0.40);
-            let width_var = 0.90 + (hash1 * 0.20);
+            let (width_var, height_var) = if clean_type == "Rock" {
+                let h = 0.85 + (hash2 * 0.30);
+                let w = 0.90 + (hash1 * 0.20);
+                (w, h)
+            } else {
+                let h = 0.80 + (hash2 * 0.40);
+                let w = 0.90 + (hash1 * 0.20);
+                (w, h)
+            };
 
             (Quat::from_rotation_y(yaw), Vec3::new(width_var, height_var, width_var))
         } else {
@@ -399,6 +453,9 @@ pub fn sync_resource_nodes(
         // Performance Optimization: Exclude small ground clutter (twigs, stones, flint)
         // from directional cascaded shadow passes to prevent shadow rasterization bottlenecking.
         if matches!(clean_type, "Branch" | "Flint" | "LooseStone") {
+            entity_cmd.insert(NotShadowCaster);
+        } else if is_tree_or_bush_type(clean_type) && dist_sq > TREE_SHADOW_NEAR_DIST_SQ {
+            // Cull distant tree and bush shadows at spawn time (>56m)
             entity_cmd.insert(NotShadowCaster);
         }
 
@@ -510,10 +567,43 @@ mod tests {
         assert_eq!(cache.bush_variants.len(), 4);
         assert_eq!(cache.bush_foliage_variants.len(), 4);
         assert_eq!(cache.bush_berries_variants.len(), 4);
+        assert_eq!(cache.rock_variants.len(), 4);
+        for rock_handle in &cache.rock_variants {
+            assert!(meshes.get(rock_handle).is_some());
+        }
         assert!(meshes.get(&cache.fallen_log).is_some());
         assert!(meshes.get(&cache.rock).is_some());
         assert!(meshes.get(&cache.branch).is_some());
         assert!(meshes.get(&cache.flint).is_some());
         assert!(meshes.get(&cache.stone).is_some());
+    }
+
+    #[test]
+    fn test_is_tree_or_bush_type_classification() {
+        assert!(is_tree_or_bush_type("Tree"));
+        assert!(is_tree_or_bush_type("Tree:Pine"));
+        assert!(is_tree_or_bush_type("Tree:Oak"));
+        assert!(is_tree_or_bush_type("Tree:Dead"));
+        assert!(is_tree_or_bush_type("Tree:Round"));
+        assert!(is_tree_or_bush_type("Pine"));
+        assert!(is_tree_or_bush_type("Oak"));
+        assert!(is_tree_or_bush_type("Dead"));
+        assert!(is_tree_or_bush_type("Round"));
+        assert!(is_tree_or_bush_type("Bush"));
+
+        // Ground clutter and minerals must NOT be classified as tree/bush
+        assert!(!is_tree_or_bush_type("Branch"));
+        assert!(!is_tree_or_bush_type("Flint"));
+        assert!(!is_tree_or_bush_type("LooseStone"));
+        assert!(!is_tree_or_bush_type("Rock"));
+    }
+
+    #[test]
+    fn test_tree_shadow_distance_thresholds() {
+        assert_eq!(TREE_SHADOW_NEAR_DIST, 56.0);
+        assert_eq!(TREE_SHADOW_FAR_DIST, 64.0);
+        assert!(TREE_SHADOW_NEAR_DIST < TREE_SHADOW_FAR_DIST);
+        assert_eq!(TREE_SHADOW_NEAR_DIST_SQ, 3136.0);
+        assert_eq!(TREE_SHADOW_FAR_DIST_SQ, 4096.0);
     }
 }

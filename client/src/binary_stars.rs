@@ -19,7 +19,7 @@
 //    - Real-time orbital progression system advancing planetary diurnal rotation and binary orbit.
 //
 // 2. SHADOW MAP & CASCADED SHADOW MAPPING (CSM) ARCHITECTURE:
-//    - Global Shadow Atlas Memory: Configures `DirectionalLightShadowMap { size: 4096 }`
+//    - Global Shadow Atlas Memory: Configures `DirectionalLightShadowMap { size: 2048 }`
 //      to prevent cascade texel starvation across multiple active lights.
 //    - Asymmetric Cascade Optimization (`CascadeShadowConfigBuilder`):
 //      * Primary Star (Star A): Higher fidelity tier:
@@ -535,8 +535,8 @@ pub struct BinaryStarSystemPlugin;
 
 impl Plugin for BinaryStarSystemPlugin {
     fn build(&self, app: &mut App) {
-        // Allocate high-capacity shadow atlas memory to avoid cascade starvation across dual lights
-        app.insert_resource(DirectionalLightShadowMap { size: 4096 })
+        // Allocate optimized shadow atlas memory (2048) balanced for high performance
+        app.insert_resource(DirectionalLightShadowMap { size: 2048 })
             .init_resource::<BinaryOrbitConfig>()
             .register_type::<BinaryOrbitConfig>()
             .register_type::<PrimaryStar>()
