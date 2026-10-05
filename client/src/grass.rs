@@ -2,7 +2,7 @@
 // File: client/src/grass.rs
 // ============================================================================
 // ----------------------------------------------------------------------------
-// PROCEDURAL CHUNK-BATCHED LOW-POLY GRASS SYSTEM
+// PROCEDURAL CHUNK-BATCHED LOW-POLY GRASS SYSTEM WITH TWO-RING DISTANCE LOD
 // ----------------------------------------------------------------------------
 // Architectural Note:
 // Implements high-performance, stylized wind-blown grass matching the BlendSwap
@@ -11,13 +11,21 @@
 //
 // Key Optimization & Visual Pillars:
 // 1. Zero Individual ECS Blade Entities: Each chunk holds a single unified mesh.
-// 2. GPU Vertex Wind Waves: Tips sway in a dual-sine wave wind gust via WGSL
+// 2. Fanned 4-Blade Star Clumps: Each tuft fans 4 geometric blades outward into
+//    distinct quadrants with varied organic curvature and 0.13m blade width,
+//    multiplying visual meadow coverage by ~6x over narrow needle blades.
+// 3. Two-Ring Distance LOD (High: <=32m, Low: 32m..48m):
+//    - Inner Tactical Ring (<=32m): High density (200 tufts / chunk = 800 blades)
+//    - Outer Perimeter Ring (32m..48m): Low density (70 tufts / chunk = 280 blades)
+//    - Beyond 48m: Zero geometry; voxel terrain green texture provides horizon tint.
+//    - Hysteresis Deadband (32m..38m): Prevents ping-ponging across chunk boundaries.
+//    - Deterministic PRNG alignment guarantees that the first 70 tufts occupy
+//      identical coordinates in both LODs, preventing visual pop during transitions.
+// 4. GPU Vertex Wind Waves: Tips sway in a dual-sine wave wind gust via WGSL
 //    vertex displacement shader without requiring per-vertex CPU buffer uploads.
-// 3. Slope & Elevation Gating: Grass strictly populates fertile meadow facets
-//    (normal.y >= 0.72, 2.5m <= y <= 15.5m), avoiding cliffs, riverbeds, and snow.
-// 4. Zero Shadow Overhead: Equipped with `NotShadowCaster` to protect the 5
+// 5. Zero Shadow Overhead: Equipped with `NotShadowCaster` to protect the 5
 //    cascaded shadow map passes from geometry explosion.
-// 5. Automatic Chunk Lifecycle: Attached to terrain chunk entities; despawns
+// 6. Automatic Chunk Lifecycle: Attached to terrain chunk entities; despawns
 //    automatically with terrain chunks via recursive hierarchy despawning.
 // ----------------------------------------------------------------------------
 
@@ -42,15 +50,19 @@ use crate::voxel_mesh::Prng;
 pub struct GrassConfig {
     /// Master toggle for the procedural grass system.
     pub enabled: bool,
-    /// Number of grass blade tufts generated per 16m terrain chunk (default: 80).
+    /// Number of grass blade tufts generated per 16m chunk in the inner tactical LOD ring (default: 200).
     pub tufts_per_chunk: usize,
+    /// Number of grass blade tufts generated per 16m chunk in the outer perimeter LOD ring (default: 70).
+    pub outer_tufts_per_chunk: usize,
+    /// Distance in 16m chunk units for the high-density inner tactical LOD ring (default: 2 chunks = 32m).
+    pub inner_lod_distance_chunks: i32,
     /// Maximum distance from the player in 16m chunk units where grass spawns (default: 3 chunks = 48m).
     pub max_distance_chunks: i32,
     /// Minimum height of an individual grass blade in meters.
     pub blade_height_min: f32,
     /// Maximum height of an individual grass blade in meters.
     pub blade_height_max: f32,
-    /// Width of grass blade base in meters.
+    /// Width of grass blade base in meters (default: 0.13m).
     pub blade_width: f32,
     /// Wind gust propagation speed.
     pub wind_speed: f32,
@@ -64,11 +76,13 @@ impl Default for GrassConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            tufts_per_chunk: 80,
-            max_distance_chunks: 3, // 48m radius (covers immediate tactical view)
+            tufts_per_chunk: 200,      // High LOD inner ring (was 80)
+            outer_tufts_per_chunk: 70, // Low LOD outer perimeter ring
+            inner_lod_distance_chunks: 2, // 32m radius (tactical zone)
+            max_distance_chunks: 3,       // 48m radius (edge horizon)
             blade_height_min: 0.45,
-            blade_height_max: 0.70,
-            blade_width: 0.08,
+            blade_height_max: 0.72,
+            blade_width: 0.13,         // Widened from 0.08 to 0.13 for bold stylized silhouette
             wind_speed: 2.2,
             wind_strength: 0.14,
             wind_frequency: 0.30,
@@ -99,15 +113,31 @@ pub type GrassMaterial = ExtendedMaterial<StandardMaterial, GrassExtension>;
 pub struct GrassMaterialHandle(pub Handle<GrassMaterial>);
 
 // ----------------------------------------------------------------------------
-// 2. COMPONENT TAGS
+// 2. COMPONENT TAGS & LOD STATES
 // ----------------------------------------------------------------------------
 
-/// Tag component inserted on terrain chunk entities that currently have grass children spawned.
-#[derive(Component, Debug, Default)]
-pub struct ChunkHasGrass;
+/// Level of detail for chunk-batched grass geometry.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
+pub enum GrassLod {
+    /// High density (200 tufts, 4 blades/tuft = 800 blades) for chunks near the player (<=32m).
+    High,
+    /// Reduced density (70 tufts, 4 blades/tuft = 280 blades) for perimeter chunks (32m..48m).
+    Low,
+}
+
+impl Default for GrassLod {
+    fn default() -> Self {
+        Self::High
+    }
+}
+
+/// Tag component inserted on terrain chunk entities that currently have grass children spawned,
+/// storing the current active LOD level of the grass mesh.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Reflect, Default)]
+pub struct ChunkHasGrass(pub GrassLod);
 
 /// Tag component marking the grass mesh entity spawned as a child of a terrain chunk.
-#[derive(Component, Debug, Default)]
+#[derive(Component, Debug, Default, Reflect)]
 pub struct GrassChildMarker;
 
 // ----------------------------------------------------------------------------
@@ -116,7 +146,12 @@ pub struct GrassChildMarker;
 
 /// Generates a unified low-poly faceted grass tuft mesh for a 16m chunk at `(cx, cz)`.
 /// Returns `None` if the chunk contains no valid meadow terrain (e.g. deep water, cliff, or snow).
-pub fn generate_chunk_grass_mesh(cx: i32, cz: i32, config: &GrassConfig) -> Option<Mesh> {
+pub fn generate_chunk_grass_mesh(
+    cx: i32,
+    cz: i32,
+    config: &GrassConfig,
+    lod: GrassLod,
+) -> Option<Mesh> {
     let chunk_world_span = 16.0f32;
     let chunk_base_x = cx as f32 * chunk_world_span;
     let chunk_base_z = cz as f32 * chunk_world_span;
@@ -125,10 +160,15 @@ pub fn generate_chunk_grass_mesh(cx: i32, cz: i32, config: &GrassConfig) -> Opti
     let seed = ((cx as i64 * 73856093) ^ (cz as i64 * 19349663) ^ 0x9E3779B97F4A7C15u64 as i64) as u64;
     let mut rng = Prng::new(seed);
 
-    let max_blades_per_tuft = 3;
+    let target_tufts = match lod {
+        GrassLod::High => config.tufts_per_chunk,
+        GrassLod::Low => config.outer_tufts_per_chunk,
+    };
+
+    let blade_count = 4;
     let est_verts_per_blade = 5;
     let est_indices_per_blade = 9;
-    let est_total_blades = config.tufts_per_chunk * max_blades_per_tuft;
+    let est_total_blades = target_tufts * blade_count;
 
     let mut positions = Vec::with_capacity(est_total_blades * est_verts_per_blade);
     let mut normals = Vec::with_capacity(est_total_blades * est_verts_per_blade);
@@ -136,17 +176,9 @@ pub fn generate_chunk_grass_mesh(cx: i32, cz: i32, config: &GrassConfig) -> Opti
     let mut uvs = Vec::with_capacity(est_total_blades * est_verts_per_blade);
     let mut indices = Vec::with_capacity(est_total_blades * est_indices_per_blade);
 
-    // Natural meadow grass color gradient (ambient occlusion from ground to sky):
-    // Root: Deep jade green / soil contact shadow
-    let root_color = [0.18, 0.42, 0.16, 1.0];
-    // Mid: Fresh vibrant spring meadow green
-    let mid_color = [0.32, 0.68, 0.22, 1.0];
-    // Tip: Sunlit chartreuse / golden lime catching stellar rays
-    let tip_color = [0.46, 0.82, 0.28, 1.0];
-
     let mut tufts_placed = 0;
 
-    for _ in 0..config.tufts_per_chunk {
+    for _ in 0..target_tufts {
         let lx = rng.range(0.4, 15.6);
         let lz = rng.range(0.4, 15.6);
         let world_x = chunk_base_x + lx;
@@ -166,33 +198,65 @@ pub fn generate_chunk_grass_mesh(cx: i32, cz: i32, config: &GrassConfig) -> Opti
             continue;
         }
 
-        // Spawn a multi-blade grass tuft fanning outward around the root point
-        let blade_count = 3;
+        // Subtly vary palette per clump for handcrafted, organic richness
+        let clump_hue_shift = rng.range(-0.02, 0.02);
+        let clump_bright = rng.range(0.92, 1.08);
+
+        // Root: Deep jade green / soil contact shadow
+        let root_color = [
+            (0.18 * clump_bright).clamp(0.0, 1.0),
+            (0.42 * clump_bright + clump_hue_shift).clamp(0.0, 1.0),
+            (0.16 * clump_bright).clamp(0.0, 1.0),
+            1.0,
+        ];
+        // Mid: Fresh vibrant spring meadow green
+        let mid_color = [
+            (0.32 * clump_bright).clamp(0.0, 1.0),
+            (0.68 * clump_bright + clump_hue_shift).clamp(0.0, 1.0),
+            (0.22 * clump_bright).clamp(0.0, 1.0),
+            1.0,
+        ];
+        // Tip: Sunlit chartreuse / golden lime catching stellar rays
+        let tip_color = [
+            (0.46 * clump_bright).clamp(0.0, 1.0),
+            (0.82 * clump_bright + clump_hue_shift).clamp(0.0, 1.0),
+            (0.28 * clump_bright).clamp(0.0, 1.0),
+            1.0,
+        ];
+
         let tuft_base_pos = Vec3::new(lx, world_y, lz);
 
         for b in 0..blade_count {
-            let blade_angle = (b as f32 / blade_count as f32) * PI + rng.range(-0.25, 0.25);
+            // 4 blades fanned across 180 degrees (double-sided rendering gives 360-degree coverage)
+            let base_angle = (b as f32 / blade_count as f32) * PI;
+            let blade_angle = base_angle + rng.range(-0.15, 0.15);
             let h = rng.range(config.blade_height_min, config.blade_height_max);
-            let w = config.blade_width * rng.range(0.85, 1.15);
+            let w = config.blade_width * rng.range(0.88, 1.15);
 
             // Width direction vector perpendicular to blade face
             let u_dir = Vec3::new(blade_angle.cos(), 0.0, blade_angle.sin()) * (w * 0.5);
-            // Lean direction vector fanning blade outward from center
-            let lean_dir = Vec3::new(blade_angle.sin(), 0.0, -blade_angle.cos()) * rng.range(0.08, 0.16);
+
+            // Alternating outward lean creates a natural fanning bowl star
+            let lean_sign = if b % 2 == 0 { 1.0 } else { -1.0 };
+            let outward_radial = Vec3::new(-blade_angle.sin(), 0.0, blade_angle.cos()) * lean_sign;
+
+            // Curvature vectors for mid and tip
+            let mid_lean = outward_radial * rng.range(0.07, 0.13);
+            let tip_lean = outward_radial * rng.range(0.16, 0.28);
 
             // 5-vertex 2-segment tapered blade geometry:
             // V0: Root Left (0% height, 0% wind sway)
             let v0 = tuft_base_pos - u_dir;
             // V1: Root Right (0% height, 0% wind sway)
             let v1 = tuft_base_pos + u_dir;
-            // V2: Mid Left (50% height, 50% wind sway)
-            let v2 = tuft_base_pos - u_dir * 0.65 + lean_dir * 0.4 + Vec3::Y * (h * 0.5);
-            // V3: Mid Right (50% height, 50% wind sway)
-            let v3 = tuft_base_pos + u_dir * 0.65 + lean_dir * 0.4 + Vec3::Y * (h * 0.5);
-            // V4: Blade Tip (100% height, 100% wind sway)
-            let v4 = tuft_base_pos + lean_dir + Vec3::Y * h;
+            // V2: Mid Left (50% height, 50% wind sway, gentle lean curve)
+            let v2 = tuft_base_pos - u_dir * 0.70 + mid_lean + Vec3::Y * (h * 0.5);
+            // V3: Mid Right (50% height, 50% wind sway, gentle lean curve)
+            let v3 = tuft_base_pos + u_dir * 0.70 + mid_lean + Vec3::Y * (h * 0.5);
+            // V4: Blade Tip (100% height, 100% wind sway, full tip lean)
+            let v4 = tuft_base_pos + tip_lean + Vec3::Y * h;
 
-            // Flat face normal for lower segment
+            // Flat face normal for lower quad
             let e1 = v1 - v0;
             let e2 = v2 - v0;
             let n_lower = e1.cross(e2).normalize_or_zero();
@@ -309,8 +373,11 @@ pub fn update_grass_wind(
     }
 }
 
-/// Synchronizes grass meshes on near terrain chunks around the player.
-/// Spawns grass within 48m (3 chunks) and unloads beyond 64m (4 chunks) with hysteresis.
+/// Synchronizes grass meshes on near terrain chunks around the player using two-ring distance LOD.
+/// - Inner ring (<=32m): High LOD (200 tufts/chunk)
+/// - Outer ring (32m..48m): Low LOD (70 tufts/chunk)
+/// - Unload radius (>64m): Despawn
+/// - LOD hysteresis (32m..38m): Prevents ping-ponging during player traversal
 pub fn sync_chunk_grass(
     mut commands: Commands,
     time: Res<Time>,
@@ -319,16 +386,16 @@ pub fn sync_chunk_grass(
     mut meshes: ResMut<Assets<Mesh>>,
     player_query: Query<&Transform, With<PlayerBody>>,
     unspawned_chunks: Query<(Entity, &VoxelChunkMarker, &Transform), (With<TerrainChunkVisual>, Without<ChunkHasGrass>)>,
-    spawned_chunks: Query<(Entity, &Transform, &Children), (With<TerrainChunkVisual>, With<ChunkHasGrass>)>,
-    grass_children: Query<Entity, With<GrassChildMarker>>,
+    spawned_chunks: Query<(Entity, &VoxelChunkMarker, &Transform, &ChunkHasGrass, &Children), With<TerrainChunkVisual>>,
+    grass_children: Query<(Entity, &Handle<Mesh>), With<GrassChildMarker>>,
     mut scan_timer: Local<Option<Timer>>,
 ) {
     if !config.enabled {
         // If grass is disabled, remove all grass children and clear markers
-        for (chunk_entity, _, children) in spawned_chunks.iter() {
+        for (chunk_entity, _, _, _, children) in spawned_chunks.iter() {
             commands.entity(chunk_entity).remove::<ChunkHasGrass>();
             for &child in children.iter() {
-                if grass_children.contains(child) {
+                if grass_children.get(child).is_ok() {
                     commands.entity(child).despawn_recursive();
                 }
             }
@@ -347,24 +414,94 @@ pub fn sync_chunk_grass(
     }
 
     let chunk_world_span = 16.0f32;
+    let inner_lod_radius_meters = config.inner_lod_distance_chunks as f32 * chunk_world_span; // 32.0m
+    let inner_lod_radius_sq = inner_lod_radius_meters * inner_lod_radius_meters; // 1024.0
+
+    // Hysteresis deadband for LOD switching:
+    // Low -> High upgrades when within 32m.
+    // High -> Low downgrades only when pushed past 38m (6m hysteresis buffer).
+    let lod_downgrade_radius_meters = inner_lod_radius_meters + 6.0; // 38.0m
+    let lod_downgrade_radius_sq = lod_downgrade_radius_meters * lod_downgrade_radius_meters;
+
     let spawn_radius_meters = config.max_distance_chunks as f32 * chunk_world_span; // 48.0m
-    let spawn_radius_sq = spawn_radius_meters * spawn_radius_meters;
+    let spawn_radius_sq = spawn_radius_meters * spawn_radius_meters; // 2304.0
 
-    // 16m hysteresis buffer to prevent boundary oscillation
+    // 16m hysteresis buffer to prevent boundary oscillation for unloading
     let unload_radius_meters = spawn_radius_meters + chunk_world_span; // 64.0m
-    let unload_radius_sq = unload_radius_meters * unload_radius_meters;
+    let unload_radius_sq = unload_radius_meters * unload_radius_meters; // 4096.0
 
-    // 1. Unload grass on distant chunks (>64m)
-    for (chunk_entity, chunk_tf, children) in spawned_chunks.iter() {
+    // 1. Process active spawned chunks: check unloads and LOD upgrades/downgrades
+    for (chunk_entity, marker, chunk_tf, grass_state, children) in spawned_chunks.iter() {
         let chunk_center_x = chunk_tf.translation.x + chunk_world_span * 0.5;
         let chunk_center_z = chunk_tf.translation.z + chunk_world_span * 0.5;
         let dist_sq = (chunk_center_x - p_pos.x).powi(2) + (chunk_center_z - p_pos.z).powi(2);
 
+        // A. Despawn distant chunks beyond unload radius (>64m)
         if dist_sq > unload_radius_sq {
             commands.entity(chunk_entity).remove::<ChunkHasGrass>();
             for &child in children.iter() {
-                if grass_children.contains(child) {
+                if grass_children.get(child).is_ok() {
                     commands.entity(child).despawn_recursive();
+                }
+            }
+            continue;
+        }
+
+        // B. Check two-ring LOD transition with hysteresis
+        let current_lod = grass_state.0;
+        let next_lod = match current_lod {
+            GrassLod::High => {
+                if dist_sq > lod_downgrade_radius_sq {
+                    GrassLod::Low
+                } else {
+                    GrassLod::High
+                }
+            }
+            GrassLod::Low => {
+                if dist_sq <= inner_lod_radius_sq {
+                    GrassLod::High
+                } else {
+                    GrassLod::Low
+                }
+            }
+        };
+
+        if next_lod != current_lod {
+            commands.entity(chunk_entity).insert(ChunkHasGrass(next_lod));
+
+            if let Some(new_mesh) = generate_chunk_grass_mesh(marker.chunk_x, marker.chunk_z, &config, next_lod) {
+                let mut found_child = false;
+                for &child in children.iter() {
+                    if let Ok((child_entity, mesh_handle)) = grass_children.get(child) {
+                        // In-place mesh asset update leverages Bevy's asset change detection
+                        if let Some(mesh_asset) = meshes.get_mut(mesh_handle) {
+                            *mesh_asset = new_mesh.clone();
+                            found_child = true;
+                            break;
+                        } else {
+                            let new_handle = meshes.add(new_mesh.clone());
+                            commands.entity(child_entity).insert(new_handle);
+                            found_child = true;
+                            break;
+                        }
+                    }
+                }
+                if !found_child {
+                    let new_handle = meshes.add(new_mesh);
+                    commands.entity(chunk_entity).with_children(|parent| {
+                        parent.spawn((
+                            MaterialMeshBundle {
+                                mesh: new_handle,
+                                material: mat_handle.0.clone(),
+                                transform: Transform::IDENTITY,
+                                ..default()
+                            },
+                            GrassChildMarker,
+                            NotShadowCaster,
+                            RenderLayers::layer(0),
+                            Name::new("Chunk Low-Poly Grass"),
+                        ));
+                    });
                 }
             }
         }
@@ -377,9 +514,15 @@ pub fn sync_chunk_grass(
         let dist_sq = (chunk_center_x - p_pos.x).powi(2) + (chunk_center_z - p_pos.z).powi(2);
 
         if dist_sq <= spawn_radius_sq {
-            commands.entity(chunk_entity).insert(ChunkHasGrass);
+            let initial_lod = if dist_sq <= inner_lod_radius_sq {
+                GrassLod::High
+            } else {
+                GrassLod::Low
+            };
 
-            if let Some(grass_mesh) = generate_chunk_grass_mesh(marker.chunk_x, marker.chunk_z, &config) {
+            commands.entity(chunk_entity).insert(ChunkHasGrass(initial_lod));
+
+            if let Some(grass_mesh) = generate_chunk_grass_mesh(marker.chunk_x, marker.chunk_z, &config, initial_lod) {
                 let mesh_handle = meshes.add(grass_mesh);
                 commands.entity(chunk_entity).with_children(|parent| {
                     parent.spawn((
@@ -411,6 +554,10 @@ pub struct GrassPlugin;
 impl Plugin for GrassPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GrassConfig>()
+            .register_type::<GrassConfig>()
+            .register_type::<GrassLod>()
+            .register_type::<ChunkHasGrass>()
+            .register_type::<GrassChildMarker>()
             .add_plugins(MaterialPlugin::<GrassMaterial> {
                 prepass_enabled: false,
                 shadows_enabled: false,
@@ -433,10 +580,13 @@ mod tests {
     fn test_grass_config_defaults_and_invariants() {
         let config = GrassConfig::default();
         assert!(config.enabled);
-        assert!(config.tufts_per_chunk >= 40 && config.tufts_per_chunk <= 200);
+        assert!(config.tufts_per_chunk >= 100 && config.tufts_per_chunk <= 400);
+        assert!(config.outer_tufts_per_chunk >= 30 && config.outer_tufts_per_chunk <= 150);
+        assert!(config.inner_lod_distance_chunks >= 1 && config.inner_lod_distance_chunks < config.max_distance_chunks);
         assert!(config.max_distance_chunks >= 2 && config.max_distance_chunks <= 6);
         assert!(config.blade_height_min > 0.0);
         assert!(config.blade_height_min < config.blade_height_max);
+        assert!(config.blade_width >= 0.10 && config.blade_width <= 0.20);
         assert!(config.wind_speed > 0.0);
         assert!(config.wind_strength > 0.0);
     }
@@ -461,21 +611,22 @@ mod tests {
     #[test]
     fn test_generate_chunk_grass_mesh_attributes_and_budget() {
         let config = GrassConfig::default();
-        // Chunk (0, 0) is central meadow terrain
-        if let Some(mesh) = generate_chunk_grass_mesh(0, 0, &config) {
-            assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
-            assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
-            assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
-            assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
-            assert!(mesh.indices().is_some());
+        // Test High LOD
+        if let Some(mesh_high) = generate_chunk_grass_mesh(0, 0, &config, GrassLod::High) {
+            assert!(mesh_high.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+            assert!(mesh_high.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
+            assert!(mesh_high.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
+            assert!(mesh_high.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
+            assert!(mesh_high.indices().is_some());
 
-            let vert_count = mesh.count_vertices();
-            assert!(vert_count >= 100, "Grass mesh should contain multiple blades: {vert_count}");
-            assert!(vert_count <= 5000, "Grass mesh exceeds low-poly chunk budget: {vert_count}");
+            let vert_count_high = mesh_high.count_vertices();
+            // 200 tufts * 4 blades * 5 verts = 4000 verts max
+            assert!(vert_count_high >= 400, "High LOD grass mesh should contain multiple blades: {vert_count_high}");
+            assert!(vert_count_high <= 6000, "High LOD grass mesh exceeds low-poly chunk budget: {vert_count_high}");
 
             // Verify UV.y height factor bounds: values must be in [0.0, 1.0]
             use bevy::render::mesh::VertexAttributeValues;
-            if let Some(VertexAttributeValues::Float32x2(ref uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
+            if let Some(VertexAttributeValues::Float32x2(ref uvs)) = mesh_high.attribute(Mesh::ATTRIBUTE_UV_0) {
                 for uv in uvs {
                     assert!(uv[1] >= 0.0 && uv[1] <= 1.0, "UV.y height factor must be in [0.0, 1.0]");
                 }
@@ -483,19 +634,45 @@ mod tests {
                 panic!("Grass mesh must have Float32x2 UV coordinates");
             }
         }
+
+        // Test Low LOD
+        if let Some(mesh_low) = generate_chunk_grass_mesh(0, 0, &config, GrassLod::Low) {
+            let vert_count_low = mesh_low.count_vertices();
+            // 70 tufts * 4 blades * 5 verts = 1400 verts max
+            assert!(vert_count_low >= 100, "Low LOD grass mesh should contain multiple blades: {vert_count_low}");
+            assert!(vert_count_low <= 2500, "Low LOD grass mesh exceeds perimeter budget: {vert_count_low}");
+        }
     }
 
     #[test]
     fn test_chunk_grass_seed_determinism() {
         let config = GrassConfig::default();
-        let m1 = generate_chunk_grass_mesh(2, 3, &config);
-        let m2 = generate_chunk_grass_mesh(2, 3, &config);
+        let m1 = generate_chunk_grass_mesh(2, 3, &config, GrassLod::High);
+        let m2 = generate_chunk_grass_mesh(2, 3, &config, GrassLod::High);
 
         if let (Some(mesh1), Some(mesh2)) = (m1, m2) {
             let pos1 = mesh1.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
             let pos2 = mesh2.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
             assert_eq!(pos1.len(), pos2.len(), "Identical coordinates must generate identical vertex counts");
             assert_eq!(pos1[0], pos2[0], "Identical coordinates must generate identical positions");
+        }
+    }
+
+    #[test]
+    fn test_chunk_grass_lod_hierarchy() {
+        let config = GrassConfig::default();
+        let high = generate_chunk_grass_mesh(0, 0, &config, GrassLod::High);
+        let low = generate_chunk_grass_mesh(0, 0, &config, GrassLod::Low);
+
+        if let (Some(mesh_high), Some(mesh_low)) = (high, low) {
+            let verts_high = mesh_high.count_vertices();
+            let verts_low = mesh_low.count_vertices();
+            assert!(verts_high > verts_low, "High LOD must produce strictly more vertices than Low LOD");
+
+            // Verify that the initial vertices of Low LOD match High LOD due to deterministic PRNG sequence
+            let pos_high = mesh_high.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
+            let pos_low = mesh_low.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
+            assert_eq!(pos_high[0], pos_low[0], "First blade root must match across LODs to avoid pop");
         }
     }
 }
