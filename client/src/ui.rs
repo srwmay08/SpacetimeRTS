@@ -8,6 +8,7 @@ use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
 use crate::building::{BuildModeState, ModularPieceType}; 
+use crate::templates::BuildingTemplateType; 
 use crate::module_bindings::player_table::PlayerTableAccess; 
 use crate::module_bindings::inventory_table::InventoryTableAccess; 
 use crate::module_bindings::health_table::HealthTableAccess; 
@@ -26,6 +27,7 @@ use crate::module_bindings::admin_clear_inventory_reducer::admin_clear_inventory
 use crate::module_bindings::admin_spawn_npc_reducer::admin_spawn_npc;
 use crate::module_bindings::admin_detonate_reducer::admin_detonate;
 use crate::module_bindings::admin_kill_all_npcs_reducer::admin_kill_all_npcs;
+use crate::module_bindings::admin_spawn_building_reducer::admin_spawn_building;
 use crate::module_bindings::equipment_loadout_table::EquipmentLoadoutTableAccess;
 use crate::module_bindings::equip_weapon_reducer::equip_weapon;
 use crate::module_bindings::unequip_weapon_reducer::unequip_weapon;
@@ -893,6 +895,8 @@ pub fn setup_ui(mut commands: Commands) {
                     (ModularPieceType::Workbench, "Workbench", "8 Wood"),
                     (ModularPieceType::Campfire, "Campfire", "4 Wood, 4 Stone"),
                     (ModularPieceType::Wall, "Wall", "8 Wood"),
+                    (ModularPieceType::Window, "Window", "8 Wood"),
+                    (ModularPieceType::Door, "Door", "12 Wood"),
                     (ModularPieceType::Floor, "Floor", "12 Wood"),
                     (ModularPieceType::Roof, "Roof", "12 Wood"),
                     (ModularPieceType::Ramp, "Ramp", "16 Wood"),
@@ -923,6 +927,60 @@ pub fn setup_ui(mut commands: Commands) {
                         btn.spawn(TextBundle::from_section(
                             cost,
                             TextStyle { font_size: 10.0, color: Color::srgb(0.7, 0.7, 0.4), ..default() }
+                        ));
+                    });
+                }
+            });
+
+            menu_box.spawn(TextBundle::from_section(
+                "MULTI-STORY TEMPLATES [BLUEPRINT STAMP]",
+                TextStyle { font_size: 16.0, color: Color::srgb(0.9, 0.8, 0.4), ..default() }
+            ));
+
+            menu_box.spawn(NodeBundle {
+                style: Style {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(10.0),
+                    row_gap: Val::Px(10.0),
+                    max_width: Val::Px(450.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                ..default()
+            }).with_children(|tmpl_grid| {
+                let templates = [
+                    (BuildingTemplateType::Watchtower, "Watchtower", "120 Wood"),
+                    (BuildingTemplateType::Palisade, "Palisade Gate", "90 Wood"),
+                    (BuildingTemplateType::Cottage, "Cottage", "70 Wood"),
+                    (BuildingTemplateType::Settlement, "Settlement", "260 Wood"),
+                ];
+
+                for (tmpl_type, name, cost) in templates {
+                    tmpl_grid.spawn((
+                        ButtonBundle {
+                            style: Style {
+                                width: Val::Px(95.0),
+                                height: Val::Px(80.0),
+                                flex_direction: FlexDirection::Column,
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(2.0)),
+                                ..default()
+                            },
+                            border_color: Color::srgb(0.4, 0.35, 0.2).into(),
+                            background_color: Color::srgb(0.22, 0.18, 0.14).into(),
+                            ..default()
+                        },
+                        BuildTemplateButton(tmpl_type),
+                    )).with_children(|btn| {
+                        btn.spawn(TextBundle::from_section(
+                            name,
+                            TextStyle { font_size: 12.0, color: Color::srgb(1.0, 0.95, 0.8), ..default() }
+                        ));
+                        btn.spawn(TextBundle::from_section(
+                            cost,
+                            TextStyle { font_size: 10.0, color: Color::srgb(0.9, 0.75, 0.4), ..default() }
                         ));
                     });
                 }
@@ -1814,6 +1872,22 @@ pub fn handle_console_input(
                     }
                 }
             }
+            "spawnbuilding" | "buildnpc" | "spawnhut" => {
+                if tokens.len() < 2 {
+                    console.logs.push("[Syntax Error] Usage: spawnbuilding <hut|cottage|guardpost> [yaw_steps (0-3)] [x] [z]".into());
+                } else {
+                    let template = tokens[1].to_lowercase();
+                    let yaw_steps = tokens.get(2).and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                    let x = tokens.get(3).and_then(|s| s.parse::<f32>().ok());
+                    let z = tokens.get(4).and_then(|s| s.parse::<f32>().ok());
+
+                    if let Err(e) = conn.db.reducers.admin_spawn_building(template.clone(), yaw_steps, x, z) {
+                        console.logs.push(format!("[Server Error] Spawn building failed: {:?}", e));
+                    } else {
+                        console.logs.push(format!("[Admin] Dispatched NPC building template '{}' (rot={})", template, yaw_steps));
+                    }
+                }
+            }
             "nuke" | "blast" => {
                 let radius = tokens.get(1).and_then(|s| s.parse::<f32>().ok()).unwrap_or(6.0);
                 if let Err(e) = conn.db.reducers.admin_detonate(radius, 600.0) {
@@ -2683,7 +2757,8 @@ pub fn toggle_celestial_hud_hotkey(
 }
 
 pub fn handle_build_menu_selection(
-    mut interaction_query: Query<(&Interaction, &BuildPieceButton, &mut BackgroundColor), Changed<Interaction>>,
+    mut interaction_query: Query<(&Interaction, &BuildPieceButton, &mut BackgroundColor), (Changed<Interaction>, Without<BuildTemplateButton>)>,
+    mut template_query: Query<(&Interaction, &BuildTemplateButton, &mut BackgroundColor), (Changed<Interaction>, Without<BuildPieceButton>)>,
     mut build_state: ResMut<BuildModeState>,
     mut menu_query: Query<&mut Style, With<BuildMenuRoot>>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
@@ -2693,6 +2768,7 @@ pub fn handle_build_menu_selection(
         match *interaction {
             Interaction::Pressed => {
                 build_state.selected_piece = btn.0;
+                build_state.selected_template = None;
                 build_state.is_active = true;
                 if let Ok(mut style) = menu_query.get_single_mut() {
                     style.display = Display::None;
@@ -2709,6 +2785,30 @@ pub fn handle_build_menu_selection(
             }
             Interaction::None => {
                 *bg = Color::srgb(0.18, 0.18, 0.18).into();
+            }
+        }
+    }
+
+    for (interaction, btn, mut bg) in template_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                build_state.selected_template = Some(btn.0);
+                build_state.is_active = true;
+                if let Ok(mut style) = menu_query.get_single_mut() {
+                    style.display = Display::None;
+                }
+                if let Ok(mut window) = window_query.get_single_mut() {
+                    if *camera_mode.get() == CameraMode::FPS {
+                        window.cursor.grab_mode = CursorGrabMode::Locked;
+                        window.cursor.visible = false;
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                *bg = Color::srgb(0.4, 0.32, 0.22).into();
+            }
+            Interaction::None => {
+                *bg = Color::srgb(0.22, 0.18, 0.14).into();
             }
         }
     }
@@ -2799,10 +2899,16 @@ pub fn update_build_ui(
         for (mut vis, mut text) in ui_query.iter_mut() {
             if build_state.is_active {
                 *vis = Visibility::Inherited;
+                let (mode_label, cost_label) = if let Some(tmpl) = build_state.selected_template {
+                    (format!("Template: {}", tmpl.name()), format!("{} Wood", tmpl.wood_cost()))
+                } else {
+                    (format!("Piece: {}", build_state.selected_piece.name()), format!("{} Wood", build_state.selected_piece.wood_cost()))
+                };
                 text.sections[0].value = format!(
-                    "BUILD MODE: ACTIVE | Piece: {} (Cost: {} Wood)\n[R] Next Piece | [Q/E] Rotate | [Right-Click] Catalog | [B] Exit", 
-                    build_state.selected_piece.name(),
-                    build_state.selected_piece.wood_cost()
+                    "BUILD MODE: ACTIVE | Faction: {} | {} (Cost: {})\n[Y] Toggle Template Mode | [R] Cycle | [T] Cycle Faction | [Q/E] Rotate | [Right-Click] Catalog | [B] Exit", 
+                    build_state.selected_faction.name(),
+                    mode_label,
+                    cost_label
                 );
             } else {
                 *vis = Visibility::Hidden;

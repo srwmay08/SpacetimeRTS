@@ -6,20 +6,8 @@
 // presets, hammer swing construction costs, cascading destruction queues,
 // and workbench placement prerequisites.
 
-use backend::building::get_piece_max_health;
+use backend::building::{get_piece_cost, get_piece_decay, get_piece_max_health};
 use backend::building::Structure;
-
-/// Evaluates stability decay penalty by piece type
-fn get_piece_decay(piece_type: &str) -> Option<u32> {
-    match piece_type {
-        "Workbench" | "Campfire" | "Bed" | "Foundation" => Some(0),
-        "Wall" => Some(20),
-        "Floor" => Some(25),
-        "Roof" => Some(30),
-        "Ramp" => Some(25),
-        _ => None,
-    }
-}
 
 /// Checks whether an existing structure with `parent_stability` can support a new child
 fn can_support_child(parent_stability: u32, piece_type: &str) -> Option<u32> {
@@ -38,6 +26,8 @@ fn test_piece_max_health_presets() {
     // Floors & Roofs (150 HP); Campfires (60 HP); Default fallback (100 HP).
     assert_eq!(get_piece_max_health("Foundation"), 400.0);
     assert_eq!(get_piece_max_health("Wall"), 200.0);
+    assert_eq!(get_piece_max_health("Window"), 150.0);
+    assert_eq!(get_piece_max_health("Door"), 120.0);
     assert_eq!(get_piece_max_health("Floor"), 150.0);
     assert_eq!(get_piece_max_health("Roof"), 150.0);
     assert_eq!(get_piece_max_health("Ramp"), 250.0);
@@ -49,11 +39,13 @@ fn test_piece_max_health_presets() {
 #[test]
 fn test_decay_penalties_by_piece_type() {
     // Architectural Note: Decay rules dictate vertical and cantilever limits:
-    // Ground anchors (0 penalty), Walls (20), Floors (25), Roofs (30), Ramps (25).
+    // Ground anchors (0 penalty), Walls/Windows/Doors (20), Floors (25), Roofs (30), Ramps (25).
     assert_eq!(get_piece_decay("Foundation"), Some(0));
     assert_eq!(get_piece_decay("Workbench"), Some(0));
     assert_eq!(get_piece_decay("Campfire"), Some(0));
     assert_eq!(get_piece_decay("Wall"), Some(20));
+    assert_eq!(get_piece_decay("Window"), Some(20));
+    assert_eq!(get_piece_decay("Door"), Some(20));
     assert_eq!(get_piece_decay("Floor"), Some(25));
     assert_eq!(get_piece_decay("Roof"), Some(30));
     assert_eq!(get_piece_decay("Ramp"), Some(25));
@@ -91,21 +83,24 @@ fn test_stability_propagation_chain() {
 fn test_construction_swing_cost_division() {
     // Architectural Note: All piece costs must be evenly divisible by 4 (25% progress per swing).
     let pieces = [
-        ("Workbench", 8, 0, 2, 0),
-        ("Campfire", 4, 4, 1, 1),
-        ("Foundation", 20, 0, 5, 0),
-        ("Wall", 8, 0, 2, 0),
-        ("Floor", 12, 0, 3, 0),
-        ("Roof", 12, 0, 3, 0),
-        ("Ramp", 16, 0, 4, 0),
+        "Workbench",
+        "Campfire",
+        "Foundation",
+        "Wall",
+        "Window",
+        "Door",
+        "Floor",
+        "Roof",
+        "Ramp",
     ];
 
-    for (piece, total_wood, total_stone, swing_wood, swing_stone) in pieces {
+    for piece in pieces {
+        let (total_wood, total_stone) = get_piece_cost(piece);
         assert_eq!(total_wood % 4, 0, "Wood cost for {} must be divisible by 4", piece);
         assert_eq!(total_stone % 4, 0, "Stone cost for {} must be divisible by 4", piece);
-        assert_eq!(total_wood / 4, swing_wood);
-        assert_eq!(total_stone / 4, swing_stone);
     }
+    assert_eq!(get_piece_cost("Window"), (8, 0));
+    assert_eq!(get_piece_cost("Door"), (12, 0));
 }
 
 #[test]

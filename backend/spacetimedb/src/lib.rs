@@ -18,12 +18,17 @@ pub mod spatial;
 pub mod physics;
 pub mod armory;
 pub mod bestiary;
+pub mod hazard;
+pub mod npc_building;
+pub mod templates;
 
 use crate::movement::{transform, player_session};
 use crate::combat::{health, hitbox_history, faction_component, Faction, weapon_skill, equipment_loadout};
-use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse, peasant, pet_component};
+#[allow(unused_imports)]
+use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse, peasant, pet_component, npc_state, NpcAction, NpcState};
 use crate::building::{structure, Structure};
 use crate::voxel::voxel_chunk;
+use crate::hazard::node_facing;
 
 pub const CANONICAL_ITEMS: &[&str] = &[
     "1h Axe",
@@ -1864,16 +1869,27 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
             ctx.db.resource_node().node_id().update(updated);
         } else {
             ctx.db.resource_node().node_id().delete(node.node_id);
+            // Architectural Note: Ruins (FallenLog / Rubble) may carry a facing row; remove it with the node.
+            ctx.db.node_facing().node_id().delete(node.node_id);
+
+            // Architectural Note: Valheim-style felling. A standing Tree does not pay out
+            // instantly: it topples away from the logger as a server-scheduled fall hazard
+            // (lethal to anything under the trunk at impact) and leaves a harvestable
+            // FallenLog ruin. The wood is collected from that log (see hazard.rs).
+            if node.node_type == "Tree" {
+                crate::hazard::fell_tree(ctx, &node, px, pz);
+                return Ok(());
+            }
 
             let amount = (match node.node_type.as_str() {
                 "Tree" | "FallenLog" => 6,
-                "Rock" => 4,
+                "Rock" | "Rubble" => 4,
                 _ => 1,
             } as f32 * node.scale).ceil() as u32;
 
             let item = match node.node_type.as_str() {
                 "Tree" | "FallenLog" => "Wood",
-                "Rock" => "Stone",
+                "Rock" | "Rubble" => "Stone",
                 "Branch" => "Branch",
                 "Flint" => "Flint",
                 "LooseStone" => "LooseStone",
@@ -1881,7 +1897,8 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
             };
 
             add_item(&mut inventory, item, amount);
-            if node.node_type == "Tree" && inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0) {
+            // Resin is tapped from felled timber; it moved from the standing Tree to its FallenLog ruin.
+            if node.node_type == "FallenLog" && inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0) {
                 add_item(&mut inventory, "Resin", 1);
             }
             ctx.db.inventory().entity_id().update(inventory);

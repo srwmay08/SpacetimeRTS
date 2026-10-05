@@ -129,6 +129,157 @@ pub struct BaseInteriorVolume {
 #[derive(Component)]
 pub struct InteriorProp;
 
+/// Explicit wrapper around the SpacetimeDB structure id for visual destruction syncing.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SpacetimeBuildingId(pub u64);
+
+#[allow(unused_imports)]
+pub use SpacetimeBuildingId as SpacetimeEntity;
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct BuildingHealth {
+    pub current: u32,
+    pub max: u32,
+}
+
+/// Tracks whether a building's mesh is currently displaying its pristine or damaged version.
+/// Updated purely based on authoritative health in SpacetimeDB (swaps at <= 50% health).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum VisualDamageState {
+    #[default]
+    Pristine,
+    Damaged,
+}
+
+/// Kinematic swinging door component attached to the moving door leaf entity.
+/// Uses kinematic position/rotation interpolation over the network instead of physical joints.
+#[derive(Component, Clone, Debug)]
+pub struct Door {
+    pub structure_id: u64,
+    pub target_rotation: Quat,
+    pub is_open: bool,
+    pub is_swinging: bool,
+}
+
+/// Marker component for selective permeability window panes.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct GlassPane;
+
+/// Client-side purely visual entity animating a server-scheduled lethal fall.
+/// Has no Rapier / Avian rigid body; simply animates the fall vector over duration.
+#[derive(Component, Clone, Debug)]
+pub struct VisualFallHazard {
+    pub hazard_id: u64,
+    pub kind: String,
+    pub origin: Vec3,
+    pub dir: Vec3,
+    pub length: f32,
+    pub elapsed: f32,
+    pub duration: f32,
+    pub initial_rotation: Quat,
+}
+
+/// Architectural Faction Styles based on early 2000s MMO aesthetics:
+/// - HighElf (The Pristine Bastion): Polished mint-green marble, lapis/obsidian roofs, gold filigree, sharp sweeping geometry.
+/// - Human (The Utilitarian Fortress): Rough-hewn grey stone blocks, red brick walls, iron-banded timber, blocky fortified geometry.
+/// - DarkElf (The Subterranean Spire): Dark indigo/black cavern stone, imposing pillars, spiked arches, glowing neon runes.
+/// - Barbarian (Bear-Claw Stronghold): Rough timber logs, animal hide, bone carvings, fortified palisades.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum BuildingFaction {
+    #[default]
+    Human,
+    HighElf,
+    DarkElf,
+    Barbarian,
+}
+
+impl BuildingFaction {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Human => "Human (Utilitarian Fortress)",
+            Self::HighElf => "High Elf (Pristine Bastion)",
+            Self::DarkElf => "Dark Elf (Subterranean Spire)",
+            Self::Barbarian => "Barbarian (Bear-Claw Stronghold)",
+        }
+    }
+
+    pub fn as_prefix(&self) -> &'static str {
+        match self {
+            Self::Human => "Human",
+            Self::HighElf => "HighElf",
+            Self::DarkElf => "DarkElf",
+            Self::Barbarian => "Barbarian",
+        }
+    }
+
+    pub fn from_piece_name(name: &str) -> Self {
+        if name.starts_with("HighElf") || (name.contains("Elf") && !name.contains("Dark")) {
+            Self::HighElf
+        } else if name.starts_with("DarkElf") || name.contains("Dark") {
+            Self::DarkElf
+        } else if name.starts_with("Barbarian") || name.contains("Bear") {
+            Self::Barbarian
+        } else {
+            Self::Human
+        }
+    }
+}
+
+#[allow(unused_imports)]
+pub use BuildingFaction as ArchitecturalFaction;
+
+/// Event emitted whenever a building is destroyed (via health zero, collapse cascade, or DB removal).
+/// Subscribed to by destruction animation and faction-specific shard/rubble generators.
+#[derive(Event, Debug, Clone)]
+pub struct BuildingDestructionEvent {
+    #[allow(dead_code)]
+    pub structure_id: u64,
+    pub faction: BuildingFaction,
+    pub piece_type: ModularPieceType,
+    pub position: Vec3,
+    pub rotation: Quat,
+}
+
+#[allow(unused_imports)]
+pub use BuildingDestructionEvent as BuildingDestroyedEvent;
+
+/// Event to trigger modular building spawns from network listeners or local commands.
+#[derive(Event, Debug, Clone)]
+pub struct SpawnBuildingEvent {
+    pub entity_id: u64,
+    pub faction: BuildingFaction,
+    pub piece: ModularPieceType,
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub is_blueprint: bool,
+}
+
+/// Ephemeral collapse entity that shakes, crumbles, and fades out over duration before leaving a ruin pile.
+#[derive(Component, Debug, Clone)]
+pub struct BuildingDestructionAnimation {
+    pub faction: BuildingFaction,
+    #[allow(dead_code)]
+    pub piece_type: ModularPieceType,
+    pub elapsed: f32,
+    pub duration: f32,
+    pub origin: Vec3,
+}
+
+/// Harvestable ruin node spawned at the end of a fall animation or tree collapse.
+/// Carries a static collider that permanently blocks movement and paths.
+#[derive(Component, Clone, Debug)]
+pub struct HarvestableRuin {
+    pub yield_amount: u32,
+    pub node_type: String,
+}
+
+/// Fading emissive point light spawned when Dark Elf structures or neon runes are shattered.
+#[derive(Component, Debug, Clone)]
+pub struct RuneLightDecay {
+    pub timer: Timer,
+    pub base_intensity: f32,
+}
+
 // ----------------------------------------------------------------------------
 // UI & VFX COMPONENTS & RESOURCES
 // ----------------------------------------------------------------------------
@@ -166,6 +317,7 @@ pub struct CachedPlayerEntity(pub Option<u64>);
 
 #[derive(Component)] pub struct BuildMenuRoot;
 #[derive(Component)] pub struct BuildPieceButton(pub ModularPieceType);
+#[derive(Component)] pub struct BuildTemplateButton(pub crate::templates::BuildingTemplateType);
 
 #[derive(Component)] pub struct HealthBarUI(pub u64);
 #[derive(Component)] pub struct BuildUIText;

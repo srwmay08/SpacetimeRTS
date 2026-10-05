@@ -50,6 +50,8 @@ pub fn rebuild_physics_cache(ctx: &ReducerContext) {
 
     // 2. Add static modular structures as Cuboids
     for s in ctx.db.structure().iter() {
+        // Architectural Note: An open door is a hole in the wall; it must not stop projectiles.
+        if !crate::building::structure_blocks_projectiles(ctx, &s) { continue; }
         // Basic 2.5m x 2.5m block representation
         let collider = ColliderBuilder::cuboid(1.25, 1.25, 1.25)
             .translation(Vector::new(s.x, s.y, s.z))

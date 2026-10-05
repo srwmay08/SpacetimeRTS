@@ -19,10 +19,12 @@ use crate::module_bindings::contribute_construction_reducer::contribute_construc
 use crate::module_bindings::interact_node_reducer::interact_node;
 use crate::module_bindings::command_peasant_reducer::command_peasant;
 use crate::module_bindings::spawn_peasant_reducer::spawn_peasant;
+use crate::module_bindings::toggle_door_reducer::toggle_door;
 use crate::module_bindings::player_table::PlayerTableAccess;
 use crate::module_bindings::inventory_table::InventoryTableAccess;
 use crate::module_bindings::resource_node_table::ResourceNodeTableAccess;
 use crate::module_bindings::structure_table::StructureTableAccess;
+use crate::module_bindings::door_state_table::DoorStateTableAccess;
 use crate::module_bindings::equipment_loadout_table::EquipmentLoadoutTableAccess;
 use crate::module_bindings::equip_weapon_reducer::equip_weapon;
 use crate::weapons::EquippedHandSide;
@@ -65,6 +67,7 @@ pub struct ActionContextQueries<'w, 's> {
     pub node: Query<'w, 's, &'static ResourceNodeItem>,
     pub parent_q: Query<'w, 's, &'static Parent>,
     pub structure: Query<'w, 's, &'static NetworkStructure>,
+    pub door: Query<'w, 's, &'static Door>,
     pub peasant: Query<'w, 's, &'static PeasantUnit>, 
     pub rts_camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<RtsCameraChild>>,
     pub selectable: Query<'w, 's, (Entity, &'static BevyTransform), With<Selectable>>,
@@ -93,6 +96,29 @@ fn resolve_node_id(entity: Entity, node_q: &Query<&ResourceNodeItem>, parent_q: 
     if let Ok(parent) = parent_q.get(entity) {
         if let Ok(node) = node_q.get(parent.get()) {
             return Some(node.node_id);
+        }
+    }
+    None
+}
+
+fn resolve_structure_id(
+    entity: Entity,
+    structure_q: &Query<&NetworkStructure>,
+    door_q: &Query<&Door>,
+    parent_q: &Query<&Parent>,
+) -> Option<u64> {
+    if let Ok(door) = door_q.get(entity) {
+        return Some(door.structure_id);
+    }
+    if let Ok(st) = structure_q.get(entity) {
+        return Some(st.structure_id);
+    }
+    if let Ok(parent) = parent_q.get(entity) {
+        if let Ok(door) = door_q.get(parent.get()) {
+            return Some(door.structure_id);
+        }
+        if let Ok(st) = structure_q.get(parent.get()) {
+            return Some(st.structure_id);
         }
     }
     None
@@ -947,9 +973,14 @@ pub fn context_aware_action_dispatcher(
                                         if let Err(e) = conn.db.reducers.interact_node(node_id) {
                                             error!("Failed to pick up resource: {:?}", e);
                                         }
-                                    } else if let Ok(net_structure) = queries.structure.get(hit_data.entity) {
-                                        if let Some(s) = conn.db.db.structure().structure_id().find(&net_structure.structure_id) {
-                                            if s.piece_type == "Workbench" && !s.is_blueprint {
+                                    } else if let Some(struct_id) = resolve_structure_id(hit_data.entity, &queries.structure, &queries.door, &queries.parent_q) {
+                                        if let Some(s) = conn.db.db.structure().structure_id().find(&struct_id) {
+                                            if s.piece_type == "Door" && !s.is_blueprint {
+                                                info!("Toggling door structure_id: {}", struct_id);
+                                                if let Err(e) = conn.db.reducers.toggle_door(struct_id) {
+                                                    error!("Failed to toggle door: {:?}", e);
+                                                }
+                                            } else if s.piece_type == "Workbench" && !s.is_blueprint {
                                                 if let Ok(mut style) = ui_queries.inventory.get_single_mut() {
                                                     style.display = Display::Flex;
                                                     if let Ok(mut window) = ui_queries.window.get_single_mut() {
@@ -1058,12 +1089,26 @@ pub fn context_aware_action_dispatcher(
                                     let hit_point = ray.origin + ray.direction * hit.time_of_impact;
                                     let is_node = queries.node.contains(hit.entity);
                                     let is_player = hit.entity == my_player_entity;
+                                    let struct_id_opt = resolve_structure_id(hit.entity, &queries.structure, &queries.door, &queries.parent_q);
+                                    let struct_data = struct_id_opt.and_then(|sid| conn.db.db.structure().structure_id().find(&sid));
+                                    let is_blueprint = struct_data.as_ref().map(|s| s.is_blueprint).unwrap_or(false);
+                                    let is_door = struct_data.as_ref().map(|s| s.piece_type.ends_with("Door") || s.piece_type == "Door").unwrap_or(false);
+
+                                    let indicator_color = if is_blueprint {
+                                        Color::srgb(0.2, 0.7, 1.0)
+                                    } else if is_door {
+                                        Color::srgb(0.9, 0.6, 0.2)
+                                    } else if is_node {
+                                        Color::srgb(0.9, 0.8, 0.1)
+                                    } else {
+                                        Color::srgb(0.2, 0.9, 0.3)
+                                    };
 
                                     commands.spawn((
                                         PbrBundle {
                                             mesh: weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.8, 0.05)),
                                             material: weapons.materials.add(StandardMaterial {
-                                                base_color: if is_node { Color::srgb(0.9, 0.8, 0.1) } else { Color::srgb(0.2, 0.9, 0.3) },
+                                                base_color: indicator_color,
                                                 unlit: true,
                                                 ..default()
                                             }),
@@ -1075,7 +1120,30 @@ pub fn context_aware_action_dispatcher(
 
                                     for selected_entity in queries.selected.iter() {
                                         if let Ok(peasant) = queries.peasant.get(selected_entity) {
-                                            if is_node {
+                                            if let Some(ref s) = struct_data {
+                                                if is_blueprint {
+                                                    let _ = conn.db.reducers.command_peasant(
+                                                        peasant.entity_id,
+                                                        "Construct".to_string(),
+                                                        hit_point.x, hit_point.y, hit_point.z,
+                                                        s.structure_id,
+                                                    );
+                                                } else if is_door {
+                                                    let _ = conn.db.reducers.command_peasant(
+                                                        peasant.entity_id,
+                                                        "Door".to_string(),
+                                                        hit_point.x, hit_point.y, hit_point.z,
+                                                        s.structure_id,
+                                                    );
+                                                } else {
+                                                    let _ = conn.db.reducers.command_peasant(
+                                                        peasant.entity_id,
+                                                        "MoveTo".to_string(),
+                                                        hit_point.x, hit_point.y, hit_point.z,
+                                                        0,
+                                                    );
+                                                }
+                                            } else if is_node {
                                                 let node = queries.node.get(hit.entity).unwrap();
                                                 let _ = conn.db.reducers.command_peasant(peasant.entity_id, "Harvest".to_string(), hit_point.x, hit_point.y, hit_point.z, node.node_id);
                                             } else if is_player {
@@ -1225,6 +1293,8 @@ pub fn update_interaction_prompt(
     node_query: Query<&ResourceNodeItem>,
     parent_query: Query<&Parent>,
     structure_query: Query<&NetworkStructure>,
+    door_query: Query<&Door>,
+    ruin_query: Query<&HarvestableRuin>,
     mut prompt_query: Query<(&mut Text, &mut Visibility), With<InteractionPromptText>>,
 ) {
     let Ok(cam_transform) = camera_query.get_single() else { return; };
@@ -1252,6 +1322,7 @@ pub fn update_interaction_prompt(
                     "LooseStone" => "[E] Pick up Stone",
                     "Tree" => "Tree (Left-click with Stone Axe)",
                     "FallenLog" => "[E] Chop Fallen Log",
+                    "Rubble" => "[E] Mine Rubble",
                     "Rock" => "Rock (Left-click with Pickaxe)",
                     _ => "[E] Gather",
                 };
@@ -1260,10 +1331,21 @@ pub fn update_interaction_prompt(
                 *vis = Visibility::Inherited;
                 return;
             }
-        } else if let Ok(net_structure) = structure_query.get(hit_data.entity) {
-            if let Some(s) = conn.db.db.structure().structure_id().find(&net_structure.structure_id) {
+        } else if let Ok(ruin) = ruin_query.get(hit_data.entity) {
+            text.sections[0].value = format!("[E] Mine {} (Yield: {})", ruin.node_type, ruin.yield_amount);
+            *vis = Visibility::Inherited;
+            return;
+        } else if let Some(struct_id) = resolve_structure_id(hit_data.entity, &structure_query, &door_query, &parent_query) {
+            if let Some(s) = conn.db.db.structure().structure_id().find(&struct_id) {
                 let is_hammer = active_item.0.as_deref() == Some("Hammer");
-                if s.piece_type == "Workbench" && !s.is_blueprint {
+                if s.piece_type == "Door" && !s.is_blueprint {
+                    let is_open = conn.db.db.door_state().structure_id().find(&struct_id).map_or(false, |d| d.is_open);
+                    text.sections[0].value = if is_open {
+                        "[E] Close Door".to_string()
+                    } else {
+                        "[E] Open Door".to_string()
+                    };
+                } else if s.piece_type == "Workbench" && !s.is_blueprint {
                     text.sections[0].value = "[E] Open Workbench".to_string();
                 } else if s.is_blueprint {
                     text.sections[0].value = if is_hammer { 

@@ -34,13 +34,16 @@ pub enum CameraMode {
 // PHYSICS LAYERS & COLLISION GROUPS
 // ----------------------------------------------------------------------------
 
-#[derive(PhysicsLayer, Default)]
+#[derive(PhysicsLayer, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameLayer {
     #[default]
     Default,
     Terrain,
     Unit,
     Environment,
+    /// Selective permeability layer: blocks physical movement (Units, Default),
+    /// but transparent to vision raycasts / LoS queries.
+    Glass,
 }
 
 // ----------------------------------------------------------------------------

@@ -48,6 +48,33 @@ pub struct Peasant {
 }
 
 // ----------------------------------------------------------------------------
+// NPC STATE MACHINE & DOORWAY INTERACTION STRUCTURES
+// ----------------------------------------------------------------------------
+// Architectural Note: Deterministic state machine governing NPC doorway interaction
+// and blueprint construction. All state progression and action intervals rely exclusively
+// on ctx.timestamp without local clocks or randomized hashes.
+
+#[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NpcAction {
+    Idle,
+    Patrolling,
+    PathingToDoor,
+    InteractingWithDoor,
+    ConstructingBlueprint,
+}
+
+#[table(accessor = npc_state, public)]
+#[derive(Clone, PartialEq, Debug)]
+pub struct NpcState {
+    #[primary_key]
+    pub entity_id: u64,
+    pub current_action: NpcAction,
+    pub target_coords: Option<Position>,
+    pub task_entity_id: Option<u64>, // ID of the door or building blueprint
+    pub last_tick: u64,
+}
+
+// ----------------------------------------------------------------------------
 // THREAT NPC & PET STRUCTURES
 // ----------------------------------------------------------------------------
 
@@ -201,6 +228,14 @@ pub fn spawn_peasant(ctx: &ReducerContext) -> Result<(), String> {
         consecutive_stuck_ticks: 0,
         auto_gather_type: "None".to_string(),
     });
+
+    ctx.db.npc_state().insert(NpcState {
+        entity_id,
+        current_action: NpcAction::Idle,
+        target_coords: None,
+        task_entity_id: None,
+        last_tick: ctx.timestamp.to_micros_since_unix_epoch() as u64,
+    });
     Ok(())
 }
 
@@ -268,6 +303,64 @@ pub fn command_peasant(
             peasant.auto_gather_type = "All".to_string(); 
             AiState::AutoGather("All".to_string()) 
         },
+        "Construct" | "Build" => {
+            peasant.auto_gather_type = "None".to_string();
+            peasant.last_harvest_target = None;
+            let now_micros = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+            let target_coords = if target_x != 0.0 || target_z != 0.0 {
+                Some(Position { x: target_x, y: target_y, z: target_z })
+            } else {
+                None
+            };
+            match ctx.db.npc_state().entity_id().find(peasant_entity_id) {
+                Some(mut st) => {
+                    st.current_action = NpcAction::ConstructingBlueprint;
+                    st.task_entity_id = Some(target_id);
+                    st.target_coords = target_coords;
+                    st.last_tick = now_micros;
+                    ctx.db.npc_state().entity_id().update(st);
+                }
+                None => {
+                    ctx.db.npc_state().insert(NpcState {
+                        entity_id: peasant_entity_id,
+                        current_action: NpcAction::ConstructingBlueprint,
+                        target_coords,
+                        task_entity_id: Some(target_id),
+                        last_tick: now_micros,
+                    });
+                }
+            }
+            AiState::Idle
+        },
+        "Door" | "ToggleDoor" => {
+            peasant.auto_gather_type = "None".to_string();
+            peasant.last_harvest_target = None;
+            let now_micros = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+            let target_coords = if target_x != 0.0 || target_z != 0.0 {
+                Some(Position { x: target_x, y: target_y, z: target_z })
+            } else {
+                None
+            };
+            match ctx.db.npc_state().entity_id().find(peasant_entity_id) {
+                Some(mut st) => {
+                    st.current_action = NpcAction::PathingToDoor;
+                    st.task_entity_id = Some(target_id);
+                    st.target_coords = target_coords;
+                    st.last_tick = now_micros;
+                    ctx.db.npc_state().entity_id().update(st);
+                }
+                None => {
+                    ctx.db.npc_state().insert(NpcState {
+                        entity_id: peasant_entity_id,
+                        current_action: NpcAction::PathingToDoor,
+                        target_coords,
+                        task_entity_id: Some(target_id),
+                        last_tick: now_micros,
+                    });
+                }
+            }
+            AiState::Idle
+        },
         _ => { 
             peasant.auto_gather_type = "None".to_string(); 
             peasant.last_harvest_target = None;
@@ -276,6 +369,127 @@ pub fn command_peasant(
     };
 
     ctx.db.peasant().entity_id().update(peasant);
+    Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// NPC STATE MACHINE REDUCERS (Doorways & Blueprint Construction)
+// ----------------------------------------------------------------------------
+// Architectural Note: Server-authoritative reducer executing deterministic AI actions.
+// Timing delays (e.g. 500ms door swing, 1s hammer intervals) strictly utilize ctx.timestamp
+// rather than local clocks to safeguard multi-node determinism and rollback safety.
+
+#[reducer]
+pub fn tick_npc_ai(ctx: &ReducerContext, npc_id: u64) -> Result<(), String> {
+    let mut npc = ctx.db.npc_state().entity_id().find(npc_id).ok_or("NPC not found")?;
+    let now_micros = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    let time_since_last_action = now_micros.saturating_sub(npc.last_tick);
+
+    match npc.current_action {
+        NpcAction::PathingToDoor => {
+            if let Some(door_id) = npc.task_entity_id {
+                // Check if door is closed via BTreeMap-backed database lookup
+                if let Some(door) = ctx.db.structure().structure_id().find(door_id) {
+                    if crate::building::base_piece_type(&door.piece_type) == "Door" {
+                        let is_open = crate::building::is_door_open(ctx, door_id);
+                        if !is_open {
+                            crate::building::set_door_open_internal(ctx, door_id, true)?;
+                            npc.current_action = NpcAction::InteractingWithDoor;
+                            npc.last_tick = now_micros;
+                        } else {
+                            npc.current_action = NpcAction::Patrolling;
+                            npc.last_tick = now_micros;
+                        }
+                    } else {
+                        npc.current_action = NpcAction::Idle;
+                        npc.task_entity_id = None;
+                    }
+                } else {
+                    npc.current_action = NpcAction::Idle;
+                    npc.task_entity_id = None;
+                }
+            } else {
+                npc.current_action = NpcAction::Idle;
+            }
+        }
+        NpcAction::InteractingWithDoor => {
+            // Wait deterministically for the client interpolation (e.g. 500ms door swing)
+            if time_since_last_action >= 500_000 {
+                npc.current_action = NpcAction::Patrolling;
+                npc.last_tick = now_micros;
+            }
+        }
+        NpcAction::ConstructingBlueprint => {
+            if let Some(blueprint_id) = npc.task_entity_id {
+                if time_since_last_action >= 1_000_000 { // 1 second hammer intervals
+                    if let Some(mut block) = ctx.db.structure().structure_id().find(blueprint_id) {
+                        if block.is_blueprint {
+                            block.current_health = (block.current_health + 10.0).min(block.max_health);
+                            block.construction_progress = ((block.current_health / block.max_health.max(1.0)) * 100.0) as u32;
+
+                            if block.current_health >= block.max_health || block.construction_progress >= 100 {
+                                block.is_blueprint = false;
+                                block.construction_progress = 100;
+                                block.current_health = block.max_health;
+                                npc.current_action = NpcAction::Idle; // Task complete
+                                npc.task_entity_id = None;
+                            }
+                            ctx.db.structure().structure_id().update(block);
+                        } else {
+                            npc.current_action = NpcAction::Idle;
+                            npc.task_entity_id = None;
+                        }
+                    } else {
+                        npc.current_action = NpcAction::Idle;
+                        npc.task_entity_id = None;
+                    }
+                    npc.last_tick = now_micros;
+                }
+            } else {
+                npc.current_action = NpcAction::Idle;
+            }
+        }
+        _ => {}
+    }
+
+    ctx.db.npc_state().entity_id().update(npc);
+    Ok(())
+}
+
+#[reducer]
+pub fn assign_npc_task(
+    ctx: &ReducerContext,
+    npc_id: u64,
+    action: NpcAction,
+    task_entity_id: Option<u64>,
+    target_x: Option<f32>,
+    target_y: Option<f32>,
+    target_z: Option<f32>,
+) -> Result<(), String> {
+    let now_micros = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    let target_coords = match (target_x, target_y, target_z) {
+        (Some(x), Some(y), Some(z)) => Some(Position { x, y, z }),
+        _ => None,
+    };
+
+    match ctx.db.npc_state().entity_id().find(npc_id) {
+        Some(mut state) => {
+            state.current_action = action;
+            state.task_entity_id = task_entity_id;
+            state.target_coords = target_coords;
+            state.last_tick = now_micros;
+            ctx.db.npc_state().entity_id().update(state);
+        }
+        None => {
+            ctx.db.npc_state().insert(NpcState {
+                entity_id: npc_id,
+                current_action: action,
+                target_coords,
+                task_entity_id,
+                last_tick: now_micros,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -651,7 +865,64 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
         let mut desired_velocity = (0.0_f32, 0.0_f32);
 
         match peasant.state.clone() {
-            AiState::Idle => {}
+            AiState::Idle => {
+                if let Some(npc_st) = ctx.db.npc_state().entity_id().find(peasant.entity_id) {
+                    match npc_st.current_action {
+                        NpcAction::PathingToDoor => {
+                            if let Some(door_id) = npc_st.task_entity_id {
+                                if let Some(door) = ctx.db.structure().structure_id().find(door_id) {
+                                    let dx = door.x - transform.x;
+                                    let dz = door.z - transform.z;
+                                    let dist_sq = dx * dx + dz * dz;
+                                    if dist_sq <= 12.25 {
+                                        let _ = tick_npc_ai(ctx, peasant.entity_id);
+                                    } else if dist_sq > 0.0001 {
+                                        let dist = dist_sq.sqrt().max(0.01);
+                                        desired_velocity = ((dx / dist) * speed, (dz / dist) * speed);
+                                        apply_movement = true;
+                                    }
+                                }
+                            }
+                        }
+                        NpcAction::InteractingWithDoor => {
+                            let _ = tick_npc_ai(ctx, peasant.entity_id);
+                        }
+                        NpcAction::ConstructingBlueprint => {
+                            if let Some(bp_id) = npc_st.task_entity_id {
+                                if let Some(bp) = ctx.db.structure().structure_id().find(bp_id) {
+                                    let dx = bp.x - transform.x;
+                                    let dz = bp.z - transform.z;
+                                    let dist_sq = dx * dx + dz * dz;
+                                    if dist_sq <= 16.0 {
+                                        let _ = tick_npc_ai(ctx, peasant.entity_id);
+                                    } else if dist_sq > 0.0001 {
+                                        let dist = dist_sq.sqrt().max(0.01);
+                                        desired_velocity = ((dx / dist) * speed, (dz / dist) * speed);
+                                        apply_movement = true;
+                                    }
+                                }
+                            }
+                        }
+                        NpcAction::Patrolling => {
+                            if let Some(ref target) = npc_st.target_coords {
+                                let dx = target.x - transform.x;
+                                let dz = target.z - transform.z;
+                                let dist_sq = dx * dx + dz * dz;
+                                if dist_sq < 1.5 {
+                                    let mut updated = npc_st.clone();
+                                    updated.current_action = NpcAction::Idle;
+                                    ctx.db.npc_state().entity_id().update(updated);
+                                } else if dist_sq > 0.0001 {
+                                    let dist = dist_sq.sqrt().max(0.01);
+                                    desired_velocity = ((dx / dist) * speed, (dz / dist) * speed);
+                                    apply_movement = true;
+                                }
+                            }
+                        }
+                        NpcAction::Idle => {}
+                    }
+                }
+            }
             AiState::AutoGather(ref target_type) => {
                 let mut nearest_node = None;
                 let mut min_dist_sq = 1_000_000.0_f32;
@@ -830,7 +1101,11 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                 }
 
                 // Architectural Note: Localized structure repulsion without cloning all structures into RAM
-                for s in ctx.db.structure().iter().filter(|s| (s.x - transform.x).abs() <= 5.0 && (s.z - transform.z).abs() <= 5.0) {
+                // Architectural Note: Open doors are walkable gaps, so they exert no repulsion.
+                for s in ctx.db.structure().iter()
+                    .filter(|s| (s.x - transform.x).abs() <= 5.0 && (s.z - transform.z).abs() <= 5.0)
+                    .filter(|s| crate::building::structure_blocks_projectiles(ctx, s))
+                {
                     let ox = transform.x - s.x;
                     let oz = transform.z - s.z;
                     let odist_sq = ox * ox + oz * oz;

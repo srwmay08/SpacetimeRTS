@@ -16,7 +16,9 @@ pub mod admin_heal_reducer;
 pub mod admin_kill_all_npcs_reducer;
 pub mod admin_respawn_resources_reducer;
 pub mod admin_set_time_reducer;
+pub mod admin_spawn_building_reducer;
 pub mod admin_spawn_npc_reducer;
+pub mod admin_spawn_template_instant_reducer;
 pub mod admin_teleport_reducer;
 pub mod ai_state_type;
 pub mod ai_type_type;
@@ -32,6 +34,8 @@ pub mod contribute_construction_reducer;
 pub mod craft_item_reducer;
 pub mod destroy_structure_reducer;
 pub mod detonate_explosive_charge_reducer;
+pub mod door_state_table;
+pub mod door_state_type;
 pub mod drop_inventory_item_reducer;
 pub mod equip_weapon_reducer;
 pub mod equipment_loadout_table;
@@ -39,6 +43,8 @@ pub mod equipment_loadout_type;
 pub mod faction_component_table;
 pub mod faction_component_type;
 pub mod faction_type;
+pub mod fall_hazard_table;
+pub mod fall_hazard_type;
 pub mod fire_bow_reducer;
 pub mod fire_ranged_weapon_reducer;
 pub mod fire_siege_weapon_reducer;
@@ -47,6 +53,7 @@ pub mod global_state_table;
 pub mod global_state_type;
 pub mod harvestable_corpse_table;
 pub mod harvestable_corpse_type;
+pub mod hazard_impact_timer_type;
 pub mod health_table;
 pub mod health_type;
 pub mod high_frequency_timer_type;
@@ -61,6 +68,8 @@ pub mod low_frequency_timer_type;
 pub mod magic_spell_type_type;
 pub mod nav_event_table;
 pub mod nav_event_type;
+pub mod node_facing_table;
+pub mod node_facing_type;
 pub mod npc_brain_table;
 pub mod npc_brain_type;
 pub mod peasant_table;
@@ -90,10 +99,12 @@ pub mod set_interior_culling_reducer;
 pub mod siege_weapon_type_type;
 pub mod snapshot_type;
 pub mod spawn_peasant_reducer;
+pub mod spawn_template_blueprint_reducer;
 pub mod structure_table;
 pub mod structure_type;
 pub mod swap_inventory_slots_reducer;
 pub mod swing_tool_reducer;
+pub mod toggle_door_reducer;
 pub mod transform_table;
 pub mod transform_type;
 pub mod unequip_weapon_reducer;
@@ -114,7 +125,9 @@ pub use admin_heal_reducer::admin_heal;
 pub use admin_kill_all_npcs_reducer::admin_kill_all_npcs;
 pub use admin_respawn_resources_reducer::admin_respawn_resources;
 pub use admin_set_time_reducer::admin_set_time;
+pub use admin_spawn_building_reducer::admin_spawn_building;
 pub use admin_spawn_npc_reducer::admin_spawn_npc;
+pub use admin_spawn_template_instant_reducer::admin_spawn_template_instant;
 pub use admin_teleport_reducer::admin_teleport;
 pub use ai_state_type::AiState;
 pub use ai_type_type::AiType;
@@ -130,6 +143,8 @@ pub use contribute_construction_reducer::contribute_construction;
 pub use craft_item_reducer::craft_item;
 pub use destroy_structure_reducer::destroy_structure;
 pub use detonate_explosive_charge_reducer::detonate_explosive_charge;
+pub use door_state_table::*;
+pub use door_state_type::DoorState;
 pub use drop_inventory_item_reducer::drop_inventory_item;
 pub use equip_weapon_reducer::equip_weapon;
 pub use equipment_loadout_table::*;
@@ -137,6 +152,8 @@ pub use equipment_loadout_type::EquipmentLoadout;
 pub use faction_component_table::*;
 pub use faction_component_type::FactionComponent;
 pub use faction_type::Faction;
+pub use fall_hazard_table::*;
+pub use fall_hazard_type::FallHazard;
 pub use fire_bow_reducer::fire_bow;
 pub use fire_ranged_weapon_reducer::fire_ranged_weapon;
 pub use fire_siege_weapon_reducer::fire_siege_weapon;
@@ -145,6 +162,7 @@ pub use global_state_table::*;
 pub use global_state_type::GlobalState;
 pub use harvestable_corpse_table::*;
 pub use harvestable_corpse_type::HarvestableCorpse;
+pub use hazard_impact_timer_type::HazardImpactTimer;
 pub use health_table::*;
 pub use health_type::Health;
 pub use high_frequency_timer_type::HighFrequencyTimer;
@@ -159,6 +177,8 @@ pub use low_frequency_timer_type::LowFrequencyTimer;
 pub use magic_spell_type_type::MagicSpellType;
 pub use nav_event_table::*;
 pub use nav_event_type::NavEvent;
+pub use node_facing_table::*;
+pub use node_facing_type::NodeFacing;
 pub use npc_brain_table::*;
 pub use npc_brain_type::NpcBrain;
 pub use peasant_table::*;
@@ -188,10 +208,12 @@ pub use set_interior_culling_reducer::set_interior_culling;
 pub use siege_weapon_type_type::SiegeWeaponType;
 pub use snapshot_type::Snapshot;
 pub use spawn_peasant_reducer::spawn_peasant;
+pub use spawn_template_blueprint_reducer::spawn_template_blueprint;
 pub use structure_table::*;
 pub use structure_type::Structure;
 pub use swap_inventory_slots_reducer::swap_inventory_slots;
 pub use swing_tool_reducer::swing_tool;
+pub use toggle_door_reducer::toggle_door;
 pub use transform_table::*;
 pub use transform_type::Transform;
 pub use unequip_weapon_reducer::unequip_weapon;
@@ -228,9 +250,21 @@ pub enum Reducer {
     AdminSetTime {
         time_of_day: f32,
     },
+    AdminSpawnBuilding {
+        template: String,
+        yaw_steps: u8,
+        x: Option<f32>,
+        z: Option<f32>,
+    },
     AdminSpawnNpc {
         ai_type_str: String,
         count: u32,
+    },
+    AdminSpawnTemplateInstant {
+        template_name: String,
+        faction_name: String,
+        origin_x: f32,
+        origin_z: f32,
     },
     AdminTeleport {
         x: f32,
@@ -354,6 +388,12 @@ pub enum Reducer {
         in_interior: bool,
     },
     SpawnPeasant,
+    SpawnTemplateBlueprint {
+        template_name: String,
+        faction_name: String,
+        origin_x: f32,
+        origin_z: f32,
+    },
     SwapInventorySlots {
         from_slot: u32,
         to_slot: u32,
@@ -365,6 +405,9 @@ pub enum Reducer {
         dx: f32,
         dy: f32,
         dz: f32,
+    },
+    ToggleDoor {
+        structure_id: u64,
     },
     UnequipWeapon {
         slot: String,
@@ -386,7 +429,9 @@ impl __sdk::Reducer for Reducer {
             Reducer::AdminKillAllNpcs => "admin_kill_all_npcs",
             Reducer::AdminRespawnResources => "admin_respawn_resources",
             Reducer::AdminSetTime { .. } => "admin_set_time",
+            Reducer::AdminSpawnBuilding { .. } => "admin_spawn_building",
             Reducer::AdminSpawnNpc { .. } => "admin_spawn_npc",
+            Reducer::AdminSpawnTemplateInstant { .. } => "admin_spawn_template_instant",
             Reducer::AdminTeleport { .. } => "admin_teleport",
             Reducer::CastHighTierMagic { .. } => "cast_high_tier_magic",
             Reducer::ChangePetStance { .. } => "change_pet_stance",
@@ -410,8 +455,10 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetCameraMode { .. } => "set_camera_mode",
             Reducer::SetInteriorCulling { .. } => "set_interior_culling",
             Reducer::SpawnPeasant => "spawn_peasant",
+            Reducer::SpawnTemplateBlueprint { .. } => "spawn_template_blueprint",
             Reducer::SwapInventorySlots { .. } => "swap_inventory_slots",
             Reducer::SwingTool { .. } => "swing_tool",
+            Reducer::ToggleDoor { .. } => "toggle_door",
             Reducer::UnequipWeapon { .. } => "unequip_weapon",
             _ => unreachable!(),
         }
@@ -453,12 +500,34 @@ impl __sdk::Reducer for Reducer {
                     time_of_day: time_of_day.clone(),
                 })
             }
+            Reducer::AdminSpawnBuilding {
+                template,
+                yaw_steps,
+                x,
+                z,
+            } => __sats::bsatn::to_vec(&admin_spawn_building_reducer::AdminSpawnBuildingArgs {
+                template: template.clone(),
+                yaw_steps: yaw_steps.clone(),
+                x: x.clone(),
+                z: z.clone(),
+            }),
             Reducer::AdminSpawnNpc { ai_type_str, count } => {
                 __sats::bsatn::to_vec(&admin_spawn_npc_reducer::AdminSpawnNpcArgs {
                     ai_type_str: ai_type_str.clone(),
                     count: count.clone(),
                 })
             }
+            Reducer::AdminSpawnTemplateInstant {
+                template_name,
+                faction_name,
+                origin_x,
+                origin_z,
+            } => __sats::bsatn::to_vec(&admin_spawn_template_instant_reducer::AdminSpawnTemplateInstantArgs {
+                template_name: template_name.clone(),
+                faction_name: faction_name.clone(),
+                origin_x: origin_x.clone(),
+                origin_z: origin_z.clone(),
+            }),
             Reducer::AdminTeleport { x, z } => {
                 __sats::bsatn::to_vec(&admin_teleport_reducer::AdminTeleportArgs {
                     x: x.clone(),
@@ -681,6 +750,17 @@ impl __sdk::Reducer for Reducer {
             Reducer::SpawnPeasant => {
                 __sats::bsatn::to_vec(&spawn_peasant_reducer::SpawnPeasantArgs {})
             }
+            Reducer::SpawnTemplateBlueprint {
+                template_name,
+                faction_name,
+                origin_x,
+                origin_z,
+            } => __sats::bsatn::to_vec(&spawn_template_blueprint_reducer::SpawnTemplateBlueprintArgs {
+                template_name: template_name.clone(),
+                faction_name: faction_name.clone(),
+                origin_x: origin_x.clone(),
+                origin_z: origin_z.clone(),
+            }),
             Reducer::SwapInventorySlots { from_slot, to_slot } => {
                 __sats::bsatn::to_vec(&swap_inventory_slots_reducer::SwapInventorySlotsArgs {
                     from_slot: from_slot.clone(),
@@ -702,6 +782,11 @@ impl __sdk::Reducer for Reducer {
                 dy: dy.clone(),
                 dz: dz.clone(),
             }),
+            Reducer::ToggleDoor { structure_id } => {
+                __sats::bsatn::to_vec(&toggle_door_reducer::ToggleDoorArgs {
+                    structure_id: structure_id.clone(),
+                })
+            }
             Reducer::UnequipWeapon { slot } => {
                 __sats::bsatn::to_vec(&unequip_weapon_reducer::UnequipWeaponArgs {
                     slot: slot.clone(),
@@ -718,14 +803,17 @@ impl __sdk::Reducer for Reducer {
 pub struct DbUpdate {
     active_projectile: __sdk::TableUpdate<ActiveProjectile>,
     combat_event: __sdk::TableUpdate<CombatEvent>,
+    door_state: __sdk::TableUpdate<DoorState>,
     equipment_loadout: __sdk::TableUpdate<EquipmentLoadout>,
     faction_component: __sdk::TableUpdate<FactionComponent>,
+    fall_hazard: __sdk::TableUpdate<FallHazard>,
     global_state: __sdk::TableUpdate<GlobalState>,
     harvestable_corpse: __sdk::TableUpdate<HarvestableCorpse>,
     health: __sdk::TableUpdate<Health>,
     hitbox_history: __sdk::TableUpdate<HitboxHistory>,
     inventory: __sdk::TableUpdate<Inventory>,
     nav_event: __sdk::TableUpdate<NavEvent>,
+    node_facing: __sdk::TableUpdate<NodeFacing>,
     npc_brain: __sdk::TableUpdate<NpcBrain>,
     peasant: __sdk::TableUpdate<Peasant>,
     pet_component: __sdk::TableUpdate<PetComponent>,
@@ -753,12 +841,18 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "combat_event" => db_update
                     .combat_event
                     .append(combat_event_table::parse_table_update(table_update)?),
+                "door_state" => db_update
+                    .door_state
+                    .append(door_state_table::parse_table_update(table_update)?),
                 "equipment_loadout" => db_update
                     .equipment_loadout
                     .append(equipment_loadout_table::parse_table_update(table_update)?),
                 "faction_component" => db_update
                     .faction_component
                     .append(faction_component_table::parse_table_update(table_update)?),
+                "fall_hazard" => db_update
+                    .fall_hazard
+                    .append(fall_hazard_table::parse_table_update(table_update)?),
                 "global_state" => db_update
                     .global_state
                     .append(global_state_table::parse_table_update(table_update)?),
@@ -777,6 +871,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "nav_event" => db_update
                     .nav_event
                     .append(nav_event_table::parse_table_update(table_update)?),
+                "node_facing" => db_update
+                    .node_facing
+                    .append(node_facing_table::parse_table_update(table_update)?),
                 "npc_brain" => db_update
                     .npc_brain
                     .append(npc_brain_table::parse_table_update(table_update)?),
@@ -848,12 +945,18 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.combat_event = cache
             .apply_diff_to_table::<CombatEvent>("combat_event", &self.combat_event)
             .with_updates_by_pk(|row| &row.id);
+        diff.door_state = cache
+            .apply_diff_to_table::<DoorState>("door_state", &self.door_state)
+            .with_updates_by_pk(|row| &row.structure_id);
         diff.equipment_loadout = cache
             .apply_diff_to_table::<EquipmentLoadout>("equipment_loadout", &self.equipment_loadout)
             .with_updates_by_pk(|row| &row.entity_id);
         diff.faction_component = cache
             .apply_diff_to_table::<FactionComponent>("faction_component", &self.faction_component)
             .with_updates_by_pk(|row| &row.entity_id);
+        diff.fall_hazard = cache
+            .apply_diff_to_table::<FallHazard>("fall_hazard", &self.fall_hazard)
+            .with_updates_by_pk(|row| &row.hazard_id);
         diff.global_state = cache
             .apply_diff_to_table::<GlobalState>("global_state", &self.global_state)
             .with_updates_by_pk(|row| &row.id);
@@ -875,6 +978,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.nav_event = cache
             .apply_diff_to_table::<NavEvent>("nav_event", &self.nav_event)
             .with_updates_by_pk(|row| &row.id);
+        diff.node_facing = cache
+            .apply_diff_to_table::<NodeFacing>("node_facing", &self.node_facing)
+            .with_updates_by_pk(|row| &row.node_id);
         diff.npc_brain = cache
             .apply_diff_to_table::<NpcBrain>("npc_brain", &self.npc_brain)
             .with_updates_by_pk(|row| &row.entity_id);
@@ -930,11 +1036,17 @@ impl __sdk::DbUpdate for DbUpdate {
                 "combat_event" => db_update
                     .combat_event
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "door_state" => db_update
+                    .door_state
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "equipment_loadout" => db_update
                     .equipment_loadout
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "faction_component" => db_update
                     .faction_component
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "fall_hazard" => db_update
+                    .fall_hazard
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "global_state" => db_update
                     .global_state
@@ -953,6 +1065,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "nav_event" => db_update
                     .nav_event
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "node_facing" => db_update
+                    .node_facing
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "npc_brain" => db_update
                     .npc_brain
@@ -1012,11 +1127,17 @@ impl __sdk::DbUpdate for DbUpdate {
                 "combat_event" => db_update
                     .combat_event
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "door_state" => db_update
+                    .door_state
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "equipment_loadout" => db_update
                     .equipment_loadout
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "faction_component" => db_update
                     .faction_component
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "fall_hazard" => db_update
+                    .fall_hazard
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "global_state" => db_update
                     .global_state
@@ -1035,6 +1156,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "nav_event" => db_update
                     .nav_event
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "node_facing" => db_update
+                    .node_facing
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "npc_brain" => db_update
                     .npc_brain
@@ -1092,14 +1216,17 @@ impl __sdk::DbUpdate for DbUpdate {
 pub struct AppliedDiff<'r> {
     active_projectile: __sdk::TableAppliedDiff<'r, ActiveProjectile>,
     combat_event: __sdk::TableAppliedDiff<'r, CombatEvent>,
+    door_state: __sdk::TableAppliedDiff<'r, DoorState>,
     equipment_loadout: __sdk::TableAppliedDiff<'r, EquipmentLoadout>,
     faction_component: __sdk::TableAppliedDiff<'r, FactionComponent>,
+    fall_hazard: __sdk::TableAppliedDiff<'r, FallHazard>,
     global_state: __sdk::TableAppliedDiff<'r, GlobalState>,
     harvestable_corpse: __sdk::TableAppliedDiff<'r, HarvestableCorpse>,
     health: __sdk::TableAppliedDiff<'r, Health>,
     hitbox_history: __sdk::TableAppliedDiff<'r, HitboxHistory>,
     inventory: __sdk::TableAppliedDiff<'r, Inventory>,
     nav_event: __sdk::TableAppliedDiff<'r, NavEvent>,
+    node_facing: __sdk::TableAppliedDiff<'r, NodeFacing>,
     npc_brain: __sdk::TableAppliedDiff<'r, NpcBrain>,
     peasant: __sdk::TableAppliedDiff<'r, Peasant>,
     pet_component: __sdk::TableAppliedDiff<'r, PetComponent>,
@@ -1136,6 +1263,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.combat_event,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<DoorState>("door_state", &self.door_state, event);
         callbacks.invoke_table_row_callbacks::<EquipmentLoadout>(
             "equipment_loadout",
             &self.equipment_loadout,
@@ -1146,6 +1274,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.faction_component,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<FallHazard>("fall_hazard", &self.fall_hazard, event);
         callbacks.invoke_table_row_callbacks::<GlobalState>(
             "global_state",
             &self.global_state,
@@ -1164,6 +1293,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<Inventory>("inventory", &self.inventory, event);
         callbacks.invoke_table_row_callbacks::<NavEvent>("nav_event", &self.nav_event, event);
+        callbacks.invoke_table_row_callbacks::<NodeFacing>("node_facing", &self.node_facing, event);
         callbacks.invoke_table_row_callbacks::<NpcBrain>("npc_brain", &self.npc_brain, event);
         callbacks.invoke_table_row_callbacks::<Peasant>("peasant", &self.peasant, event);
         callbacks.invoke_table_row_callbacks::<PetComponent>(
@@ -1863,14 +1993,17 @@ impl __sdk::SpacetimeModule for RemoteModule {
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         active_projectile_table::register_table(client_cache);
         combat_event_table::register_table(client_cache);
+        door_state_table::register_table(client_cache);
         equipment_loadout_table::register_table(client_cache);
         faction_component_table::register_table(client_cache);
+        fall_hazard_table::register_table(client_cache);
         global_state_table::register_table(client_cache);
         harvestable_corpse_table::register_table(client_cache);
         health_table::register_table(client_cache);
         hitbox_history_table::register_table(client_cache);
         inventory_table::register_table(client_cache);
         nav_event_table::register_table(client_cache);
+        node_facing_table::register_table(client_cache);
         npc_brain_table::register_table(client_cache);
         peasant_table::register_table(client_cache);
         pet_component_table::register_table(client_cache);
@@ -1888,14 +2021,17 @@ impl __sdk::SpacetimeModule for RemoteModule {
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "active_projectile",
         "combat_event",
+        "door_state",
         "equipment_loadout",
         "faction_component",
+        "fall_hazard",
         "global_state",
         "harvestable_corpse",
         "health",
         "hitbox_history",
         "inventory",
         "nav_event",
+        "node_facing",
         "npc_brain",
         "peasant",
         "pet_component",

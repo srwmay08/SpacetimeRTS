@@ -351,7 +351,7 @@ pub fn spawn_creature_visual_entity(
         Selectable, 
         RigidBody::Kinematic, 
         root_collider,
-        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default]),
+        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Environment, GameLayer::Glass]),
     ));
 
     if is_peasant {

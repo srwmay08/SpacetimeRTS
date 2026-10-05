@@ -783,6 +783,8 @@ pub fn fire_weapon(
     
     // 3. Static structures
     for s in ctx.db.structure().iter() {
+        // Architectural Note: Same rule as physics.rs - an open door is a gap in the wall.
+        if !crate::building::structure_blocks_projectiles(ctx, &s) { continue; }
         let col = rapier3d::prelude::ColliderBuilder::cuboid(1.25, 1.25, 1.25)
             .translation(rapier3d::prelude::Vector::new(s.x, s.y, s.z))
             .user_data((s.structure_id as u128) | (1 << 64))

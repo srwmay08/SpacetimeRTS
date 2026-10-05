@@ -5,6 +5,9 @@
 use std::collections::BTreeMap;
 use noise::{NoiseFn, Perlin};
 
+pub mod templates;
+pub use templates::*;
+
 // ----------------------------------------------------------------------------
 // INVENTORY & ITEM DISCOVERY
 // ----------------------------------------------------------------------------

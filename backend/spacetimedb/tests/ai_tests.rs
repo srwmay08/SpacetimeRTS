@@ -172,3 +172,105 @@ fn test_npc_brain_states_and_types() {
     ];
     assert_eq!(types.len(), 5);
 }
+
+#[test]
+fn test_npc_state_machine_door_interaction_transitions() {
+    let mut npc = backend::ai::NpcState {
+        entity_id: 300,
+        current_action: backend::ai::NpcAction::PathingToDoor,
+        target_coords: Some(Position { x: 10.0, y: 1.0, z: 20.0 }),
+        task_entity_id: Some(555),
+        last_tick: 1_000_000,
+    };
+
+    assert_eq!(npc.current_action, backend::ai::NpcAction::PathingToDoor);
+    assert_eq!(npc.task_entity_id, Some(555));
+
+    // When the door is toggled, transition to InteractingWithDoor
+    let door_open_tick = 2_000_000;
+    npc.current_action = backend::ai::NpcAction::InteractingWithDoor;
+    npc.last_tick = door_open_tick;
+
+    assert_eq!(npc.current_action, backend::ai::NpcAction::InteractingWithDoor);
+
+    // After 500ms (500_000 micros), transition to Patrolling
+    let check_tick = door_open_tick + 600_000;
+    let elapsed = check_tick - npc.last_tick;
+    assert!(elapsed >= 500_000);
+
+    npc.current_action = backend::ai::NpcAction::Patrolling;
+    assert_eq!(npc.current_action, backend::ai::NpcAction::Patrolling);
+}
+
+#[test]
+fn test_npc_state_machine_blueprint_construction_progress() {
+    let mut npc = backend::ai::NpcState {
+        entity_id: 301,
+        current_action: backend::ai::NpcAction::ConstructingBlueprint,
+        target_coords: Some(Position { x: 4.0, y: 0.5, z: 4.0 }),
+        task_entity_id: Some(777),
+        last_tick: 10_000_000,
+    };
+
+    let mut current_health = 1.0_f32;
+    let max_health = 100.0_f32;
+    let mut is_blueprint = true;
+
+    // Simulate 1-second hammer swings
+    for step in 1..=10 {
+        let current_tick = 10_000_000 + (step * 1_000_000);
+        let elapsed = current_tick - npc.last_tick;
+        assert!(elapsed >= 1_000_000);
+
+        current_health = (current_health + 10.0).min(max_health);
+        let progress = ((current_health / max_health) * 100.0) as u32;
+        if current_health >= max_health || progress >= 100 {
+            is_blueprint = false;
+            npc.current_action = backend::ai::NpcAction::Idle;
+            npc.task_entity_id = None;
+        }
+        npc.last_tick = current_tick;
+    }
+
+    assert!(!is_blueprint);
+    assert_eq!(current_health, 100.0);
+    assert_eq!(npc.current_action, backend::ai::NpcAction::Idle);
+    assert_eq!(npc.task_entity_id, None);
+}
+
+#[test]
+fn test_building_templates_grid_offsets_and_faction_styles() {
+    use backend::templates::{BuildingPiece, BuildingTemplate, Faction, GridOffset};
+
+    // 1. Watchtower (2x2 foundation, door, window, sniper perches)
+    let tower = BuildingTemplate::watchtower(Faction::HighElf);
+    assert_eq!(tower.faction, Faction::HighElf);
+    assert_eq!(tower.blocks.get(&GridOffset(0, 0, 0)), Some(&BuildingPiece::Foundation));
+    assert_eq!(tower.blocks.get(&GridOffset(1, 0, 0)), Some(&BuildingPiece::Foundation));
+    assert_eq!(tower.blocks.get(&GridOffset(0, 1, 0)), Some(&BuildingPiece::Doorway));
+    assert_eq!(tower.blocks.get(&GridOffset(1, 1, 0)), Some(&BuildingPiece::SolidWall));
+    assert_eq!(tower.blocks.get(&GridOffset(1, 1, 1)), Some(&BuildingPiece::WindowWall));
+
+    // Check HighElf piece names
+    assert_eq!(BuildingPiece::Doorway.to_piece_name(Faction::HighElf), "HighElf_Door");
+    assert_eq!(BuildingPiece::WindowWall.to_piece_name(Faction::HighElf), "HighElf_Window");
+    assert_eq!(BuildingPiece::SolidWall.to_piece_name(Faction::HighElf), "HighElf_Wall");
+    assert_eq!(BuildingPiece::Foundation.to_piece_name(Faction::HighElf), "HighElf_Foundation");
+
+    // 2. Palisade (4x1 wall with gate)
+    let palisade = BuildingTemplate::palisade(Faction::DarkElf);
+    assert_eq!(palisade.blocks.len(), 12);
+    assert_eq!(palisade.blocks.get(&GridOffset(1, 1, 0)), Some(&BuildingPiece::Doorway));
+    assert_eq!(BuildingPiece::Doorway.to_piece_name(Faction::DarkElf), "DarkElf_Door");
+
+    // 3. Barbarian style
+    assert_eq!(BuildingPiece::Doorway.to_piece_name(Faction::Barbarian), "Barbarian_Door");
+    assert_eq!(BuildingPiece::SolidWall.to_piece_name(Faction::Barbarian), "Barbarian_Wall");
+
+    // 4. World position transformation
+    let offset = GridOffset(2, 1, 3);
+    let (wx, wy, wz) = offset.to_world_pos(10.0, 5.0, 20.0);
+    assert_eq!(wx, 18.0); // 10 + 2*4
+    assert_eq!(wy, 8.0);  // 5 + 1*3
+    assert_eq!(wz, 32.0); // 20 + 3*4
+}

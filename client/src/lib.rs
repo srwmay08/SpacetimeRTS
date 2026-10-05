@@ -30,3 +30,4 @@ pub mod props;
 pub mod creatures;
 pub mod resource_nodes;
 pub mod grass;
+pub mod templates;

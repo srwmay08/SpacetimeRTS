@@ -7,7 +7,7 @@
 // while advanced pieces (Walls, Floors, Roofs, Ramps) enforce active workbench proximity.
 
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
-use crate::movement::player_session;
+use crate::movement::{player_session, transform};
 use crate::inventory;
 use crate::CombatEvent;
 use crate::combat_event;
@@ -53,14 +53,46 @@ pub struct Structure {
     pub owner_id: u64,
 }
 
+/// Architectural Note: Per-door open/closed state.
+/// Kept in its own table (instead of a new `Structure` column) so the existing
+/// `structure` schema, its generated bindings and every `Structure { .. }` literal stay
+/// untouched. A missing row means "closed", so rows are created lazily on the first toggle
+/// and removed again when the door is destroyed (see `destroy_structure_internal`).
+/// Clients subscribe to this table and animate the door leaf towards `is_open`; the
+/// server never simulates a hinge, which keeps doors jitter-free and desync-free.
+#[table(accessor = door_state, public)]
+#[derive(Clone)]
+pub struct DoorState {
+    #[primary_key]
+    pub structure_id: u64,
+    pub is_open: bool,
+}
+
+/// Maximum distance (m) between a player and a door for `toggle_door` to be accepted.
+/// Slightly larger than the client's 3m prompt radius to tolerate network latency.
+pub const DOOR_INTERACT_RANGE: f32 = 5.0;
+
 // ----------------------------------------------------------------------------
 // BUILDING LOGIC & REDUCERS
 // ----------------------------------------------------------------------------
 
+/// Strips faction prefix (e.g. "HighElf_", "Human_", "DarkElf_") to get canonical piece name.
+pub fn base_piece_type(piece_type: &str) -> &str {
+    if let Some((_, base)) = piece_type.split_once('_') {
+        base
+    } else if let Some((_, base)) = piece_type.split_once(':') {
+        base
+    } else {
+        piece_type
+    }
+}
+
 pub fn get_piece_max_health(piece_type: &str) -> f32 {
-    match piece_type {
+    match base_piece_type(piece_type) {
         "Foundation" => 400.0,
         "Wall" => 200.0,
+        "Window" => 150.0,
+        "Door" => 120.0,
         "Floor" => 150.0,
         "Roof" => 150.0,
         "Ramp" => 250.0,
@@ -70,9 +102,126 @@ pub fn get_piece_max_health(piece_type: &str) -> f32 {
     }
 }
 
+/// Stability lost when a piece of this type is attached to its parent, or `None` for
+/// unknown piece types. Single source of truth for `place_structure` and for the NPC
+/// building templates, so scripted buildings obey exactly the same structural rules as
+/// player-placed ones.
+pub fn get_piece_decay(piece_type: &str) -> Option<u32> {
+    match base_piece_type(piece_type) {
+        "Workbench" | "Campfire" | "Bed" | "Foundation" => Some(0),
+        "Wall" | "Window" | "Door" => Some(20),
+        "Floor" => Some(25),
+        "Roof" => Some(30),
+        "Ramp" => Some(25),
+        _ => None,
+    }
+}
+
+/// Wood cost (total, paid over 4 hammer swings) and stone cost for a piece type.
+/// Every value must stay divisible by 4 so each swing contributes exactly 25%.
+pub fn get_piece_cost(piece_type: &str) -> (u32, u32) {
+    match base_piece_type(piece_type) {
+        "Workbench" => (8, 0),
+        "Campfire" => (4, 4),
+        "Foundation" => (20, 0),
+        "Wall" => (8, 0),
+        "Window" => (8, 0),
+        "Door" => (12, 0),
+        "Floor" => (12, 0),
+        "Roof" => (12, 0),
+        "Ramp" => (16, 0),
+        _ => (4, 0),
+    }
+}
+
+/// Whether a structure of this type still stops projectiles / hitscan rays.
+/// An open door leaves a gap in the wall, so shots (and NPC repulsion) pass through it.
+/// Windows deliberately DO block projectiles: they only let *sight* through (the client
+/// excludes the `Glass` collision layer from vision rays).
+pub fn blocks_projectiles(piece_type: &str, door_open: bool) -> bool {
+    !(base_piece_type(piece_type) == "Door" && door_open)
+}
+
+/// Looks up the open state of a door. Missing row == closed.
+pub fn is_door_open(ctx: &ReducerContext, structure_id: u64) -> bool {
+    ctx.db.door_state().structure_id().find(structure_id).map_or(false, |d| d.is_open)
+}
+
+/// Convenience wrapper combining `blocks_projectiles` with the DB lookup. Only doors incur
+/// a table read, so the high-frequency physics rebuild stays cheap.
+pub fn structure_blocks_projectiles(ctx: &ReducerContext, s: &Structure) -> bool {
+    if base_piece_type(&s.piece_type) != "Door" {
+        return true;
+    }
+    blocks_projectiles(&s.piece_type, is_door_open(ctx, s.structure_id))
+}
+
+/// Authoritative door state change usable by reducers AND by NPC programs (e.g. a peasant
+/// opening the door of its cottage). Emits a `NavEvent` so navigation meshes refresh
+/// around the doorway.
+pub fn set_door_open_internal(ctx: &ReducerContext, structure_id: u64, open: bool) -> Result<(), String> {
+    let structure = ctx.db.structure().structure_id().find(structure_id)
+        .ok_or_else(|| "Structure not found.".to_string())?;
+
+    if base_piece_type(&structure.piece_type) != "Door" {
+        return Err("Structure is not a door.".to_string());
+    }
+    if structure.is_blueprint {
+        return Err("Door is still a blueprint.".to_string());
+    }
+
+    match ctx.db.door_state().structure_id().find(structure_id) {
+        Some(mut state) => {
+            if state.is_open == open {
+                return Ok(());
+            }
+            state.is_open = open;
+            ctx.db.door_state().structure_id().update(state);
+        }
+        None => {
+            ctx.db.door_state().insert(DoorState { structure_id, is_open: open });
+        }
+    }
+
+    ctx.db.nav_event().insert(crate::NavEvent {
+        id: 0,
+        min_x: structure.x - 3.0,
+        min_y: structure.y - 3.0,
+        min_z: structure.z - 3.0,
+        max_x: structure.x + 3.0,
+        max_y: structure.y + 3.0,
+        max_z: structure.z + 3.0,
+    });
+    Ok(())
+}
+
+/// Player-facing door toggle. Range-checked against the server-side transform so a
+/// modified client cannot open doors across the map.
+#[reducer]
+pub fn toggle_door(ctx: &ReducerContext, structure_id: u64) -> Result<(), String> {
+    let session = ctx.db.player_session().identity().find(ctx.sender())
+        .ok_or_else(|| "Unauthorized: No active session.".to_string())?;
+
+    let structure = ctx.db.structure().structure_id().find(structure_id)
+        .ok_or_else(|| "Structure not found.".to_string())?;
+
+    let player_t = ctx.db.transform().entity_id().find(session.entity_id)
+        .ok_or_else(|| "Player transform not found.".to_string())?;
+
+    let dist_sq = (player_t.x - structure.x).powi(2)
+        + (player_t.y - structure.y).powi(2)
+        + (player_t.z - structure.z).powi(2);
+    if dist_sq > DOOR_INTERACT_RANGE * DOOR_INTERACT_RANGE {
+        return Err("Too far from the door.".to_string());
+    }
+
+    let currently_open = is_door_open(ctx, structure_id);
+    set_door_open_internal(ctx, structure_id, !currently_open)
+}
+
 pub fn is_covered(ctx: &ReducerContext, x: f32, y: f32, z: f32) -> bool {
     for s in ctx.db.structure().iter() {
-        if s.piece_type == "Roof" && !s.is_blueprint {
+        if base_piece_type(&s.piece_type) == "Roof" && !s.is_blueprint {
             let dist_sq = (s.x - x).powi(2) + (s.z - z).powi(2);
             if dist_sq <= 9.0 && s.y > y && (s.y - y) < 10.0 {
                 return true;
@@ -119,10 +268,10 @@ pub fn place_structure(
     // Foundations, Workbenches, and Campfires can be placed freely on terrain/voxels
     // to establish a camp. Advanced superstructures (Walls, Floors, Roofs, Ramps)
     // strictly require being within 20m of a constructed, active Workbench.
-    let is_starter_piece = matches!(piece_type.as_str(), "Foundation" | "Workbench" | "Campfire");
+    let is_starter_piece = matches!(base_piece_type(piece_type.as_str()), "Foundation" | "Workbench" | "Campfire");
     if !is_starter_piece {
         let mut near_workbench = false;
-        for s in ctx.db.structure().iter().filter(|s| s.piece_type == "Workbench" && !s.is_blueprint) {
+        for s in ctx.db.structure().iter().filter(|s| base_piece_type(&s.piece_type) == "Workbench" && !s.is_blueprint) {
             if (s.x - x).powi(2) + (s.z - z).powi(2) <= 400.0 {
                 near_workbench = true;
                 break;
@@ -133,19 +282,15 @@ pub fn place_structure(
         }
     }
 
-    let decay_penalty = match piece_type.as_str() {
-        "Workbench" | "Campfire" | "Bed" | "Foundation" => 0,
-        "Wall" => 20,
-        "Floor" => 25,
-        "Roof" => 30,
-        "Ramp" => 25,
-        _ => return Err(format!("Unknown piece type: {}", piece_type)),
-    };
+    // Architectural Note: Decay is looked up through the shared `get_piece_decay` table so
+    // player-placed pieces and scripted NPC buildings obey identical stability rules.
+    let decay_penalty = get_piece_decay(piece_type.as_str())
+        .ok_or_else(|| format!("Unknown piece type: {}", piece_type))?;
 
     let stability: u32;
     let is_grounded: bool;
 
-    if (piece_type == "Foundation" || piece_type == "Ramp" || piece_type == "Workbench" || piece_type == "Campfire") && parent_id.is_none() {
+    if matches!(base_piece_type(piece_type.as_str()), "Foundation" | "Ramp" | "Workbench" | "Campfire") && parent_id.is_none() {
         let ground_y = crate::get_terrain_height(x, z);
         let voxel_mat = voxel::get_voxel_at(ctx, x, y - 0.5, z);
 
@@ -223,17 +368,9 @@ pub fn contribute_construction(ctx: &ReducerContext, structure_id: u64) -> Resul
         return Err("You must equip a Hammer to contribute materials.".to_string());
     }
 
-    // Architectural Note: Evenly divisible construction costs by 4 swings (25% per hammer hit)
-    let (wood_cost, stone_cost) = match structure.piece_type.as_str() {
-        "Workbench" => (8, 0),    // 2 wood per swing
-        "Campfire" => (4, 4),     // 1 wood, 1 stone per swing
-        "Foundation" => (20, 0),  // 5 wood per swing
-        "Wall" => (8, 0),         // 2 wood per swing
-        "Floor" => (12, 0),       // 3 wood per swing
-        "Roof" => (12, 0),        // 3 wood per swing
-        "Ramp" => (16, 0),        // 4 wood per swing
-        _ => (4, 0),
-    };
+    // Architectural Note: Evenly divisible construction costs by 4 swings (25% per hammer hit).
+    // The table lives in `get_piece_cost` (Window = 8 wood, Door = 12 wood, etc.).
+    let (wood_cost, stone_cost) = get_piece_cost(structure.piece_type.as_str());
 
     let wood_swing = wood_cost / 4;
     let stone_swing = stone_cost / 4;
@@ -353,6 +490,8 @@ pub fn destroy_structure_internal(ctx: &ReducerContext, target_structure_id: u64
     for id in &collapse_queue {
         if let Some(structure) = ctx.db.structure().structure_id().find(*id) {
             ctx.db.structure().structure_id().delete(*id);
+            // Architectural Note: Drop any door state so destroyed doors never leave stale rows.
+            ctx.db.door_state().structure_id().delete(*id);
 
             ctx.db.combat_event().insert(CombatEvent {
                 id: 0,

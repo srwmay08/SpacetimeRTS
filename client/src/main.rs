@@ -27,6 +27,7 @@ pub mod props;
 pub mod creatures;
 pub mod resource_nodes;
 pub mod grass;
+pub mod templates;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -93,6 +94,8 @@ fn main() {
         .init_state::<GameState>()
         .init_state::<CameraMode>()
         .add_event::<ActionEvent>() 
+        .add_event::<BuildingDestructionEvent>()
+        .add_event::<SpawnBuildingEvent>()
         
         // P2 Fix: Configure SystemSets for explicit ordering
         .configure_sets(Update, (
@@ -177,6 +180,15 @@ fn main() {
             update_tree_colors,
             update_berry_visuals, 
             sync_structures, 
+            spawn_modular_building_system,
+            update_building_destruction_visuals,
+            handle_building_destruction,
+            update_building_destruction_animations,
+            update_rune_light_decay,
+            sync_door_states,
+            animate_doors,
+            sync_fall_hazards,
+            update_fall_hazards,
             sync_active_projectiles,
             tick_voxel_gibs,
         ).run_if(in_state(GameState::InGame)))

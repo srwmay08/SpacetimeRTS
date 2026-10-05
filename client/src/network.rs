@@ -90,6 +90,9 @@ pub fn init_network_connection(
                 "SELECT * FROM voxel_chunk".to_string(),
                 "SELECT * FROM active_projectile".to_string(),
                 "SELECT * FROM equipment_loadout".to_string(),
+                "SELECT * FROM door_state".to_string(),
+                "SELECT * FROM fall_hazard".to_string(),
+                "SELECT * FROM node_facing".to_string(),
             ]);
 
             if let Ok(mut guard) = store_clone.lock() {
@@ -162,7 +165,7 @@ pub fn init_network_connection(
         Collider::capsule(0.4, 1.2),
         ColliderDensity(1.0),
         SweptCcd::default(),
-        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment]),
+        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment, GameLayer::Glass]),
         LockedAxes::ROTATION_LOCKED,
         GravityScale(0.0),
         LinearVelocity::ZERO,
