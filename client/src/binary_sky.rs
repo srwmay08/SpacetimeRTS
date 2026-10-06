@@ -262,6 +262,23 @@ pub struct BinarySkyConfig {
     pub ambient_illuminance_lux: Option<f32>,
     /// Dynamic scale factor for cosmic starfield points of light (default: 1.0).
     pub starfield_scale: f32,
+
+    // ------------------------------------------------------------------------
+    // Cascaded Shadow Map (CSM) Fidelity Profiles
+    // ------------------------------------------------------------------------
+    /// Number of CSM cascades for Host Star A (default: 3).
+    pub star_a_num_cascades: usize,
+    /// Maximum shadow distance for Star A in meters (default: 160.0m).
+    pub star_a_maximum_shadow_distance: f32,
+    /// First cascade far bound for Star A in meters (default: 15.0m for near-field contact shadows).
+    pub star_a_first_cascade_far_bound: f32,
+
+    /// Number of CSM cascades for Companion Star B (default: 2 - asymmetric optimization).
+    pub star_b_num_cascades: usize,
+    /// Maximum shadow distance for Star B in meters (default: 112.5m - tightened for performance).
+    pub star_b_maximum_shadow_distance: f32,
+    /// First cascade far bound for Star B in meters (default: 18.0m).
+    pub star_b_first_cascade_far_bound: f32,
 }
 
 impl Default for BinarySkyConfig {
@@ -296,6 +313,12 @@ impl Default for BinarySkyConfig {
             star_b_shadows_enabled: true,
             ambient_illuminance_lux: None,
             starfield_scale: 1.0,
+            star_a_num_cascades: 3,
+            star_a_maximum_shadow_distance: 160.0,
+            star_a_first_cascade_far_bound: 15.0,
+            star_b_num_cascades: 2,
+            star_b_maximum_shadow_distance: 112.5,
+            star_b_first_cascade_far_bound: 18.0,
         }
     }
 }
@@ -457,11 +480,13 @@ impl Default for AtmosphericWeather {
 // ============================================================================
 
 /// Tag component marking the entity containing Star A's `DirectionalLightBundle`.
-#[derive(Component, Debug, Default)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default, Reflect)]
+#[reflect(Component)]
 pub struct PrimaryStar;
 
 /// Tag component marking the entity containing Star B's `DirectionalLightBundle`.
-#[derive(Component, Debug, Default)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default, Reflect)]
+#[reflect(Component)]
 pub struct SecondaryStar;
 
 /// Tag component marking the 3D camera receiving atmospheric sky and fog updates.
@@ -1028,10 +1053,10 @@ pub fn setup_binary_sky_environment(
 
     // Spawn Host Primary Star A Directional Light (Dominant Shadow Caster - Higher Fidelity CSM)
     let cascade_config_a = CascadeShadowConfigBuilder {
-        num_cascades: 3,
+        num_cascades: config.star_a_num_cascades,
         minimum_distance: 0.1,
-        maximum_distance: 160.0,
-        first_cascade_far_bound: 15.0,
+        maximum_distance: config.star_a_maximum_shadow_distance,
+        first_cascade_far_bound: config.star_a_first_cascade_far_bound,
         overlap_proportion: 0.20,
     }
     .build();
@@ -1055,10 +1080,10 @@ pub fn setup_binary_sky_environment(
 
     // Spawn Secondary Dwarf Star B Directional Light (Asymmetric CSM Tier: 2 cascades, 112.5m)
     let cascade_config_b = CascadeShadowConfigBuilder {
-        num_cascades: 2,
+        num_cascades: config.star_b_num_cascades,
         minimum_distance: 0.1,
-        maximum_distance: 112.5,
-        first_cascade_far_bound: 18.0,
+        maximum_distance: config.star_b_maximum_shadow_distance,
+        first_cascade_far_bound: config.star_b_first_cascade_far_bound,
         overlap_proportion: 0.20,
     }
     .build();
@@ -1903,6 +1928,8 @@ pub struct BinarySkyPlugin;
 impl Plugin for BinarySkyPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DirectionalLightShadowMap { size: 2048 })
+            .register_type::<PrimaryStar>()
+            .register_type::<SecondaryStar>()
             .init_resource::<BinarySkyConfig>()
             .init_resource::<BinaryEphemerisState>()
             .init_resource::<AtmosphericRadianceCache>()
@@ -2515,5 +2542,57 @@ mod tests {
         // Fog color and ClearColor must match the horizon color
         let clear_color = app.world().resource::<ClearColor>().0;
         assert_eq!(fog.color, clear_color, "Fog color must match clear color for seamless horizon blending");
+    }
+
+    #[test]
+    fn test_asymmetric_cascade_configuration_construction() {
+        let config = BinarySkyConfig::default();
+
+        // Primary star: 3 cascades, 160m
+        let cascade_a = CascadeShadowConfigBuilder {
+            num_cascades: config.star_a_num_cascades,
+            minimum_distance: 0.1,
+            maximum_distance: config.star_a_maximum_shadow_distance,
+            first_cascade_far_bound: config.star_a_first_cascade_far_bound,
+            overlap_proportion: 0.20,
+        }
+        .build();
+
+        // Secondary star: 2 cascades, 112.5m
+        let cascade_b = CascadeShadowConfigBuilder {
+            num_cascades: config.star_b_num_cascades,
+            minimum_distance: 0.1,
+            maximum_distance: config.star_b_maximum_shadow_distance,
+            first_cascade_far_bound: config.star_b_first_cascade_far_bound,
+            overlap_proportion: 0.20,
+        }
+        .build();
+
+        assert_eq!(cascade_a.bounds.len(), 3);
+        assert_eq!(cascade_b.bounds.len(), 2);
+        assert!(cascade_a.bounds.last().unwrap() > cascade_b.bounds.last().unwrap());
+    }
+
+    #[test]
+    fn test_dual_shadow_casting_progression() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+        app.add_plugins(BinarySkyPlugin);
+
+        // High noon: Star A should be at zenith/high elevation
+        app.update();
+
+        let mut light_query = app.world_mut().query::<(&DirectionalLight, Option<&PrimaryStar>, Option<&SecondaryStar>)>();
+        let lights: Vec<(&DirectionalLight, bool, bool)> = light_query
+            .iter(app.world())
+            .map(|(l, p, s)| (l, p.is_some(), s.is_some()))
+            .collect();
+
+        assert_eq!(lights.len(), 2, "BinarySkyPlugin must spawn exactly 2 directional lights");
+        let star_a = lights.iter().find(|(_, is_p, _)| *is_p).expect("Star A must exist");
+        assert!(star_a.0.shadows_enabled, "Star A must have shadows enabled at default high noon");
     }
 }
