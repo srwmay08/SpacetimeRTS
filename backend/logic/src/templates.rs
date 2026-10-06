@@ -2,7 +2,8 @@
 // BUILDING TEMPLATES & FACTION BLUEPRINT STYLES (Pure Logic / Client-Shared)
 // ----------------------------------------------------------------------------
 // Architectural Note: Provides deterministic multi-story building templates
-// (watchtowers, palisades, cottages, settlements) for NPC builders and RTS proxies.
+// (watchtowers, palisades, cottages, settlements) for NPC builders, SpacetimeDB
+// reducers, and client-side RTS proxies.
 // All local piece offsets are keyed in a BTreeMap<GridOffset, BuildingPiece> to strictly
 // adhere to determinism guardrails (no HashMaps).
 
@@ -33,6 +34,15 @@ impl Faction {
             Self::HighElf => "HighElf",
             Self::DarkElf => "DarkElf",
             Self::Barbarian => "Barbarian",
+        }
+    }
+
+    pub fn from_str_name(name: &str) -> Self {
+        match name.to_ascii_lowercase().as_str() {
+            "highelf" | "high_elf" => Self::HighElf,
+            "darkelf" | "dark_elf" => Self::DarkElf,
+            "barbarian" => Self::Barbarian,
+            _ => Self::Human,
         }
     }
 }
@@ -220,5 +230,152 @@ impl BuildingTemplate {
             blocks.insert(GridOffset(offset.0 + 2, offset.1, offset.2), piece);
         }
         Self { blocks, faction }
+    }
+}
+
+/// Identifiers for multi-story blueprint templates supported in build mode and RTS construction.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Default)]
+pub enum BuildingTemplateType {
+    #[default]
+    Watchtower,
+    Palisade,
+    Cottage,
+    Settlement,
+}
+
+impl BuildingTemplateType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Watchtower => "Watchtower (2x2 Multi-story)",
+            Self::Palisade => "Palisade Gate & Wall",
+            Self::Cottage => "Residential Cottage",
+            Self::Settlement => "Settlement Outpost",
+        }
+    }
+
+    pub fn to_api_name(&self) -> &'static str {
+        match self {
+            Self::Watchtower => "watchtower",
+            Self::Palisade => "palisade",
+            Self::Cottage => "cottage",
+            Self::Settlement => "settlement",
+        }
+    }
+
+    pub fn from_api_name(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "watchtower" | "tower" => Some(Self::Watchtower),
+            "palisade" | "wall" => Some(Self::Palisade),
+            "cottage" | "house" => Some(Self::Cottage),
+            "settlement" | "outpost" => Some(Self::Settlement),
+            _ => None,
+        }
+    }
+
+    pub fn wood_cost(&self) -> u32 {
+        match self {
+            Self::Watchtower => 120,
+            Self::Palisade => 90,
+            Self::Cottage => 70,
+            Self::Settlement => 260,
+        }
+    }
+
+    pub fn to_template(&self, faction: Faction) -> BuildingTemplate {
+        match self {
+            Self::Watchtower => BuildingTemplate::watchtower(faction),
+            Self::Palisade => BuildingTemplate::palisade(faction),
+            Self::Cottage => BuildingTemplate::cottage(faction),
+            Self::Settlement => BuildingTemplate::settlement(faction),
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Watchtower => Self::Palisade,
+            Self::Palisade => Self::Cottage,
+            Self::Cottage => Self::Settlement,
+            Self::Settlement => Self::Watchtower,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_building_template_type_cycle_and_metadata() {
+        let t = BuildingTemplateType::Watchtower;
+        assert_eq!(t.to_api_name(), "watchtower");
+        assert_eq!(t.wood_cost(), 120);
+
+        let t2 = t.next();
+        assert_eq!(t2, BuildingTemplateType::Palisade);
+        assert_eq!(t2.to_api_name(), "palisade");
+        assert_eq!(t2.wood_cost(), 90);
+
+        let t3 = t2.next();
+        assert_eq!(t3, BuildingTemplateType::Cottage);
+        assert_eq!(t3.to_api_name(), "cottage");
+        assert_eq!(t3.wood_cost(), 70);
+
+        let t4 = t3.next();
+        assert_eq!(t4, BuildingTemplateType::Settlement);
+        assert_eq!(t4.to_api_name(), "settlement");
+        assert_eq!(t4.wood_cost(), 260);
+
+        let t5 = t4.next();
+        assert_eq!(t5, BuildingTemplateType::Watchtower);
+    }
+
+    #[test]
+    fn test_from_api_name() {
+        assert_eq!(BuildingTemplateType::from_api_name("watchtower"), Some(BuildingTemplateType::Watchtower));
+        assert_eq!(BuildingTemplateType::from_api_name("TOWER"), Some(BuildingTemplateType::Watchtower));
+        assert_eq!(BuildingTemplateType::from_api_name("palisade"), Some(BuildingTemplateType::Palisade));
+        assert_eq!(BuildingTemplateType::from_api_name("wall"), Some(BuildingTemplateType::Palisade));
+        assert_eq!(BuildingTemplateType::from_api_name("cottage"), Some(BuildingTemplateType::Cottage));
+        assert_eq!(BuildingTemplateType::from_api_name("house"), Some(BuildingTemplateType::Cottage));
+        assert_eq!(BuildingTemplateType::from_api_name("settlement"), Some(BuildingTemplateType::Settlement));
+        assert_eq!(BuildingTemplateType::from_api_name("outpost"), Some(BuildingTemplateType::Settlement));
+        assert_eq!(BuildingTemplateType::from_api_name("invalid"), None);
+    }
+
+    #[test]
+    fn test_template_block_counts_and_offsets() {
+        let tower = BuildingTemplate::watchtower(Faction::HighElf);
+        assert_eq!(tower.blocks.len(), 16);
+        assert_eq!(tower.faction, Faction::HighElf);
+        assert_eq!(tower.blocks.get(&GridOffset(0, 1, 0)), Some(&BuildingPiece::Doorway));
+        assert_eq!(tower.blocks.get(&GridOffset(1, 1, 1)), Some(&BuildingPiece::WindowWall));
+
+        let palisade = BuildingTemplate::palisade(Faction::Human);
+        assert_eq!(palisade.blocks.len(), 12);
+        assert_eq!(palisade.blocks.get(&GridOffset(1, 1, 0)), Some(&BuildingPiece::Doorway));
+
+        let cottage = BuildingTemplate::cottage(Faction::DarkElf);
+        assert_eq!(cottage.blocks.len(), 8);
+        assert_eq!(cottage.blocks.get(&GridOffset(0, 1, 0)), Some(&BuildingPiece::Doorway));
+
+        let settlement = BuildingTemplate::settlement(Faction::Barbarian);
+        assert_eq!(settlement.blocks.len(), 28);
+    }
+
+    #[test]
+    fn test_grid_offset_world_conversion() {
+        let offset = GridOffset(2, 3, -1);
+        let (wx, wy, wz) = offset.to_world_pos(10.0, 0.0, 20.0);
+        assert_eq!(wx, 10.0 + 8.0);
+        assert_eq!(wy, 0.0 + 9.0);
+        assert_eq!(wz, 20.0 - 4.0);
+    }
+
+    #[test]
+    fn test_faction_parsing() {
+        assert_eq!(Faction::from_str_name("high_elf"), Faction::HighElf);
+        assert_eq!(Faction::from_str_name("DarkElf"), Faction::DarkElf);
+        assert_eq!(Faction::from_str_name("BARBARIAN"), Faction::Barbarian);
+        assert_eq!(Faction::from_str_name("unknown"), Faction::Human);
     }
 }
