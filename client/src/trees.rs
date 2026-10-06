@@ -621,15 +621,6 @@ pub fn create_lowpoly_fallen_log_mesh(seed: u64) -> Mesh {
     builder.build()
 }
 
-// ----------------------------------------------------------------------------
-// BACKWARD-COMPATIBILITY ALIASES
-// ----------------------------------------------------------------------------
-
-#[inline] pub fn create_voxel_oak_mesh(seed: u64) -> Mesh { create_lowpoly_oak_mesh(seed) }
-#[inline] pub fn create_voxel_pine_mesh(seed: u64) -> Mesh { create_lowpoly_pine_mesh(seed) }
-#[inline] pub fn create_voxel_round_tree_mesh(seed: u64) -> Mesh { create_lowpoly_round_tree_mesh(seed) }
-#[inline] pub fn create_voxel_dead_tree_mesh(seed: u64) -> Mesh { create_lowpoly_dead_tree_mesh(seed) }
-#[inline] pub fn create_voxel_fallen_log_mesh(seed: u64) -> Mesh { create_lowpoly_fallen_log_mesh(seed) }
 
 // ----------------------------------------------------------------------------
 // TREE MESH CACHE

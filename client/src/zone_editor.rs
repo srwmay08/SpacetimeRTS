@@ -22,7 +22,7 @@ use tracing::info;
 
 use crate::core::*;
 use crate::components::*;
-use crate::trees::{create_voxel_oak_mesh, create_voxel_pine_mesh, create_voxel_dead_tree_mesh};
+use crate::trees::{create_lowpoly_oak_mesh, create_lowpoly_pine_mesh, create_lowpoly_dead_tree_mesh};
 use crate::props::{create_voxel_rock_mesh, create_voxel_bush_mesh, create_voxel_flint_mesh};
 use crate::creatures::{
     create_voxel_peasant_mesh, create_voxel_goblin_mesh, create_voxel_deer_mesh,
@@ -545,9 +545,9 @@ pub fn handle_editor_brush_painting(
         match editor.tool_category {
             EditorToolCategory::Doodads => {
                 let (mesh, scale) = match editor.doodad_choice {
-                    DoodadChoice::AutumnOak => (meshes.add(create_voxel_oak_mesh(1001)), 1.0),
-                    DoodadChoice::AlpinePine => (meshes.add(create_voxel_pine_mesh(2002)), 1.1),
-                    DoodadChoice::DeadTree => (meshes.add(create_voxel_dead_tree_mesh(3003)), 1.0),
+                    DoodadChoice::AutumnOak => (meshes.add(create_lowpoly_oak_mesh(1001)), 1.0),
+                    DoodadChoice::AlpinePine => (meshes.add(create_lowpoly_pine_mesh(2002)), 1.1),
+                    DoodadChoice::DeadTree => (meshes.add(create_lowpoly_dead_tree_mesh(3003)), 1.0),
                     DoodadChoice::GraniteBoulder => (meshes.add(create_voxel_rock_mesh()), 1.3),
                     DoodadChoice::KnappedFlint => (meshes.add(create_voxel_flint_mesh()), 1.0),
                     DoodadChoice::BerryBush => (meshes.add(create_voxel_bush_mesh()), 1.0),

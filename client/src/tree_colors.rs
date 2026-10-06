@@ -353,14 +353,14 @@ mod tests {
 
     #[test]
     fn test_tree_mesh_procedural_variation() {
-        let oak1 = create_voxel_oak_mesh(1001);
-        let oak2 = create_voxel_oak_mesh(2002);
-        let pine1 = create_voxel_pine_mesh(3003);
-        let pine2 = create_voxel_pine_mesh(4004);
-        let dead1 = create_voxel_dead_tree_mesh(5005);
-        let dead2 = create_voxel_dead_tree_mesh(6006);
-        let round1 = create_voxel_round_tree_mesh(7007);
-        let round2 = create_voxel_round_tree_mesh(8008);
+        let oak1 = create_lowpoly_oak_mesh(1001);
+        let oak2 = create_lowpoly_oak_mesh(2002);
+        let pine1 = create_lowpoly_pine_mesh(3003);
+        let pine2 = create_lowpoly_pine_mesh(4004);
+        let dead1 = create_lowpoly_dead_tree_mesh(5005);
+        let dead2 = create_lowpoly_dead_tree_mesh(6006);
+        let round1 = create_lowpoly_round_tree_mesh(7007);
+        let round2 = create_lowpoly_round_tree_mesh(8008);
 
         // All meshes should have vertex positions, colors, normals, and indices
         for mesh in [&oak1, &oak2, &pine1, &pine2, &dead1, &dead2, &round1, &round2] {
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn test_fallen_log_mesh_generation() {
-        let log = create_voxel_fallen_log_mesh(9999);
+        let log = create_lowpoly_fallen_log_mesh(9999);
         assert!(log.count_vertices() > 50);
         assert!(log.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
     }
