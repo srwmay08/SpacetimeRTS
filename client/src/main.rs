@@ -112,6 +112,7 @@ fn main() {
         .insert_resource(BuildModeState::default())
         .insert_resource(NetworkCullingState::default()) 
         .insert_resource(CameraTransitionState::default())
+        .insert_resource(CharacterCameraSettings::default())
         .insert_resource(ConsoleState::default())
         .insert_resource(DragDropState::default())
         .insert_resource(ActiveItemSlot(0))
