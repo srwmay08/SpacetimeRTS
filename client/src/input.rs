@@ -28,17 +28,19 @@ use crate::module_bindings::door_state_table::DoorStateTableAccess;
 use crate::module_bindings::equipment_loadout_table::EquipmentLoadoutTableAccess;
 use crate::module_bindings::equip_weapon_reducer::equip_weapon;
 use crate::weapons::EquippedHandSide;
-use spacetime_rts_logic::HandSide;
+use spacetime_rts_logic::{HandSide, TacticalAbilityKind};
 
 // ----------------------------------------------------------------------------
-// EVENTS & ENUMS
+// EVENTS, ENUMS & ACTION BUFFER (Unified Input Pipeline)
 // ----------------------------------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum VirtualAction {
     Primary,
     Secondary,
     Interact,
+    Jump,
+    UseAbility(TacticalAbilityKind),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -48,12 +50,82 @@ pub enum ActionState {
     JustReleased,
 }
 
-#[derive(Event, Debug)]
+#[derive(Event, Debug, Clone)]
 pub struct ActionEvent {
     pub action: VirtualAction,
     pub state: ActionState,
     pub cursor_pos: Option<Vec2>,
     pub is_over_ui: bool, 
+}
+
+/// A buffered player action intent with Time-To-Live (TTL) preventing "eaten inputs".
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BufferedAction {
+    pub action: VirtualAction,
+    pub timestamp_seconds: f64,
+    pub ttl_seconds: f32,
+}
+
+impl BufferedAction {
+    pub fn new(action: VirtualAction, timestamp_seconds: f64, ttl_seconds: f32) -> Self {
+        Self {
+            action,
+            timestamp_seconds,
+            ttl_seconds,
+        }
+    }
+
+    pub fn is_expired(&self, current_time: f64) -> bool {
+        (current_time - self.timestamp_seconds) > (self.ttl_seconds as f64)
+    }
+}
+
+/// Central action buffer retaining recent intent triggers across physics/cooldown frames.
+#[derive(Resource, Default, Debug)]
+pub struct ActionBuffer {
+    pub actions: Vec<BufferedAction>,
+}
+
+impl ActionBuffer {
+    pub fn push(&mut self, action: VirtualAction, current_time: f64, ttl_seconds: f32) {
+        self.actions.push(BufferedAction::new(action, current_time, ttl_seconds));
+    }
+
+    pub fn pop_matching<F>(&mut self, current_time: f64, predicate: F) -> Option<VirtualAction>
+    where
+        F: Fn(VirtualAction) -> bool,
+    {
+        self.actions.retain(|item| !item.is_expired(current_time));
+        if let Some(idx) = self.actions.iter().position(|item| predicate(item.action)) {
+            Some(self.actions.remove(idx).action)
+        } else {
+            None
+        }
+    }
+
+    pub fn prune(&mut self, current_time: f64) {
+        self.actions.retain(|item| !item.is_expired(current_time));
+    }
+}
+
+/// Locomotion feel settings (coyote time, jump buffer window, and movement speeds).
+#[derive(Resource, Debug, Clone)]
+pub struct LocomotionSettings {
+    pub coyote_time_max: f32,
+    pub jump_buffer_max: f32,
+    pub horizontal_speed: f32,
+    pub jump_impulse: f32,
+}
+
+impl Default for LocomotionSettings {
+    fn default() -> Self {
+        Self {
+            coyote_time_max: 0.12,
+            jump_buffer_max: 0.12,
+            horizontal_speed: 15.0,
+            jump_impulse: 10.0,
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -207,6 +279,9 @@ pub fn input_router_system(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     console: Res<ConsoleState>,
+    camera_mode: Res<State<CameraMode>>,
+    time: Res<Time>,
+    mut action_buffer: ResMut<ActionBuffer>,
     drag_drop: Res<DragDropState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut action_events: EventWriter<ActionEvent>,
@@ -216,6 +291,9 @@ pub fn input_router_system(
     if console.is_open {
         return;
     }
+
+    let current_time = time.elapsed_seconds_f64();
+    action_buffer.prune(current_time);
 
     let cursor_pos = window_query.get_single().ok().and_then(|w| w.cursor_position());
     let cursor_locked = window_query.get_single().map_or(false, |w| w.cursor.grab_mode == CursorGrabMode::Locked);
@@ -259,6 +337,38 @@ pub fn input_router_system(
     
     if keys.just_pressed(KeyCode::KeyE) {
         action_events.send(ActionEvent { action: VirtualAction::Interact, state: ActionState::JustPressed, cursor_pos, is_over_ui });
+    }
+
+    // Tactical Abilities & Jump (Only active when in FPS perspective and not clicking UI)
+    if *camera_mode.get() == CameraMode::FPS && !is_over_ui {
+        // Jump intent
+        if keys.just_pressed(KeyCode::Space) {
+            action_events.send(ActionEvent { action: VirtualAction::Jump, state: ActionState::JustPressed, cursor_pos, is_over_ui: false });
+            action_buffer.push(VirtualAction::Jump, current_time, 0.12);
+        }
+
+        // Tactical abilities: Q (Dash), C (Smoke), X (Intel Dart), F (Grav-Lift)
+        // Architectural Note: ShiftLeft is intentionally reserved for off-hand equipment, avoiding ghost dash triggers.
+        if keys.just_pressed(KeyCode::KeyQ) {
+            let act = VirtualAction::UseAbility(TacticalAbilityKind::PhaseDash);
+            action_events.send(ActionEvent { action: act, state: ActionState::JustPressed, cursor_pos, is_over_ui: false });
+            action_buffer.push(act, current_time, 0.12);
+        }
+        if keys.just_pressed(KeyCode::KeyC) {
+            let act = VirtualAction::UseAbility(TacticalAbilityKind::SmokeVeil);
+            action_events.send(ActionEvent { action: act, state: ActionState::JustPressed, cursor_pos, is_over_ui: false });
+            action_buffer.push(act, current_time, 0.12);
+        }
+        if keys.just_pressed(KeyCode::KeyX) {
+            let act = VirtualAction::UseAbility(TacticalAbilityKind::IntelDart);
+            action_events.send(ActionEvent { action: act, state: ActionState::JustPressed, cursor_pos, is_over_ui: false });
+            action_buffer.push(act, current_time, 0.12);
+        }
+        if keys.just_pressed(KeyCode::KeyF) {
+            let act = VirtualAction::UseAbility(TacticalAbilityKind::GravLift);
+            action_events.send(ActionEvent { action: act, state: ActionState::JustPressed, cursor_pos, is_over_ui: false });
+            action_buffer.push(act, current_time, 0.12);
+        }
     }
 }
 
@@ -1194,16 +1304,21 @@ pub fn player_movement_system(
     keys: Res<ButtonInput<KeyCode>>, 
     camera_mode: Res<State<CameraMode>>,
     console: Res<ConsoleState>,
+    time: Res<Time>,
+    locomotion_settings: Res<LocomotionSettings>,
+    ability_state: Option<Res<TacticalAbilityState>>,
+    mut action_buffer: ResMut<ActionBuffer>,
     mut query: Query<(
         Entity, 
         &mut BevyTransform, 
         &mut LinearVelocity, 
         &mut GravityScale, 
         &mut Kcc,
+        Option<&mut LocomotionState>,
     ), With<PlayerBody>>,
     spatial_query: SpatialQuery, 
 ) {
-    let Ok((entity, mut transform, mut lin_vel, mut gravity, mut kcc)) = query.get_single_mut() else { return; };
+    let Ok((entity, mut transform, mut lin_vel, mut gravity, mut kcc, mut loco_opt)) = query.get_single_mut() else { return; };
 
     let ray_start = transform.translation; 
     let hit = spatial_query.cast_ray(
@@ -1232,40 +1347,85 @@ pub fn player_movement_system(
     move_dir.y = 0.0;
     if move_dir != Vec3::ZERO { move_dir = move_dir.normalize(); }
 
-    let horizontal_speed = 15.0; 
-    if *camera_mode.get() == CameraMode::FPS {
-        lin_vel.x = move_dir.x * horizontal_speed;
-        lin_vel.z = move_dir.z * horizontal_speed;
+    // Preserve active tactical Phase Dash momentum instead of clamping to walking speed
+    let is_dashing = ability_state.as_ref().map_or(false, |s| s.is_dashing);
+    if !is_dashing && *camera_mode.get() == CameraMode::FPS {
+        lin_vel.x = move_dir.x * locomotion_settings.horizontal_speed;
+        lin_vel.z = move_dir.z * locomotion_settings.horizontal_speed;
     }
 
-    if kcc.is_grounded {
-        if *camera_mode.get() == CameraMode::FPS && !console.is_open && keys.just_pressed(KeyCode::Space) { 
-            lin_vel.y = 10.0; 
-            gravity.0 = 8.0; 
-            kcc.is_grounded = false; 
-        } else if move_dir == Vec3::ZERO {
-            // Standing still: zero downward acceleration and vertical velocity to prevent Avian3D
-            // XPBD penetration chatter and camera micro-jitter against static collision meshes.
-            lin_vel.y = 0.0;
-            gravity.0 = 0.0;
+    let dt = time.delta_seconds();
+    let current_time = time.elapsed_seconds_f64();
+    let mut jump_requested = (!console.is_open && *camera_mode.get() == CameraMode::FPS) && (
+        keys.just_pressed(KeyCode::Space) ||
+        action_buffer.pop_matching(current_time, |a| a == VirtualAction::Jump).is_some()
+    );
 
-            // If contact penetration occurred into the surface beneath, gently align to exact collider surface
-            if let Some(hit_data) = hit {
-                if hit_data.time_of_impact < 0.98 {
-                    let surface_y = ray_start.y - hit_data.time_of_impact;
-                    transform.translation.y = surface_y + 1.0;
+    if let Some(ref mut loco) = loco_opt {
+        if kcc.is_grounded {
+            loco.time_since_grounded = 0.0;
+            // Check for buffered jump upon landing
+            if loco.jump_buffered_timer > 0.0 {
+                jump_requested = true;
+                loco.jump_buffered_timer = 0.0;
+            }
+        } else {
+            loco.time_since_grounded += dt;
+            if jump_requested {
+                // Buffer the jump intent while in the air to execute seamlessly on touchdown
+                loco.jump_buffered_timer = locomotion_settings.jump_buffer_max;
+            }
+            loco.jump_buffered_timer = (loco.jump_buffered_timer - dt).max(0.0);
+        }
+
+        // Coyote Time: Grace window allowing jumps within 120ms of falling off edges
+        let can_jump = kcc.is_grounded || loco.time_since_grounded <= locomotion_settings.coyote_time_max;
+
+        if jump_requested && can_jump && *camera_mode.get() == CameraMode::FPS && !console.is_open {
+            lin_vel.y = locomotion_settings.jump_impulse;
+            gravity.0 = 8.0;
+            kcc.is_grounded = false;
+            loco.time_since_grounded = locomotion_settings.coyote_time_max + 1.0; // Consume coyote window
+            loco.jump_buffered_timer = 0.0;
+        } else if kcc.is_grounded {
+            if move_dir == Vec3::ZERO {
+                // Standing still: zero downward acceleration to prevent Avian3D penetration chatter
+                lin_vel.y = 0.0;
+                gravity.0 = 0.0;
+
+                if let Some(hit_data) = hit {
+                    if hit_data.time_of_impact < 0.98 {
+                        let surface_y = ray_start.y - hit_data.time_of_impact;
+                        transform.translation.y = surface_y + 1.0;
+                    }
+                }
+            } else {
+                // Moving along slope: apply slight downward adhesion
+                gravity.0 = 2.0;
+                if lin_vel.y < 0.0 {
+                    lin_vel.y = -0.5;
                 }
             }
         } else {
-            // Moving along slope: apply slight downward adhesion to prevent launching over downhill gradients
-            gravity.0 = 2.0;
-            if lin_vel.y < 0.0 {
-                lin_vel.y = -0.5;
-            }
+            gravity.0 = 8.0;
         }
     } else {
-        // Airborne: full gravity acceleration
-        gravity.0 = 8.0; 
+        // Fallback execution when LocomotionState component is absent
+        if kcc.is_grounded {
+            if jump_requested && *camera_mode.get() == CameraMode::FPS && !console.is_open {
+                lin_vel.y = locomotion_settings.jump_impulse;
+                gravity.0 = 8.0;
+                kcc.is_grounded = false;
+            } else if move_dir == Vec3::ZERO {
+                lin_vel.y = 0.0;
+                gravity.0 = 0.0;
+            } else {
+                gravity.0 = 2.0;
+                if lin_vel.y < 0.0 { lin_vel.y = -0.5; }
+            }
+        } else {
+            gravity.0 = 8.0;
+        }
     }
 
     // Void safety net: failsafe if entity tunnels through unloaded chunks or physics glitch
@@ -1408,5 +1568,46 @@ mod tests {
         assert_eq!(lin_vel.y, 10.0);
         assert_eq!(gravity.0, 8.0);
         assert_eq!(kcc.is_grounded, false);
+    }
+
+    #[test]
+    fn test_action_buffer_push_pop_and_ttl_expiration() {
+        let mut buffer = ActionBuffer::default();
+        let current_time = 100.0;
+
+        buffer.push(VirtualAction::Jump, current_time, 0.12);
+        buffer.push(VirtualAction::UseAbility(TacticalAbilityKind::PhaseDash), current_time, 0.12);
+        assert_eq!(buffer.actions.len(), 2);
+
+        // Pop jump
+        let popped = buffer.pop_matching(current_time + 0.05, |a| a == VirtualAction::Jump);
+        assert_eq!(popped, Some(VirtualAction::Jump));
+        assert_eq!(buffer.actions.len(), 1);
+
+        // Advancing time past TTL (0.12s) expires remaining actions
+        let popped_expired = buffer.pop_matching(current_time + 0.20, |a| a == VirtualAction::UseAbility(TacticalAbilityKind::PhaseDash));
+        assert_eq!(popped_expired, None);
+        assert_eq!(buffer.actions.len(), 0);
+    }
+
+    #[test]
+    fn test_coyote_time_grace_window() {
+        let settings = LocomotionSettings::default();
+        let mut loco = LocomotionState::default();
+
+        // On ground: timer is 0
+        loco.time_since_grounded = 0.0;
+        let mut can_jump = loco.time_since_grounded <= settings.coyote_time_max;
+        assert!(can_jump);
+
+        // Falling off a ledge for 0.08s (within 0.12s coyote window): still can jump
+        loco.time_since_grounded += 0.08;
+        can_jump = loco.time_since_grounded <= settings.coyote_time_max;
+        assert!(can_jump);
+
+        // Falling off ledge past 0.12s: cannot coyote jump
+        loco.time_since_grounded += 0.05; // 0.13s total
+        can_jump = loco.time_since_grounded <= settings.coyote_time_max;
+        assert!(!can_jump);
     }
 }

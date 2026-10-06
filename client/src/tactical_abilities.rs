@@ -21,13 +21,19 @@ use crate::audio_feedback::play_sound;
 use crate::components::*;
 use crate::core::*;
 
-/// Architectural Note: Handles input detection and execution for tactical abilities in FPS perspective.
+use crate::input::{ActionEvent, ActionBuffer, VirtualAction};
+
+/// Architectural Note: Executes tactical abilities in FPS perspective from routed ActionEvents
+/// and queued ActionBuffer intents, guaranteeing zero dropped inputs across cooldown windows.
 pub fn tactical_ability_input_system(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     console: Res<ConsoleState>,
     camera_mode: Res<State<CameraMode>>,
     mut ability_state: ResMut<TacticalAbilityState>,
+    mut action_events: EventReader<ActionEvent>,
+    mut action_buffer: ResMut<ActionBuffer>,
+    time: Res<Time>,
     audio_handles: Res<CombatAudioHandles>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -48,210 +54,242 @@ pub fn tactical_ability_input_system(
 
     let cam_forward = cam_global.forward();
     let cam_pos = cam_global.translation();
+    let current_time = time.elapsed_seconds_f64();
 
-    // ------------------------------------------------------------------------
-    // 1. PHASE DASH (Key Q or LShift) - Horizontal Momentum Burst
-    // ------------------------------------------------------------------------
-    if (keys.just_pressed(KeyCode::KeyQ) || keys.just_pressed(KeyCode::ShiftLeft))
-        && ability_state.cooldowns.is_ready(TacticalAbilityKind::PhaseDash)
-    {
-        if ability_state.cooldowns.trigger(TacticalAbilityKind::PhaseDash).is_ok() {
-            let mut dash_dir = Vec3::ZERO;
-            if keys.pressed(KeyCode::KeyW) { dash_dir += *p_transform.forward(); }
-            if keys.pressed(KeyCode::KeyS) { dash_dir -= *p_transform.forward(); }
-            if keys.pressed(KeyCode::KeyD) { dash_dir += *p_transform.right(); }
-            if keys.pressed(KeyCode::KeyA) { dash_dir -= *p_transform.right(); }
-            dash_dir.y = 0.0;
-
-            if dash_dir == Vec3::ZERO {
-                dash_dir = *p_transform.forward();
-                dash_dir.y = 0.0;
-            }
-            let normalized_dir = dash_dir.normalize_or_zero();
-
-            ability_state.is_dashing = true;
-            ability_state.dash_timer.reset();
-            ability_state.dash_velocity = normalized_dir * 32.0;
-
-            // Apply immediate burst velocity
-            lin_vel.x = ability_state.dash_velocity.x;
-            lin_vel.z = ability_state.dash_velocity.z;
-
-            // Telegraph: Play aerodynamic dash sound
-            play_sound(&mut commands, &audio_handles.dash_whoosh);
-
-            // Telegraph: High-contrast cyan particle slipstream trail
-            let trail_mesh = meshes.add(bevy::math::primitives::Sphere::new(0.18));
-            let trail_mat = materials.add(StandardMaterial {
-                base_color: Color::srgba(0.0, 1.0, 1.0, 0.8),
-                unlit: true,
-                ..default()
-            });
-
-            for step in 1..=4 {
-                let offset = p_transform.translation - normalized_dir * (step as f32 * 0.7);
-                commands.spawn((
-                    PbrBundle {
-                        mesh: trail_mesh.clone(),
-                        material: trail_mat.clone(),
-                        transform: BevyTransform::from_translation(offset),
-                        ..default()
-                    },
-                    Particle { timer: Timer::from_seconds(0.35, TimerMode::Once) },
-                ));
-            }
-            info!("Executed Tactical Ability: Phase Dash");
+    // 1. Gather ability trigger intents from events emitted by input_router_system
+    let mut requested_abilities = Vec::new();
+    for event in action_events.read() {
+        if let VirtualAction::UseAbility(kind) = event.action {
+            requested_abilities.push(kind);
         }
     }
 
-    // ------------------------------------------------------------------------
-    // 2. SMOKE VEIL (Key C) - Line of Sight Manipulation & Space Creation
-    // ------------------------------------------------------------------------
-    if keys.just_pressed(KeyCode::KeyC) && ability_state.cooldowns.is_ready(TacticalAbilityKind::SmokeVeil) {
-        if ability_state.cooldowns.trigger(TacticalAbilityKind::SmokeVeil).is_ok() {
-            play_sound(&mut commands, &audio_handles.smoke_hiss);
-
-            // Raycast forward to find ground/wall impact
-            let hit = spatial_query.cast_ray(
-                cam_pos, cam_forward, 18.0, true,
-                SpatialQueryFilter::from_excluded_entities([player_entity]),
-            );
-            let target_point = hit.map_or(cam_pos + cam_forward * 12.0, |h| cam_pos + cam_forward * h.time_of_impact);
-
-            // Spawn central smoke anchor with 8-second lifetime
-            commands.spawn((
-                PbrBundle {
-                    transform: BevyTransform::from_translation(target_point),
-                    ..default()
-                },
-                SmokeCloudMarker {
-                    timer: Timer::from_seconds(8.0, TimerMode::Once),
-                    radius: 7.5,
-                },
-            ));
-
-            // Spawn volumetric smoke cloud puffs
-            let smoke_mesh = meshes.add(bevy::math::primitives::Sphere::new(1.8));
-            let smoke_mat = materials.add(StandardMaterial {
-                base_color: Color::srgba(0.65, 0.68, 0.72, 0.75),
-                perceptual_roughness: 0.95,
-                ..default()
-            });
-
-            let offsets = [
-                Vec3::new(0.0, 0.5, 0.0),
-                Vec3::new(1.8, 1.0, 0.0),
-                Vec3::new(-1.8, 1.0, 0.0),
-                Vec3::new(0.0, 1.2, 1.8),
-                Vec3::new(0.0, 1.2, -1.8),
-                Vec3::new(1.3, 2.0, 1.3),
-                Vec3::new(-1.3, 2.0, -1.3),
-                Vec3::new(-1.3, 2.0, 1.3),
-                Vec3::new(1.3, 2.0, -1.3),
-            ];
-
-            for off in offsets {
-                commands.spawn((
-                    PbrBundle {
-                        mesh: smoke_mesh.clone(),
-                        material: smoke_mat.clone(),
-                        transform: BevyTransform::from_translation(target_point + off),
-                        ..default()
-                    },
-                    Particle { timer: Timer::from_seconds(8.0, TimerMode::Once) },
-                ));
+    // 2. Check ActionBuffer for buffered intents that are now off cooldown (zero eaten inputs)
+    for &kind in &[
+        TacticalAbilityKind::PhaseDash,
+        TacticalAbilityKind::SmokeVeil,
+        TacticalAbilityKind::IntelDart,
+        TacticalAbilityKind::GravLift,
+    ] {
+        if ability_state.cooldowns.is_ready(kind) {
+            if action_buffer.pop_matching(current_time, |a| a == VirtualAction::UseAbility(kind)).is_some() {
+                if !requested_abilities.contains(&kind) {
+                    requested_abilities.push(kind);
+                }
             }
-            info!("Executed Tactical Ability: Smoke Veil deployed at {:?}", target_point);
         }
     }
 
-    // ------------------------------------------------------------------------
-    // 3. INTEL DART (Key X) - Reconnaissance Sonar Beacon
-    // ------------------------------------------------------------------------
-    if keys.just_pressed(KeyCode::KeyX) && ability_state.cooldowns.is_ready(TacticalAbilityKind::IntelDart) {
-        if ability_state.cooldowns.trigger(TacticalAbilityKind::IntelDart).is_ok() {
-            let hit = spatial_query.cast_ray(
-                cam_pos, cam_forward, 45.0, true,
-                SpatialQueryFilter::from_excluded_entities([player_entity]),
-            );
-            let target_point = hit.map_or(cam_pos + cam_forward * 30.0, |h| cam_pos + cam_forward * h.time_of_impact);
+    // 3. Dispatch requested abilities
+    for kind in requested_abilities {
+        if !ability_state.cooldowns.is_ready(kind) {
+            continue;
+        }
 
-            // Telegraph: Initial sonar ping upon deployment
-            play_sound(&mut commands, &audio_handles.sonar_ping);
+        match kind {
+            // ----------------------------------------------------------------
+            // 1. PHASE DASH - Horizontal Momentum Burst
+            // ----------------------------------------------------------------
+            TacticalAbilityKind::PhaseDash => {
+                if ability_state.cooldowns.trigger(TacticalAbilityKind::PhaseDash).is_ok() {
+                    let mut dash_dir = Vec3::ZERO;
+                    if keys.pressed(KeyCode::KeyW) { dash_dir += *p_transform.forward(); }
+                    if keys.pressed(KeyCode::KeyS) { dash_dir -= *p_transform.forward(); }
+                    if keys.pressed(KeyCode::KeyD) { dash_dir += *p_transform.right(); }
+                    if keys.pressed(KeyCode::KeyA) { dash_dir -= *p_transform.right(); }
+                    dash_dir.y = 0.0;
 
-            // Anchor dart marker entity with 3 sonar pings (1.5s interval)
-            commands.spawn((
-                PbrBundle {
-                    mesh: meshes.add(bevy::math::primitives::Sphere::new(0.2)),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::srgb(1.0, 0.85, 0.1),
+                    if dash_dir == Vec3::ZERO {
+                        dash_dir = *p_transform.forward();
+                        dash_dir.y = 0.0;
+                    }
+                    let normalized_dir = dash_dir.normalize_or_zero();
+
+                    ability_state.is_dashing = true;
+                    ability_state.dash_timer.reset();
+                    ability_state.dash_velocity = normalized_dir * 32.0;
+
+                    // Apply immediate burst velocity
+                    lin_vel.x = ability_state.dash_velocity.x;
+                    lin_vel.z = ability_state.dash_velocity.z;
+
+                    // Telegraph: Play aerodynamic dash sound
+                    play_sound(&mut commands, &audio_handles.dash_whoosh);
+
+                    // Telegraph: High-contrast cyan particle slipstream trail
+                    let trail_mesh = meshes.add(bevy::math::primitives::Sphere::new(0.18));
+                    let trail_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgba(0.0, 1.0, 1.0, 0.8),
                         unlit: true,
                         ..default()
-                    }),
-                    transform: BevyTransform::from_translation(target_point),
-                    ..default()
-                },
-                IntelDartMarker {
-                    pings_left: 3,
-                    ping_timer: Timer::from_seconds(1.5, TimerMode::Repeating),
-                    radius: 15.0,
-                },
-                Particle { timer: Timer::from_seconds(5.0, TimerMode::Once) },
-            ));
+                    });
 
-            // Immediate expanding sonar ring visual
-            commands.spawn((
-                PbrBundle {
-                    mesh: meshes.add(bevy::math::primitives::Torus::new(0.2, 0.05)),
-                    material: materials.add(StandardMaterial {
-                        base_color: Color::srgba(1.0, 0.85, 0.2, 0.8),
+                    for step in 1..=4 {
+                        let offset = p_transform.translation - normalized_dir * (step as f32 * 0.7);
+                        commands.spawn((
+                            PbrBundle {
+                                mesh: trail_mesh.clone(),
+                                material: trail_mat.clone(),
+                                transform: BevyTransform::from_translation(offset),
+                                ..default()
+                            },
+                            Particle { timer: Timer::from_seconds(0.35, TimerMode::Once) },
+                        ));
+                    }
+                    info!("Executed Tactical Ability: Phase Dash");
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // 2. SMOKE VEIL - Line of Sight Manipulation & Space Creation
+            // ----------------------------------------------------------------
+            TacticalAbilityKind::SmokeVeil => {
+                if ability_state.cooldowns.trigger(TacticalAbilityKind::SmokeVeil).is_ok() {
+                    play_sound(&mut commands, &audio_handles.smoke_hiss);
+
+                    // Raycast forward to find ground/wall impact
+                    let hit = spatial_query.cast_ray(
+                        cam_pos, cam_forward, 18.0, true,
+                        SpatialQueryFilter::from_excluded_entities([player_entity]),
+                    );
+                    let target_point = hit.map_or(cam_pos + cam_forward * 12.0, |h| cam_pos + cam_forward * h.time_of_impact);
+
+                    // Spawn central smoke anchor with 8-second lifetime
+                    commands.spawn((
+                        PbrBundle {
+                            transform: BevyTransform::from_translation(target_point),
+                            ..default()
+                        },
+                        SmokeCloudMarker {
+                            timer: Timer::from_seconds(8.0, TimerMode::Once),
+                            radius: 7.5,
+                        },
+                    ));
+
+                    // Spawn volumetric smoke cloud puffs
+                    let smoke_mesh = meshes.add(bevy::math::primitives::Sphere::new(1.8));
+                    let smoke_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgba(0.65, 0.68, 0.72, 0.75),
+                        perceptual_roughness: 0.95,
+                        ..default()
+                    });
+
+                    let offsets = [
+                        Vec3::new(0.0, 0.5, 0.0),
+                        Vec3::new(1.8, 1.0, 0.0),
+                        Vec3::new(-1.8, 1.0, 0.0),
+                        Vec3::new(0.0, 1.2, 1.8),
+                        Vec3::new(0.0, 1.2, -1.8),
+                        Vec3::new(1.3, 2.0, 1.3),
+                        Vec3::new(-1.3, 2.0, -1.3),
+                        Vec3::new(-1.3, 2.0, 1.3),
+                        Vec3::new(1.3, 2.0, -1.3),
+                    ];
+
+                    for off in offsets {
+                        commands.spawn((
+                            PbrBundle {
+                                mesh: smoke_mesh.clone(),
+                                material: smoke_mat.clone(),
+                                transform: BevyTransform::from_translation(target_point + off),
+                                ..default()
+                            },
+                            Particle { timer: Timer::from_seconds(8.0, TimerMode::Once) },
+                        ));
+                    }
+                    info!("Executed Tactical Ability: Smoke Veil deployed at {:?}", target_point);
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // 3. INTEL DART - Reconnaissance Sonar Beacon
+            // ----------------------------------------------------------------
+            TacticalAbilityKind::IntelDart => {
+                if ability_state.cooldowns.trigger(TacticalAbilityKind::IntelDart).is_ok() {
+                    let hit = spatial_query.cast_ray(
+                        cam_pos, cam_forward, 45.0, true,
+                        SpatialQueryFilter::from_excluded_entities([player_entity]),
+                    );
+                    let target_point = hit.map_or(cam_pos + cam_forward * 30.0, |h| cam_pos + cam_forward * h.time_of_impact);
+
+                    // Telegraph: Initial sonar ping upon deployment
+                    play_sound(&mut commands, &audio_handles.sonar_ping);
+
+                    // Anchor dart marker entity with 3 sonar pings (1.5s interval)
+                    commands.spawn((
+                        PbrBundle {
+                            mesh: meshes.add(bevy::math::primitives::Sphere::new(0.2)),
+                            material: materials.add(StandardMaterial {
+                                base_color: Color::srgb(1.0, 0.85, 0.1),
+                                unlit: true,
+                                ..default()
+                            }),
+                            transform: BevyTransform::from_translation(target_point),
+                            ..default()
+                        },
+                        IntelDartMarker {
+                            pings_left: 3,
+                            ping_timer: Timer::from_seconds(1.5, TimerMode::Repeating),
+                            radius: 15.0,
+                        },
+                        Particle { timer: Timer::from_seconds(5.0, TimerMode::Once) },
+                    ));
+
+                    // Immediate expanding sonar ring visual
+                    commands.spawn((
+                        PbrBundle {
+                            mesh: meshes.add(bevy::math::primitives::Torus::new(0.2, 0.05)),
+                            material: materials.add(StandardMaterial {
+                                base_color: Color::srgba(1.0, 0.85, 0.2, 0.8),
+                                unlit: true,
+                                ..default()
+                            }),
+                            transform: BevyTransform::from_translation(target_point),
+                            ..default()
+                        },
+                        IntelSonarPulseVisual {
+                            timer: Timer::from_seconds(0.8, TimerMode::Once),
+                            max_radius: 15.0,
+                        },
+                    ));
+                    info!("Executed Tactical Ability: Intel Dart anchored at {:?}", target_point);
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // 4. GRAV-LIFT - Vertical Kinetic Air Jet (Mobility Multiplier)
+            // ----------------------------------------------------------------
+            TacticalAbilityKind::GravLift => {
+                if ability_state.cooldowns.trigger(TacticalAbilityKind::GravLift).is_ok() {
+                    // Reset downward momentum and launch upward
+                    lin_vel.y = 15.5; // ~7.5m vertical apex
+                    kcc.is_grounded = false;
+
+                    play_sound(&mut commands, &audio_handles.dash_whoosh);
+
+                    // Telegraph: Upward swirling particle jet
+                    let lift_mesh = meshes.add(bevy::math::primitives::Cylinder::new(0.6, 0.08));
+                    let lift_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgba(0.2, 1.0, 0.4, 0.7),
                         unlit: true,
                         ..default()
-                    }),
-                    transform: BevyTransform::from_translation(target_point),
-                    ..default()
-                },
-                IntelSonarPulseVisual {
-                    timer: Timer::from_seconds(0.8, TimerMode::Once),
-                    max_radius: 15.0,
-                },
-            ));
-            info!("Executed Tactical Ability: Intel Dart anchored at {:?}", target_point);
-        }
-    }
+                    });
 
-    // ------------------------------------------------------------------------
-    // 4. GRAV-LIFT (Key F) - Vertical Kinetic Air Jet (Mobility Multiplier)
-    // ------------------------------------------------------------------------
-    if keys.just_pressed(KeyCode::KeyF) && ability_state.cooldowns.is_ready(TacticalAbilityKind::GravLift) {
-        if ability_state.cooldowns.trigger(TacticalAbilityKind::GravLift).is_ok() {
-            // Reset downward momentum and launch upward
-            lin_vel.y = 15.5; // ~7.5m vertical apex
-            kcc.is_grounded = false;
-
-            play_sound(&mut commands, &audio_handles.dash_whoosh);
-
-            // Telegraph: Upward swirling particle jet
-            let lift_mesh = meshes.add(bevy::math::primitives::Cylinder::new(0.6, 0.08));
-            let lift_mat = materials.add(StandardMaterial {
-                base_color: Color::srgba(0.2, 1.0, 0.4, 0.7),
-                unlit: true,
-                ..default()
-            });
-
-            for step in 0..3 {
-                let off = Vec3::new(0.0, step as f32 * 0.4, 0.0);
-                commands.spawn((
-                    PbrBundle {
-                        mesh: lift_mesh.clone(),
-                        material: lift_mat.clone(),
-                        transform: BevyTransform::from_translation(p_transform.translation + off),
-                        ..default()
-                    },
-                    Particle { timer: Timer::from_seconds(0.4, TimerMode::Once) },
-                ));
+                    for step in 0..3 {
+                        let off = Vec3::new(0.0, step as f32 * 0.4, 0.0);
+                        commands.spawn((
+                            PbrBundle {
+                                mesh: lift_mesh.clone(),
+                                material: lift_mat.clone(),
+                                transform: BevyTransform::from_translation(p_transform.translation + off),
+                                ..default()
+                            },
+                            Particle { timer: Timer::from_seconds(0.4, TimerMode::Once) },
+                        ));
+                    }
+                    info!("Executed Tactical Ability: Grav-Lift upward boost");
+                }
             }
-            info!("Executed Tactical Ability: Grav-Lift upward boost");
         }
     }
 }

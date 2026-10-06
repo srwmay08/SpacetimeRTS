@@ -171,6 +171,7 @@ pub fn init_network_connection(
         LinearVelocity::ZERO,
         ExternalForce::default().with_persistence(false),
         Kcc { is_grounded: false },
+        LocomotionState::default(),
     ));
 
     player_entity_commands.insert((

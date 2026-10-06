@@ -128,6 +128,8 @@ fn main() {
         .init_resource::<CrosshairSettings>()
         .init_resource::<CrosshairMenuState>()
         .init_resource::<TacticalAbilityState>()
+        .init_resource::<ActionBuffer>()
+        .init_resource::<LocomotionSettings>()
         .init_resource::<HitMarkerState>()
         .init_resource::<SeasonState>()
         .init_resource::<TreeMaterialHandles>()

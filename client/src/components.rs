@@ -52,6 +52,11 @@ pub enum Faction {
 #[derive(Component)] pub struct PlayerHead;
 #[allow(dead_code)] #[derive(Component)] pub struct ViewModelArm;
 #[derive(Component)] pub struct Kcc { pub is_grounded: bool }
+#[derive(Component, Debug, Clone, Default)]
+pub struct LocomotionState {
+    pub time_since_grounded: f32,
+    pub jump_buffered_timer: f32,
+}
 
 #[derive(Component)]
 pub struct ResourceNodeItem {
