@@ -17,7 +17,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use std::f32::consts::PI;
 
-use crate::voxel_mesh::Prng;
+use crate::prng::Prng;
 
 // ----------------------------------------------------------------------------
 // FLAT-SHADED LOW-POLY MESH BUILDER

@@ -40,8 +40,106 @@ use spacetimedb_sdk::Table;
 use crate::core::GameLayer;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
-use crate::voxel_mesh::{VoxelBox, build_voxel_mesh};
-use crate::module_bindings::structure_table::StructureTableAccess; 
+use crate::module_bindings::structure_table::StructureTableAccess;
+
+// ----------------------------------------------------------------------------
+// COMPOSITE BUILDING BOX MESH BUILDER
+// ----------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug)]
+pub struct BuildingBox {
+    pub min: Vec3,
+    pub max: Vec3,
+    pub color: [f32; 4],
+}
+
+/// Backwards compatibility alias for modular piece definitions
+pub type VoxelBox = BuildingBox;
+
+pub fn build_building_mesh(boxes: &[BuildingBox]) -> Mesh {
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(boxes.len() * 24);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(boxes.len() * 24);
+    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(boxes.len() * 24);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(boxes.len() * 24);
+    let mut indices: Vec<u32> = Vec::with_capacity(boxes.len() * 36);
+
+    for b in boxes {
+        let min = b.min;
+        let max = b.max;
+        let c = b.color;
+
+        // Top Face (+Y)
+        let s = positions.len() as u32;
+        positions.push([min.x, max.y, max.z]);
+        positions.push([max.x, max.y, max.z]);
+        positions.push([max.x, max.y, min.z]);
+        positions.push([min.x, max.y, min.z]);
+        for _ in 0..4 { normals.push([0.0, 1.0, 0.0]); colors.push(c); }
+        uvs.extend_from_slice(&[[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]);
+        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+
+        // Bottom Face (-Y)
+        let s = positions.len() as u32;
+        positions.push([min.x, min.y, min.z]);
+        positions.push([max.x, min.y, min.z]);
+        positions.push([max.x, min.y, max.z]);
+        positions.push([min.x, min.y, max.z]);
+        for _ in 0..4 { normals.push([0.0, -1.0, 0.0]); colors.push(c); }
+        uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+
+        // East Face (+X)
+        let s = positions.len() as u32;
+        positions.push([max.x, min.y, max.z]);
+        positions.push([max.x, min.y, min.z]);
+        positions.push([max.x, max.y, min.z]);
+        positions.push([max.x, max.y, max.z]);
+        for _ in 0..4 { normals.push([1.0, 0.0, 0.0]); colors.push(c); }
+        uvs.extend_from_slice(&[[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
+        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+
+        // West Face (-X)
+        let s = positions.len() as u32;
+        positions.push([min.x, min.y, min.z]);
+        positions.push([min.x, min.y, max.z]);
+        positions.push([min.x, max.y, max.z]);
+        positions.push([min.x, max.y, min.z]);
+        for _ in 0..4 { normals.push([-1.0, 0.0, 0.0]); colors.push(c); }
+        uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+
+        // South Face (+Z)
+        let s = positions.len() as u32;
+        positions.push([min.x, min.y, max.z]);
+        positions.push([max.x, min.y, max.z]);
+        positions.push([max.x, max.y, max.z]);
+        positions.push([min.x, max.y, max.z]);
+        for _ in 0..4 { normals.push([0.0, 0.0, 1.0]); colors.push(c); }
+        uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+
+        // North Face (-Z)
+        let s = positions.len() as u32;
+        positions.push([max.x, min.y, min.z]);
+        positions.push([min.x, min.y, min.z]);
+        positions.push([min.x, max.y, min.z]);
+        positions.push([max.x, max.y, min.z]);
+        for _ in 0..4 { normals.push([0.0, 0.0, -1.0]); colors.push(c); }
+        uvs.extend_from_slice(&[[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
+        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(bevy::render::mesh::Indices::U32(indices));
+    mesh
+}
+
+/// Backwards compatibility alias for building piece mesh construction
+pub use build_building_mesh as build_voxel_mesh; 
 use crate::module_bindings::door_state_table::DoorStateTableAccess;
 use crate::module_bindings::fall_hazard_table::FallHazardTableAccess;
 use crate::module_bindings::place_structure_reducer::place_structure;

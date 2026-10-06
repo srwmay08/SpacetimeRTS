@@ -39,7 +39,7 @@ use std::f32::consts::PI;
 
 use crate::components::{PlayerBody, VoxelChunkMarker};
 use crate::terrain::{compute_canonical_terrain_height, TerrainChunkVisual};
-use crate::voxel_mesh::Prng;
+use crate::prng::Prng;
 
 // ----------------------------------------------------------------------------
 // 1. CONFIGURATION & EXTENSION MATERIAL

@@ -15,135 +15,16 @@ use bevy::render::render_asset::RenderAssetUsages;
 use std::collections::BTreeMap;
 
 // ----------------------------------------------------------------------------
-// SEEDED DETERMINISTIC PRNG UTILITY
+// SEEDED DETERMINISTIC PRNG UTILITY (RE-EXPORT FROM CRATE::PRNG)
 // ----------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy)]
-pub struct Prng {
-    pub state: u64,
-}
-
-impl Prng {
-    pub fn new(seed: u64) -> Self {
-        Self {
-            state: if seed == 0 { 0x517cc1b727220a95 } else { seed },
-        }
-    }
-
-    pub fn next(&mut self) -> f64 {
-        self.state ^= self.state << 13;
-        self.state ^= self.state >> 7;
-        self.state ^= self.state << 17;
-        (self.state as f64) / (u64::MAX as f64)
-    }
-
-    pub fn range(&mut self, min: f32, max: f32) -> f32 {
-        min + (self.next() as f32) * (max - min)
-    }
-
-    pub fn blend_color(&mut self, c1: [f32; 4], c2: [f32; 4], t: f32) -> [f32; 4] {
-        let f = t.clamp(0.0, 1.0);
-        let inv = 1.0 - f;
-        [
-            c1[0] * inv + c2[0] * f,
-            c1[1] * inv + c2[1] * f,
-            c1[2] * inv + c2[2] * f,
-            c1[3] * inv + c2[3] * f,
-        ]
-    }
-}
+pub use crate::prng::Prng;
 
 // ----------------------------------------------------------------------------
-// COMPOSITE VOXEL BOX MESH BUILDER (Building / Structure Compatibility)
+// COMPOSITE BUILDING BOX MESH BUILDER (RE-EXPORT FROM CRATE::BUILDING)
 // ----------------------------------------------------------------------------
 
-pub struct VoxelBox {
-    pub min: Vec3,
-    pub max: Vec3,
-    pub color: [f32; 4],
-}
-
-pub fn build_voxel_mesh(boxes: &[VoxelBox]) -> Mesh {
-    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(boxes.len() * 24);
-    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(boxes.len() * 24);
-    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(boxes.len() * 24);
-    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(boxes.len() * 24);
-    let mut indices: Vec<u32> = Vec::with_capacity(boxes.len() * 36);
-
-    for b in boxes {
-        let min = b.min;
-        let max = b.max;
-        let c = b.color;
-
-        // Top Face (+Y)
-        let s = positions.len() as u32;
-        positions.push([min.x, max.y, max.z]);
-        positions.push([max.x, max.y, max.z]);
-        positions.push([max.x, max.y, min.z]);
-        positions.push([min.x, max.y, min.z]);
-        for _ in 0..4 { normals.push([0.0, 1.0, 0.0]); colors.push(c); }
-        uvs.extend_from_slice(&[[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]);
-        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
-
-        // Bottom Face (-Y)
-        let s = positions.len() as u32;
-        positions.push([min.x, min.y, min.z]);
-        positions.push([max.x, min.y, min.z]);
-        positions.push([max.x, min.y, max.z]);
-        positions.push([min.x, min.y, max.z]);
-        for _ in 0..4 { normals.push([0.0, -1.0, 0.0]); colors.push(c); }
-        uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
-        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
-
-        // East Face (+X)
-        let s = positions.len() as u32;
-        positions.push([max.x, min.y, max.z]);
-        positions.push([max.x, min.y, min.z]);
-        positions.push([max.x, max.y, min.z]);
-        positions.push([max.x, max.y, max.z]);
-        for _ in 0..4 { normals.push([1.0, 0.0, 0.0]); colors.push(c); }
-        uvs.extend_from_slice(&[[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
-        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
-
-        // West Face (-X)
-        let s = positions.len() as u32;
-        positions.push([min.x, min.y, min.z]);
-        positions.push([min.x, min.y, max.z]);
-        positions.push([min.x, max.y, max.z]);
-        positions.push([min.x, max.y, min.z]);
-        for _ in 0..4 { normals.push([-1.0, 0.0, 0.0]); colors.push(c); }
-        uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
-        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
-
-        // South Face (+Z)
-        let s = positions.len() as u32;
-        positions.push([min.x, min.y, max.z]);
-        positions.push([max.x, min.y, max.z]);
-        positions.push([max.x, max.y, max.z]);
-        positions.push([min.x, max.y, max.z]);
-        for _ in 0..4 { normals.push([0.0, 0.0, 1.0]); colors.push(c); }
-        uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
-        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
-
-        // North Face (-Z)
-        let s = positions.len() as u32;
-        positions.push([max.x, min.y, min.z]);
-        positions.push([min.x, min.y, min.z]);
-        positions.push([min.x, max.y, min.z]);
-        positions.push([max.x, max.y, min.z]);
-        for _ in 0..4 { normals.push([0.0, 0.0, -1.0]); colors.push(c); }
-        uvs.extend_from_slice(&[[1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
-        indices.extend_from_slice(&[s, s + 1, s + 2, s, s + 2, s + 3]);
-    }
-
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-    mesh.insert_indices(Indices::U32(indices));
-    mesh
-}
+pub use crate::building::{BuildingBox, VoxelBox, build_building_mesh, build_voxel_mesh};
 
 // ----------------------------------------------------------------------------
 // MICRO-VOXEL RASTERIZER & EXPOSED-FACE EXTRACTOR

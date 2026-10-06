@@ -21,6 +21,7 @@ pub mod zone_editor;
 pub mod spellbook;
 pub mod skills_ui;
 pub mod voxel_mesh;
+pub mod prng;
 pub mod trees;
 pub mod props;
 pub mod creatures;

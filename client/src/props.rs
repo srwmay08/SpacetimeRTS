@@ -12,7 +12,7 @@
 // ----------------------------------------------------------------------------
 
 use bevy::prelude::*;
-use crate::voxel_mesh::Prng;
+use crate::prng::Prng;
 use crate::trees::LowPolyMeshBuilder;
 
 /// Procedural low-poly granite boulder matching the BlendSwap #9440 geometric aesthetic.
