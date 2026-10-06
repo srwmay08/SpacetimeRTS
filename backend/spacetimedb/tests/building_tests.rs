@@ -344,7 +344,7 @@ fn test_autobuild_3_second_progression() {
     // Over 25 ticks (2.5s), it reaches 100% and finishes.
     let mut progress = 0_u32;
     let max_hp = 200.0_f32;
-    let mut health = 1.0_f32;
+    let mut health;
     let mut is_blueprint = true;
 
     for tick in 1..=30 {

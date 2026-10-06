@@ -2213,6 +2213,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_aurora_mesh_generation() {
         let mesh = create_aurora_mesh();
         assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
