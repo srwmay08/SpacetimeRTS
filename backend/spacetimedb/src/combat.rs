@@ -295,22 +295,33 @@ pub fn process_projectiles_tick(ctx: &ReducerContext, dt: f32) {
             let ndy = segment_dy / segment_len;
             let ndz = segment_dz / segment_len;
 
-            if let Some((user_data, hx, hy, hz, _toi)) = crate::physics::cast_ray(
+            // Adaptive CCD: Sweep projectile volume along displacement to eliminate tunneling
+            let projectile_radius = match proj.kind {
+                ProjectileKind::CatapultRock | ProjectileKind::TrebuchetShell => 0.60,
+                ProjectileKind::BallistaSpear => 0.20,
+                ProjectileKind::FireballBall => 0.35,
+                ProjectileKind::Arrow => 0.12,
+                ProjectileKind::HandCrossbowBolt => 0.10,
+                ProjectileKind::SniperBullet => 0.08,
+                ProjectileKind::RevolverBullet => 0.08,
+                ProjectileKind::ShotgunPellet => 0.05,
+                _ => 0.10,
+            };
+
+            if let Some(hit) = crate::physics::cast_swept_sphere(
                 prev_x, prev_y, prev_z,
                 ndx, ndy, ndz,
+                projectile_radius,
                 segment_len,
                 proj.shooter_id,
             ) {
-                let is_structure = (user_data >> 64) == 1;
-                let target_id = (user_data & 0xFFFFFFFFFFFFFFFF) as u64;
-                
                 hit_detected = true;
-                hit_point = (hx, hy, hz);
-                
-                if is_structure {
-                    crate::building::damage_structure(ctx, target_id, proj.damage);
+                hit_point = hit.point;
+
+                if hit.is_structure {
+                    crate::building::damage_structure(ctx, hit.entity_id, proj.damage);
                 } else {
-                    hit_target_id = Some(target_id);
+                    hit_target_id = Some(hit.entity_id);
                 }
             }
 
@@ -728,15 +739,23 @@ pub fn fire_weapon(
     let inv_len = 1.0 / dir_len_sq.sqrt();
     let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
 
+    let search_radius = (max_range + 2.0).max(5.0);
+    let search_radius_sq = search_radius * search_radius;
+
     let mut colliders = rapier3d::prelude::ColliderSet::new();
     let mut processed_entities = std::collections::BTreeSet::new();
 
-    // 1. Lag-compensated snapshots for online players with hitbox history
+    // 1. Lag-compensated snapshots for online players with hitbox history (culled to action radius)
     for history in ctx.db.hitbox_history().iter() {
         if history.entity_id == session.entity_id { continue; }
         if ctx.db.harvestable_corpse().entity_id().find(history.entity_id).is_some() { continue; }
 
         if let Some(snap) = history.snapshots.iter().min_by_key(|s| (s.tick_id as i64 - client_tick as i64).abs()) {
+            let dx = snap.x - origin_x;
+            let dy = snap.y - origin_y;
+            let dz = snap.z - origin_z;
+            if (dx * dx + dy * dy + dz * dz) > search_radius_sq { continue; }
+
             let col = rapier3d::prelude::ColliderBuilder::capsule_y(0.5, 0.4)
                 .translation(rapier3d::prelude::Vector::new(snap.x, snap.y - 0.15, snap.z))
                 .user_data(history.entity_id as u128)
@@ -746,12 +765,17 @@ pub fn fire_weapon(
         }
     }
 
-    // 2. Authoritative living dynamic entities (NPCs: Boars, Deer, Goblins, Peasants, or players without history)
+    // 2. Authoritative living dynamic entities (culled to action radius)
     for t in ctx.db.transform().iter() {
         if t.entity_id == session.entity_id { continue; }
         if processed_entities.contains(&t.entity_id) { continue; }
         if ctx.db.harvestable_corpse().entity_id().find(t.entity_id).is_some() { continue; }
         if ctx.db.health().entity_id().find(t.entity_id).is_none() { continue; }
+
+        let dx = t.x - origin_x;
+        let dy = t.y - origin_y;
+        let dz = t.z - origin_z;
+        if (dx * dx + dy * dy + dz * dz) > search_radius_sq { continue; }
 
         let col = if let Some(brain) = ctx.db.npc_brain().entity_id().find(t.entity_id) {
             let arch = crate::bestiary::get_archetype_by_ai_type(brain.ai_type);
@@ -781,10 +805,14 @@ pub fn fire_weapon(
         colliders.insert(col);
     }
     
-    // 3. Static structures
+    // 3. Static structures (culled to action radius)
     for s in ctx.db.structure().iter() {
-        // Architectural Note: Same rule as physics.rs - an open door is a gap in the wall.
         if !crate::building::structure_blocks_projectiles(ctx, &s) { continue; }
+        let dx = s.x - origin_x;
+        let dy = s.y - origin_y;
+        let dz = s.z - origin_z;
+        if (dx * dx + dy * dy + dz * dz) > search_radius_sq { continue; }
+
         let col = rapier3d::prelude::ColliderBuilder::cuboid(1.25, 1.25, 1.25)
             .translation(rapier3d::prelude::Vector::new(s.x, s.y, s.z))
             .user_data((s.structure_id as u128) | (1 << 64))
@@ -795,26 +823,64 @@ pub fn fire_weapon(
     let mut query_pipeline = rapier3d::prelude::QueryPipeline::new();
     query_pipeline.update(&colliders);
 
-    let ray = rapier3d::prelude::Ray::new(
-        rapier3d::prelude::Point::new(origin_x, origin_y, origin_z),
-        rapier3d::prelude::Vector::new(ndx, ndy, ndz)
+    let is_melee = matches!(
+        skill_category,
+        "Edged" | "Blunt" | "Pointed" | "TwoHanded" | "Brawling" | "Polearm"
     );
 
     let rigid_bodies = rapier3d::prelude::RigidBodySet::new();
-    if let Some((handle, toi)) = query_pipeline.cast_ray(
-        &rigid_bodies, &colliders, &ray, max_range, true, rapier3d::prelude::QueryFilter::default()
-    ) {
-        let user_data = colliders[handle].user_data;
-        let is_structure = (user_data >> 64) == 1;
-        let target_id = (user_data & 0xFFFFFFFFFFFFFFFF) as u64;
-        let hit_pt = ray.point_at(toi);
-        
-        hit_location = (hit_pt.x, hit_pt.y, hit_pt.z);
-        
-        if is_structure {
-            crate::building::damage_structure(ctx, target_id, weapon_damage);
-        } else {
-            hit_entity = Some(target_id);
+
+    if is_melee {
+        // Melee swept attack volume: 20cm thickness for blade/blunt sweep
+        let sweep_shape = rapier3d::prelude::Ball::new(0.20);
+        let shape_pos = rapier3d::prelude::Isometry::translation(origin_x, origin_y, origin_z);
+        let shape_vel = rapier3d::prelude::Vector::new(ndx, ndy, ndz);
+        let options = rapier3d::parry::query::ShapeCastOptions {
+            max_time_of_impact: max_range,
+            stop_at_penetration: true,
+            target_distance: 0.0,
+            compute_impact_geometry_on_penetration: true,
+        };
+        if let Some((handle, hit)) = query_pipeline.cast_shape(
+            &rigid_bodies,
+            &colliders,
+            &shape_pos,
+            &shape_vel,
+            &sweep_shape,
+            options,
+            rapier3d::prelude::QueryFilter::default(),
+        ) {
+            let user_data = colliders[handle].user_data;
+            let is_structure = (user_data >> 64) == 1;
+            let target_id = (user_data & 0xFFFFFFFFFFFFFFFF) as u64;
+            let hit_pt = shape_pos.translation.vector + shape_vel * hit.time_of_impact;
+            hit_location = (hit_pt.x, hit_pt.y, hit_pt.z);
+
+            if is_structure {
+                crate::building::damage_structure(ctx, target_id, weapon_damage);
+            } else {
+                hit_entity = Some(target_id);
+            }
+        }
+    } else {
+        let ray = rapier3d::prelude::Ray::new(
+            rapier3d::prelude::Point::new(origin_x, origin_y, origin_z),
+            rapier3d::prelude::Vector::new(ndx, ndy, ndz)
+        );
+        if let Some((handle, toi)) = query_pipeline.cast_ray(
+            &rigid_bodies, &colliders, &ray, max_range, true, rapier3d::prelude::QueryFilter::default()
+        ) {
+            let user_data = colliders[handle].user_data;
+            let is_structure = (user_data >> 64) == 1;
+            let target_id = (user_data & 0xFFFFFFFFFFFFFFFF) as u64;
+            let hit_pt = ray.point_at(toi);
+            hit_location = (hit_pt.x, hit_pt.y, hit_pt.z);
+
+            if is_structure {
+                crate::building::damage_structure(ctx, target_id, weapon_damage);
+            } else {
+                hit_entity = Some(target_id);
+            }
         }
     }
 

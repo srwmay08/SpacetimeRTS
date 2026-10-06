@@ -5,7 +5,8 @@
 // speed-hack throttling calibrated to match the client's 15.0 m/s movement speed.
 
 use spacetimedb::{table, reducer, ReducerContext, Identity, Table};
-use crate::combat::{hitbox_history, Snapshot}; 
+use crate::combat::{hitbox_history, Snapshot, health}; 
+use crate::ai::harvestable_corpse;
 use crate::waypoint;
 use crate::player_perspective;
 use crate::CameraModeType;
@@ -113,6 +114,34 @@ pub fn process_movement(
     transform.y += dy;
     transform.z += dz;
     transform.last_processed_tick = tick_id;
+
+    // CQC Dynamic Body Presence: Capsule-to-Capsule Pushback Separation
+    let nearby_entities = crate::spatial::get_nearby_entities(transform.x, transform.z, 2.5);
+    for other_id in nearby_entities {
+        if other_id == session.entity_id { continue; }
+        if ctx.db.harvestable_corpse().entity_id().find(other_id).is_some() { continue; }
+        if ctx.db.health().entity_id().find(other_id).is_none() { continue; }
+
+        if let Some(other_t) = ctx.db.transform().entity_id().find(other_id) {
+            // Humanoid capsule: half-height 0.5, radius 0.4
+            if let Some((normal, dist)) = crate::physics::compute_capsule_contact(
+                (transform.x, transform.y - 0.15, transform.z),
+                0.5, 0.4,
+                (other_t.x, other_t.y - 0.15, other_t.z),
+                0.5, 0.4,
+                0.0,
+            ) {
+                // If penetrating (dist < 0.0), apply soft horizontal pushback separation
+                if dist < 0.0 {
+                    let penetration = -dist;
+                    let push_x = normal.0 * (penetration * 0.5);
+                    let push_z = normal.2 * (penetration * 0.5);
+                    transform.x += push_x;
+                    transform.z += push_z;
+                }
+            }
+        }
+    }
     
     let ground_y = crate::get_terrain_height(transform.x, transform.z);
     if transform.y < ground_y + 1.05 {
