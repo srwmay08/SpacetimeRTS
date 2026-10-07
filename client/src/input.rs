@@ -213,6 +213,7 @@ pub fn hotbar_input_system(
     mut active_offhand: ResMut<ActiveOffHandItem>,
     hand_side: Res<EquippedHandSide>,
     conn: Res<SpacetimeConnection>,
+    sparring_mode: Res<SparringMode>,
 ) {
     if console.is_open {
         return;
@@ -260,16 +261,28 @@ pub fn hotbar_input_system(
     // Read authoritative equipped weapon from SpacetimeDB EquipmentLoadout
     let loadout = conn.db.db.equipment_loadout().entity_id().find(&player.entity_id);
     if let Some(l) = loadout {
-        active_item.0 = if l.main_hand != "None" && !l.main_hand.is_empty() {
-            Some(l.main_hand.clone())
+        if l.main_hand != "None" && !l.main_hand.is_empty() {
+            active_item.0 = Some(l.main_hand.clone());
+        } else if sparring_mode.0 {
+            active_item.0 = Some("Longsword".to_string());
         } else {
-            None
-        };
-        active_offhand.0 = if l.off_hand != "None" && !l.off_hand.is_empty() {
-            Some(l.off_hand.clone())
+            active_item.0 = None;
+        }
+
+        if l.off_hand != "None" && !l.off_hand.is_empty() {
+            active_offhand.0 = Some(l.off_hand.clone());
+        } else if sparring_mode.0 {
+            active_offhand.0 = Some("Wooden Shield".to_string());
         } else {
-            None
-        };
+            active_offhand.0 = None;
+        }
+    } else if sparring_mode.0 {
+        if active_item.0.is_none() {
+            active_item.0 = Some("Longsword".to_string());
+        }
+        if active_offhand.0.is_none() {
+            active_offhand.0 = Some("Wooden Shield".to_string());
+        }
     } else {
         active_item.0 = None;
         active_offhand.0 = None;
@@ -659,6 +672,17 @@ pub fn context_aware_action_dispatcher(
                                             weapons.weapon_state.offhand_recoil_offset += Vec3::new(0.0, 0.03, -0.08);
                                             weapons.weapon_state.offhand_recoil_rot *= Quat::from_rotation_y(-0.2);
                                             weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 2.5).min(20.0);
+
+                                            crate::weapons::spawn_directional_slash_trail(
+                                                &mut commands,
+                                                &mut weapons.meshes,
+                                                &mut weapons.materials,
+                                                origin,
+                                                *cam_transform.forward(),
+                                                *cam_transform.right(),
+                                                *cam_transform.up(),
+                                                MeleeSwingDirection::Left,
+                                            );
 
                                             let hit = spatial_query.cast_ray(
                                                 origin, cam_transform.forward(), 4.5, true,
@@ -1113,6 +1137,17 @@ pub fn context_aware_action_dispatcher(
                                     let is_melee = weapons.weapon_state.current_weapon.is_melee();
 
                                     if is_melee {
+                                        crate::weapons::spawn_directional_slash_trail(
+                                            &mut commands,
+                                            &mut weapons.meshes,
+                                            &mut weapons.materials,
+                                            origin,
+                                            *cam_transform.forward(),
+                                            *cam_transform.right(),
+                                            *cam_transform.up(),
+                                            direction,
+                                        );
+
                                         // Authoritative melee swing: bare fists (unarmed), tools, blades, bludgeons
                                         let _ = conn.db.reducers.swing_tool(
                                             origin.x, origin.y, origin.z, dir.x, dir.y, dir.z

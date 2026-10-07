@@ -16,6 +16,7 @@ use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::render::view::RenderLayers;
 use crate::components::*;
 use crate::core::*;
+use crate::trees::LowPolyMeshBuilder;
 
 use spacetime_rts_logic::HandSide;
 
@@ -382,29 +383,29 @@ pub fn get_default_weapon_pos(weapon: WeaponType, is_left: bool) -> Vec3 {
         WeaponType::Wand => Vec3::new(0.20, -0.18, -0.38),
         WeaponType::Orb => Vec3::new(0.22, -0.20, -0.36),
         WeaponType::Halberd => Vec3::new(0.25, -0.24, -0.52),
-        WeaponType::Longsword => Vec3::new(0.22, -0.20, -0.42),
-        WeaponType::Greatsword => Vec3::new(0.24, -0.22, -0.48),
-        WeaponType::TwoHandAxe => Vec3::new(0.24, -0.22, -0.48),
-        WeaponType::Maul => Vec3::new(0.24, -0.22, -0.45),
-        WeaponType::Spear => Vec3::new(0.24, -0.20, -0.50),
-        WeaponType::Javelin => Vec3::new(0.22, -0.20, -0.46),
-        WeaponType::Trident => Vec3::new(0.24, -0.22, -0.52),
-        WeaponType::Rapier => Vec3::new(0.22, -0.18, -0.42),
-        WeaponType::Warhammer => Vec3::new(0.22, -0.20, -0.40),
-        WeaponType::Club => Vec3::new(0.22, -0.22, -0.38),
-        WeaponType::BlackJack => Vec3::new(0.20, -0.20, -0.34),
-        WeaponType::Dagger => Vec3::new(0.20, -0.18, -0.34),
-        WeaponType::Handaxe => Vec3::new(0.22, -0.20, -0.38),
-        WeaponType::TigerClaws => Vec3::new(0.18, -0.18, -0.28),
-        WeaponType::Cestus => Vec3::new(0.18, -0.18, -0.30),
-        WeaponType::KnuckleDuster => Vec3::new(0.18, -0.18, -0.28),
-        WeaponType::FryingPan => Vec3::new(0.24, -0.22, -0.40),
-        WeaponType::HolyMackerel => Vec3::new(0.22, -0.20, -0.38),
-        WeaponType::Hammer => Vec3::new(0.20, -0.20, -0.36),
-        WeaponType::Pickaxe => Vec3::new(0.22, -0.20, -0.40),
-        WeaponType::Torch => Vec3::new(0.22, -0.20, -0.38),
-        WeaponType::WoodenShield => Vec3::new(0.24, -0.18, -0.38),
-        WeaponType::None => Vec3::new(0.20, -0.20, -0.32), // Boxer guard default fist
+        WeaponType::Longsword => Vec3::new(0.24, -0.12, -0.34),
+        WeaponType::Greatsword => Vec3::new(0.24, -0.14, -0.38),
+        WeaponType::TwoHandAxe => Vec3::new(0.24, -0.14, -0.38),
+        WeaponType::Maul => Vec3::new(0.24, -0.14, -0.36),
+        WeaponType::Spear => Vec3::new(0.24, -0.14, -0.42),
+        WeaponType::Javelin => Vec3::new(0.22, -0.14, -0.38),
+        WeaponType::Trident => Vec3::new(0.24, -0.14, -0.44),
+        WeaponType::Rapier => Vec3::new(0.22, -0.12, -0.34),
+        WeaponType::Warhammer => Vec3::new(0.22, -0.14, -0.34),
+        WeaponType::Club => Vec3::new(0.22, -0.14, -0.34),
+        WeaponType::BlackJack => Vec3::new(0.20, -0.14, -0.30),
+        WeaponType::Dagger => Vec3::new(0.20, -0.12, -0.30),
+        WeaponType::Handaxe => Vec3::new(0.22, -0.14, -0.32),
+        WeaponType::TigerClaws => Vec3::new(0.18, -0.14, -0.26),
+        WeaponType::Cestus => Vec3::new(0.18, -0.14, -0.26),
+        WeaponType::KnuckleDuster => Vec3::new(0.18, -0.14, -0.26),
+        WeaponType::FryingPan => Vec3::new(0.24, -0.16, -0.34),
+        WeaponType::HolyMackerel => Vec3::new(0.22, -0.14, -0.32),
+        WeaponType::Hammer => Vec3::new(0.20, -0.14, -0.30),
+        WeaponType::Pickaxe => Vec3::new(0.22, -0.14, -0.32),
+        WeaponType::Torch => Vec3::new(0.22, -0.14, -0.32),
+        WeaponType::WoodenShield => Vec3::new(0.24, -0.10, -0.32),
+        WeaponType::None => Vec3::new(0.20, -0.14, -0.28), // Boxer guard default fist
     };
 
     if is_left {
@@ -514,10 +515,15 @@ pub fn spawn_or_update_view_model_weapon(
         // 1. Main Hand Viewmodel Root (or Right Fist if Unarmed)
         let is_left = hand_side.0 == HandSide::Left;
         let main_pos = get_default_weapon_pos(desired_main, is_left);
-        let main_rot = if is_left {
-            Quat::from_rotation_y(0.08) * Quat::from_rotation_z(0.06)
-        } else {
-            Quat::IDENTITY
+        let main_rot = match desired_main {
+            WeaponType::Longsword | WeaponType::Greatsword | WeaponType::Rapier => {
+                Quat::from_rotation_x(0.48) * Quat::from_rotation_y(-0.25) * Quat::from_rotation_z(0.18)
+            }
+            _ => if is_left {
+                Quat::from_rotation_y(0.08) * Quat::from_rotation_z(0.06)
+            } else {
+                Quat::IDENTITY
+            },
         };
 
         parent.spawn((
@@ -541,10 +547,19 @@ pub fn spawn_or_update_view_model_weapon(
         if should_spawn_offhand {
             let off_is_left = !is_left;
             let off_pos = get_default_weapon_pos(desired_off, off_is_left);
-            let off_rot = if off_is_left {
-                Quat::from_rotation_y(0.08) * Quat::from_rotation_z(0.06)
-            } else {
-                Quat::from_rotation_y(-0.08) * Quat::from_rotation_z(-0.06)
+            let off_rot = match desired_off {
+                WeaponType::WoodenShield => {
+                    if off_is_left {
+                        Quat::from_rotation_y(0.26) * Quat::from_rotation_x(0.16) * Quat::from_rotation_z(-0.08)
+                    } else {
+                        Quat::from_rotation_y(-0.26) * Quat::from_rotation_x(0.16) * Quat::from_rotation_z(0.08)
+                    }
+                }
+                _ => if off_is_left {
+                    Quat::from_rotation_y(0.08) * Quat::from_rotation_z(0.06)
+                } else {
+                    Quat::from_rotation_y(-0.08) * Quat::from_rotation_z(-0.06)
+                },
             };
 
             parent.spawn((
@@ -879,6 +894,128 @@ fn spawn_voxel_box(
     ));
 }
 
+/// Spawns an immediate procedural blade slash trail / crescent arc in front of the camera.
+pub fn spawn_directional_slash_trail(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    origin: Vec3,
+    cam_forward: Vec3,
+    cam_right: Vec3,
+    cam_up: Vec3,
+    direction: MeleeSwingDirection,
+) {
+    let mut builder = LowPolyMeshBuilder::new();
+    let num_segments = 12;
+
+    match direction {
+        MeleeSwingDirection::Right => {
+            // Arc sweeping from upper-left to lower-right
+            for i in 0..num_segments {
+                let t0 = i as f32 / num_segments as f32;
+                let t1 = (i + 1) as f32 / num_segments as f32;
+                let angle0 = -0.9 + t0 * 1.8;
+                let angle1 = -0.9 + t1 * 1.8;
+
+                let r_inner = 0.55;
+                let r_outer0 = 1.05 + 0.15 * (1.0 - (t0 - 0.5).abs() * 2.0);
+                let r_outer1 = 1.05 + 0.15 * (1.0 - (t1 - 0.5).abs() * 2.0);
+
+                let v0 = cam_right * (angle0.sin() * r_inner) + cam_up * (angle0.cos() * r_inner);
+                let v1 = cam_right * (angle0.sin() * r_outer0) + cam_up * (angle0.cos() * r_outer0);
+                let v2 = cam_right * (angle1.sin() * r_outer1) + cam_up * (angle1.cos() * r_outer1);
+                let v3 = cam_right * (angle1.sin() * r_inner) + cam_up * (angle1.cos() * r_inner);
+
+                let color = [0.8, 0.95, 1.0, 1.0 - (t0 - 0.5).abs() * 0.5];
+                builder.add_flat_quad(v0, v1, v2, v3, color);
+            }
+        }
+        MeleeSwingDirection::Left => {
+            // Arc sweeping from upper-right to lower-left
+            for i in 0..num_segments {
+                let t0 = i as f32 / num_segments as f32;
+                let t1 = (i + 1) as f32 / num_segments as f32;
+                let angle0 = 0.9 - t0 * 1.8;
+                let angle1 = 0.9 - t1 * 1.8;
+
+                let r_inner = 0.55;
+                let r_outer0 = 1.05 + 0.15 * (1.0 - (t0 - 0.5).abs() * 2.0);
+                let r_outer1 = 1.05 + 0.15 * (1.0 - (t1 - 0.5).abs() * 2.0);
+
+                let v0 = cam_right * (angle0.sin() * r_inner) + cam_up * (angle0.cos() * r_inner);
+                let v1 = cam_right * (angle0.sin() * r_outer0) + cam_up * (angle0.cos() * r_outer0);
+                let v2 = cam_right * (angle1.sin() * r_outer1) + cam_up * (angle1.cos() * r_outer1);
+                let v3 = cam_right * (angle1.sin() * r_inner) + cam_up * (angle1.cos() * r_inner);
+
+                let color = [0.8, 0.95, 1.0, 1.0 - (t0 - 0.5).abs() * 0.5];
+                builder.add_flat_quad(v0, v1, v2, v3, color);
+            }
+        }
+        MeleeSwingDirection::Overhead => {
+            // Vertical downward cleave arc
+            for i in 0..num_segments {
+                let t0 = i as f32 / num_segments as f32;
+                let t1 = (i + 1) as f32 / num_segments as f32;
+                let angle0 = 1.1 - t0 * 2.2;
+                let angle1 = 1.1 - t1 * 2.2;
+
+                let r_inner = 0.50;
+                let r_outer = 1.15;
+
+                let v0 = cam_forward * (angle0.cos() * r_inner) + cam_up * (angle0.sin() * r_inner);
+                let v1 = cam_forward * (angle0.cos() * r_outer) + cam_up * (angle0.sin() * r_outer);
+                let v2 = cam_forward * (angle1.cos() * r_outer) + cam_up * (angle1.sin() * r_outer);
+                let v3 = cam_forward * (angle1.cos() * r_inner) + cam_up * (angle1.sin() * r_inner);
+
+                let color = [1.0, 0.85, 0.35, 1.0];
+                builder.add_flat_quad(v0, v1, v2, v3, color);
+            }
+        }
+        MeleeSwingDirection::Thrust => {
+            // Focused linear aerodynamic thrust cone
+            for i in 0..num_segments {
+                let angle0 = (i as f32) * (std::f32::consts::TAU / num_segments as f32);
+                let angle1 = ((i + 1) as f32) * (std::f32::consts::TAU / num_segments as f32);
+
+                let p_tip = cam_forward * 1.5;
+                let p_base0 = cam_forward * 0.3 + cam_right * (angle0.cos() * 0.18) + cam_up * (angle0.sin() * 0.18);
+                let p_base1 = cam_forward * 0.3 + cam_right * (angle1.cos() * 0.18) + cam_up * (angle1.sin() * 0.18);
+
+                let color = [0.85, 0.95, 1.0, 0.8];
+                builder.add_flat_triangle(p_base0, p_tip, p_base1, color);
+            }
+        }
+    }
+
+    let trail_mesh = meshes.add(builder.build());
+    let trail_mat = materials.add(StandardMaterial {
+        base_color: match direction {
+            MeleeSwingDirection::Overhead => Color::srgb(1.0, 0.85, 0.35),
+            MeleeSwingDirection::Thrust => Color::srgb(0.9, 0.96, 1.0),
+            _ => Color::srgb(0.75, 0.92, 1.0),
+        },
+        emissive: match direction {
+            MeleeSwingDirection::Overhead => LinearRgba::rgb(4.0, 2.5, 0.6),
+            MeleeSwingDirection::Thrust => LinearRgba::rgb(3.0, 4.0, 5.0),
+            _ => LinearRgba::rgb(2.5, 4.0, 5.5),
+        },
+        unlit: true,
+        cull_mode: None,
+        double_sided: true,
+        ..default()
+    });
+
+    commands.spawn((
+        PbrBundle {
+            mesh: trail_mesh,
+            material: trail_mat,
+            transform: BevyTransform::from_translation(origin + cam_forward * 0.45),
+            ..default()
+        },
+        Particle { timer: Timer::from_seconds(0.14, TimerMode::Once) },
+    ));
+}
+
 /// Computes procedural position and rotation offsets for directional 4-way melee attacks
 /// (Right slash, Left backhand, Overhead cleave, Forward thrust) across Windup, Release, Recovery.
 pub fn compute_directional_melee_transform(
@@ -1161,7 +1298,22 @@ pub fn animate_weapon_viewmodel(
             let sway_x = (weapon_state.sway_time * 1.5).sin() * 0.003;
             let sway_y = (weapon_state.sway_time * 3.0).cos() * 0.002;
             let mut current_offset = default_pos + Vec3::new(sway_x, sway_y, 0.0) + weapon_state.recoil_offset;
-            let mut current_rot = weapon_state.recoil_rot;
+
+            // Idle ready guard posture for melee weapons
+            let idle_base_rot = match weapon_state.current_weapon {
+                WeaponType::Longsword | WeaponType::Greatsword | WeaponType::Rapier => {
+                    Quat::from_rotation_x(0.48) * Quat::from_rotation_y(-0.25) * Quat::from_rotation_z(0.18)
+                }
+                WeaponType::Warhammer | WeaponType::Handaxe | WeaponType::Club => {
+                    Quat::from_rotation_x(0.38) * Quat::from_rotation_y(-0.20)
+                }
+                WeaponType::Spear | WeaponType::Halberd => {
+                    Quat::from_rotation_x(0.25) * Quat::from_rotation_y(-0.15)
+                }
+                _ => Quat::IDENTITY,
+            };
+
+            let mut current_rot = idle_base_rot * weapon_state.recoil_rot;
             if is_left {
                 current_rot = Quat::from_rotation_y(0.08) * Quat::from_rotation_z(0.06) * current_rot;
             }
@@ -1223,7 +1375,19 @@ pub fn animate_weapon_viewmodel(
             let sway_x = ((weapon_state.sway_time + 1.2) * 1.5).sin() * 0.003;
             let sway_y = ((weapon_state.sway_time + 1.2) * 3.0).cos() * 0.002;
             let mut current_offset = default_pos + Vec3::new(sway_x, sway_y, 0.0) + weapon_state.offhand_recoil_offset;
-            let mut current_rot = weapon_state.offhand_recoil_rot;
+
+            let idle_offhand_rot = match weapon_state.offhand_weapon {
+                WeaponType::WoodenShield => {
+                    if off_is_left {
+                        Quat::from_rotation_y(0.26) * Quat::from_rotation_x(0.16) * Quat::from_rotation_z(-0.08)
+                    } else {
+                        Quat::from_rotation_y(-0.26) * Quat::from_rotation_x(0.16) * Quat::from_rotation_z(0.08)
+                    }
+                }
+                _ => Quat::IDENTITY,
+            };
+
+            let mut current_rot = idle_offhand_rot * weapon_state.offhand_recoil_rot;
             if off_is_left {
                 current_rot = Quat::from_rotation_y(0.08) * Quat::from_rotation_z(0.06) * current_rot;
             } else {
@@ -1232,8 +1396,8 @@ pub fn animate_weapon_viewmodel(
 
             // Shield Block Guard
             if swing_state.is_blocking && weapon_state.offhand_weapon == WeaponType::WoodenShield {
-                let block_pos = Vec3::new(-0.04, 0.02, -0.26);
-                let block_rot = Quat::from_rotation_y(-0.24) * Quat::from_rotation_x(0.12) * Quat::from_rotation_z(-0.06);
+                let block_pos = Vec3::new(-0.02, 0.0, -0.22);
+                let block_rot = Quat::from_rotation_y(-0.08) * Quat::from_rotation_x(0.06);
                 current_offset = current_offset.lerp(block_pos, (dt * 18.0).min(1.0));
                 current_rot = current_rot.slerp(block_rot, (dt * 18.0).min(1.0));
             } else if swing_state.offhand_is_swinging {

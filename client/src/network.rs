@@ -215,6 +215,11 @@ pub fn init_network_connection(
 
         parent.spawn((
             Camera3dBundle { 
+                projection: Projection::Perspective(PerspectiveProjection {
+                    fov: 65.0_f32.to_radians(),
+                    near: 0.05,
+                    ..default()
+                }),
                 transform: BevyTransform::from_xyz(0.0, 0.5, 0.0), 
                 camera: Camera { is_active: true, ..default() },
                 ..default() 
