@@ -905,12 +905,15 @@ impl FromWorld for BuildingAssetManifest {
 // ----------------------------------------------------------------------------
 
 pub fn toggle_build_mode(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut toggle_evts: EventReader<crate::input::ToggleBuildModeEvent>,
+    mut tmpl_evts: EventReader<crate::input::BuildCycleTemplateEvent>,
+    mut piece_evts: EventReader<crate::input::BuildCyclePieceEvent>,
+    mut rot_evts: EventReader<crate::input::BuildRotatePieceEvent>,
     mut build_state: ResMut<BuildModeState>,
     mut commands: Commands,
     hologram_query: Query<Entity, With<BuildHologram>>,
 ) {
-    if keys.just_pressed(KeyCode::KeyB) {
+    for _ in toggle_evts.read() {
         build_state.is_active = !build_state.is_active;
         info!("Build Mode Active: {}", build_state.is_active);
 
@@ -922,7 +925,7 @@ pub fn toggle_build_mode(
     }
 
     if build_state.is_active {
-        if keys.just_pressed(KeyCode::KeyY) {
+        for _ in tmpl_evts.read() {
             build_state.selected_template = match build_state.selected_template {
                 None => Some(BuildingTemplateType::Watchtower),
                 Some(BuildingTemplateType::Watchtower) => Some(BuildingTemplateType::Palisade),
@@ -940,7 +943,7 @@ pub fn toggle_build_mode(
             }
         }
 
-        if keys.just_pressed(KeyCode::KeyR) {
+        for _ in piece_evts.read() {
             if let Some(ref mut t) = build_state.selected_template {
                 *t = t.next();
                 info!("Selected Multi-Piece Template: {:?}", t);
@@ -964,18 +967,12 @@ pub fn toggle_build_mode(
             }
         }
 
-        if keys.just_pressed(KeyCode::KeyT) {
-            // KeyT previously cycled architectural factions (Human, HighElf, DarkElf, Barbarian)
-            // Deprecated: Canonical Frontier Wood & Stone style is active.
-            info!("Multi-race architectural cycling is deprecated; Frontier Wood & Stone style active.");
-        }
-
-
-        if keys.just_pressed(KeyCode::KeyQ) {
-            build_state.rotation_steps = (build_state.rotation_steps + 1) % 4;
-        }
-        if keys.just_pressed(KeyCode::KeyE) {
-            build_state.rotation_steps = (build_state.rotation_steps.wrapping_sub(1)) % 4;
+        for ev in rot_evts.read() {
+            if ev.clockwise {
+                build_state.rotation_steps = (build_state.rotation_steps.wrapping_sub(1)) % 4;
+            } else {
+                build_state.rotation_steps = (build_state.rotation_steps + 1) % 4;
+            }
         }
     }
 }

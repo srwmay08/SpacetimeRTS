@@ -667,13 +667,13 @@ pub struct TunerActionComponent(pub TunerAction);
 // ----------------------------------------------------------------------------
 
 pub fn toggle_tuner_ui(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut tuner_evts: EventReader<crate::input::ToggleWeaponTunerEvent>,
     mut tuner: ResMut<WeaponTunerState>,
     mut tuner_root_q: Query<&mut Style, With<TunerRoot>>,
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
     camera_mode: Res<State<CameraMode>>,
 ) {
-    if keys.just_pressed(KeyCode::F6) {
+    for _ in tuner_evts.read() {
         tuner.is_open = !tuner.is_open;
         if let Ok(mut style) = tuner_root_q.get_single_mut() {
             style.display = if tuner.is_open { Display::Flex } else { Display::None };

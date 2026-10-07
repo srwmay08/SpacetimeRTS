@@ -1849,7 +1849,8 @@ pub fn setup_options_panel_modal_ui(
 // ----------------------------------------------------------------------------
 
 pub fn toggle_options_and_spellbook_system(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut options_evts: EventReader<crate::input::ToggleOptionsEvent>,
+    mut spellbook_evts: EventReader<crate::input::ToggleSpellbookEvent>,
     mut options_state: ResMut<OptionsPanelState>,
     mut spellbook_state: ResMut<SpellbookWindowState>,
     mut options_q: Query<&mut Style, (With<OptionsPanelModalRoot>, Without<SpellbookModalRoot>)>,
@@ -1859,8 +1860,8 @@ pub fn toggle_options_and_spellbook_system(
 ) {
     let mut state_changed = false;
 
-    // Toggle Options with O
-    if keys.just_pressed(KeyCode::KeyO) {
+    // Toggle Options
+    for _ in options_evts.read() {
         options_state.is_open = !options_state.is_open;
         if options_state.is_open {
             spellbook_state.is_open = false; // mutually exclusive or stack
@@ -1868,8 +1869,8 @@ pub fn toggle_options_and_spellbook_system(
         state_changed = true;
     }
 
-    // Toggle Spellbook with K
-    if keys.just_pressed(KeyCode::KeyK) {
+    // Toggle Spellbook
+    for _ in spellbook_evts.read() {
         spellbook_state.is_open = !spellbook_state.is_open;
         if spellbook_state.is_open {
             options_state.is_open = false;
@@ -2526,6 +2527,7 @@ fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, _window: &Windo
 
 pub fn handle_spell_drag_and_drop(
     mouse: Res<ButtonInput<MouseButton>>,
+    console: Res<crate::core::ConsoleState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     card_query: Query<(&SpellbookSlotCard, &GlobalTransform, &Node, Option<&Interaction>)>,
     hotbar_slot_q: Query<(&HotbarSlotButton, &GlobalTransform, &Node, Option<&Interaction>)>,
@@ -2533,6 +2535,10 @@ pub fn handle_spell_drag_and_drop(
     mut hotbar: ResMut<PreparedHotbarState>,
     mut spellbook_state: ResMut<SpellbookWindowState>,
 ) {
+    if console.is_open {
+        return;
+    }
+
     let Ok(window) = window_query.get_single() else { return; };
     let Some(cursor_pos) = window.cursor_position() else { return; };
 
@@ -2955,6 +2961,8 @@ impl Plugin for SpellbookPlugin {
             .init_resource::<OptionsPanelState>()
             .init_resource::<TerrainRenderSettings>()
             .init_resource::<SpellDragState>()
+            .add_event::<crate::input::ToggleOptionsEvent>()
+            .add_event::<crate::input::ToggleSpellbookEvent>()
             .add_systems(OnEnter(GameState::InGame), (
                 setup_prepared_hotbar_ui,
                 setup_spellbook_modal_ui,

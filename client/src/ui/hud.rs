@@ -179,13 +179,12 @@ pub fn update_celestial_hud_ui(
     }
 }
 
-/// Allows toggling the celestial clock & weather HUD pill with [F10] when outside the console.
+/// Allows toggling the celestial clock & weather HUD pill with [F10] event.
 pub fn toggle_celestial_hud_hotkey(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut hud_evts: EventReader<crate::input::ToggleCelestialHudEvent>,
     mut hud_pill_query: Query<&mut Style, With<CelestialHudRoot>>,
-    console: Res<ConsoleState>,
 ) {
-    if !console.is_open && keys.just_pressed(KeyCode::F10) {
+    for _ in hud_evts.read() {
         if let Ok(mut style) = hud_pill_query.get_single_mut() {
             style.display = if style.display == Display::None {
                 Display::Flex
@@ -511,15 +510,12 @@ pub fn update_reticle_abilities_and_hitmarker(
 }
 
 pub fn toggle_crosshair_menu(
-    keys: Res<ButtonInput<KeyCode>>,
-    console: Res<ConsoleState>,
+    mut menu_evts: EventReader<crate::input::ToggleCrosshairMenuEvent>,
     mut menu_state: ResMut<CrosshairMenuState>,
     mut menu_q: Query<&mut Style, With<CrosshairMenuRoot>>,
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    if console.is_open { return; }
-
-    if keys.just_pressed(KeyCode::F7) {
+    for _ in menu_evts.read() {
         menu_state.is_open = !menu_state.is_open;
         if let Ok(mut style) = menu_q.get_single_mut() {
             style.display = if menu_state.is_open { Display::Flex } else { Display::None };

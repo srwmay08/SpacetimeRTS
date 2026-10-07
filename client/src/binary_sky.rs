@@ -1785,17 +1785,19 @@ pub fn sync_celestial_visuals(
 
 /// Interactive user input system for adjusting time of day, scrubbing cycles, and cycling weather.
 pub fn handle_sky_time_and_weather_inputs(
-    keys: Option<Res<ButtonInput<KeyCode>>>,
+    mut day_night_evts: EventReader<crate::input::CelestialCycleDayNightEvent>,
+    mut weather_evts: EventReader<crate::input::CelestialCycleWeatherEvent>,
+    mut step_evts: EventReader<crate::input::CelestialCycleStepEvent>,
+    mut scale_evts: EventReader<crate::input::CelestialTimeScaleStepEvent>,
     mut config: ResMut<BinarySkyConfig>,
     mut ephemeris: ResMut<BinaryEphemerisState>,
     mut weather: ResMut<AtmosphericWeather>,
     mut console: Option<ResMut<crate::core::ConsoleState>>,
 ) {
-    let Some(keys) = keys else { return; };
     let day_duration = config.day_duration_seconds as f64;
 
-    // [F8] Quick Day/Night Toggle
-    if keys.just_pressed(KeyCode::F8) {
+    // Quick Day/Night Toggle
+    for _ in day_night_evts.read() {
         if ephemeris.star_a_elevation > 0.0 {
             ephemeris.simulation_time_seconds = day_duration * 0.5;
             ephemeris.diurnal_angle = std::f32::consts::PI;
@@ -1813,37 +1815,44 @@ pub fn handle_sky_time_and_weather_inputs(
         }
     }
 
-    // [ [ ] Step 1 hour backward
-    if keys.just_pressed(KeyCode::BracketLeft) {
+    // Step 1 hour forward or backward
+    for ev in step_evts.read() {
         let hour_sec = (config.day_duration_seconds / 24.0) as f64;
-        ephemeris.simulation_time_seconds = (ephemeris.simulation_time_seconds - hour_sec).rem_euclid(day_duration);
-        let msg = format!("[Celestial Cycle] Rewound 1 hour. Current time: {:.1}h", ephemeris.clock_time_hours());
-        info!("{}", msg);
-        if let Some(ref mut c) = console {
-            c.logs.push(msg);
+        if ev.forward {
+            ephemeris.simulation_time_seconds = (ephemeris.simulation_time_seconds + hour_sec).rem_euclid(day_duration);
+            let msg = format!("[Celestial Cycle] Advanced 1 hour. Current time: {:.1}h", ephemeris.clock_time_hours());
+            info!("{}", msg);
+            if let Some(ref mut c) = console {
+                c.logs.push(msg);
+            }
+        } else {
+            ephemeris.simulation_time_seconds = (ephemeris.simulation_time_seconds - hour_sec).rem_euclid(day_duration);
+            let msg = format!("[Celestial Cycle] Rewound 1 hour. Current time: {:.1}h", ephemeris.clock_time_hours());
+            info!("{}", msg);
+            if let Some(ref mut c) = console {
+                c.logs.push(msg);
+            }
         }
     }
 
-    // [ ] ] Step 1 hour forward
-    if keys.just_pressed(KeyCode::BracketRight) {
-        let hour_sec = (config.day_duration_seconds / 24.0) as f64;
-        ephemeris.simulation_time_seconds = (ephemeris.simulation_time_seconds + hour_sec).rem_euclid(day_duration);
-        let msg = format!("[Celestial Cycle] Advanced 1 hour. Current time: {:.1}h", ephemeris.clock_time_hours());
-        info!("{}", msg);
-        if let Some(ref mut c) = console {
-            c.logs.push(msg);
+    // Step time scale faster or slower
+    for ev in scale_evts.read() {
+        if ev.faster {
+            config.time_scale = match config.time_scale {
+                s if s < 1.0 => 1.0,
+                s if s < 10.0 => 10.0,
+                s if s < 60.0 => 60.0,
+                _ => 300.0,
+            };
+        } else {
+            config.time_scale = match config.time_scale {
+                s if s >= 300.0 => 60.0,
+                s if s >= 60.0 => 10.0,
+                s if s >= 10.0 => 1.0,
+                s if s >= 1.0 => 0.0,
+                _ => 0.0,
+            };
         }
-    }
-
-    // [ - ] Slow down time progression
-    if keys.just_pressed(KeyCode::Minus) {
-        config.time_scale = match config.time_scale {
-            s if s >= 300.0 => 60.0,
-            s if s >= 60.0 => 10.0,
-            s if s >= 10.0 => 1.0,
-            s if s >= 1.0 => 0.0,
-            _ => 0.0,
-        };
         let msg = format!("[Celestial Cycle] Time scale set to: {:.0}x", config.time_scale);
         info!("{}", msg);
         if let Some(ref mut c) = console {
@@ -1851,23 +1860,8 @@ pub fn handle_sky_time_and_weather_inputs(
         }
     }
 
-    // [ = ] Accelerate time progression
-    if keys.just_pressed(KeyCode::Equal) {
-        config.time_scale = match config.time_scale {
-            s if s < 1.0 => 1.0,
-            s if s < 10.0 => 10.0,
-            s if s < 60.0 => 60.0,
-            _ => 300.0,
-        };
-        let msg = format!("[Celestial Cycle] Time scale set to: {:.0}x", config.time_scale);
-        info!("{}", msg);
-        if let Some(ref mut c) = console {
-            c.logs.push(msg);
-        }
-    }
-
-    // [F9] Cycle Atmospheric Weather Presets
-    if keys.just_pressed(KeyCode::F9) {
+    // Cycle Atmospheric Weather Presets
+    for _ in weather_evts.read() {
         weather.weather_type = match weather.weather_type {
             WeatherType::ClearSky => WeatherType::AerosolHaze,
             WeatherType::AerosolHaze => WeatherType::StellarWindAurora,
@@ -1985,6 +1979,10 @@ impl Plugin for BinarySkyPlugin {
             .init_resource::<crate::tree_colors::SeasonState>()
             .init_resource::<AmbientLight>()
             .init_resource::<ClearColor>()
+            .add_event::<crate::input::CelestialCycleDayNightEvent>()
+            .add_event::<crate::input::CelestialCycleWeatherEvent>()
+            .add_event::<crate::input::CelestialCycleStepEvent>()
+            .add_event::<crate::input::CelestialTimeScaleStepEvent>()
             .add_plugins(MaterialPlugin::<StarAuroraDomeMaterial> {
                 prepass_enabled: false,
                 shadows_enabled: false,

@@ -81,9 +81,8 @@ impl Default for CameraTransitionState {
 // ----------------------------------------------------------------------------
 
 pub fn toggle_perspective(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut persp_evts: EventReader<crate::input::TogglePerspectiveEvent>,
     state: Res<State<CameraMode>>,
-    console: Res<ConsoleState>,
     mut next_state: ResMut<NextState<CameraMode>>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     player_query: Query<&BevyTransform, With<PlayerBody>>,
@@ -92,11 +91,7 @@ pub fn toggle_perspective(
     mut culling_state: ResMut<NetworkCullingState>, 
     mut transition: ResMut<CameraTransitionState>,
 ) {
-    if console.is_open {
-        return;
-    }
-
-    if keys.just_pressed(KeyCode::KeyV) {
+    for _ in persp_evts.read() {
         let Ok(mut window) = window_query.get_single_mut() else { return; };
         let Ok(player_transform) = player_query.get_single() else { return; };
         let Ok(mut rig_transform) = rts_rig_query.get_single_mut() else { return; };

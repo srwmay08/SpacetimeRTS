@@ -350,16 +350,11 @@ pub struct WeaponHudText;
 // ----------------------------------------------------------------------------
 
 pub fn toggle_weapon_hand_system(
-    keys: Res<ButtonInput<KeyCode>>,
-    console: Res<ConsoleState>,
+    mut hand_evts: EventReader<crate::input::ToggleWeaponHandEvent>,
     mut hand_side: ResMut<EquippedHandSide>,
     mut weapon_root_q: Query<&mut BevyTransform, With<ViewModelWeaponRoot>>,
 ) {
-    if console.is_open {
-        return;
-    }
-
-    if keys.just_pressed(KeyCode::KeyH) {
+    for _ in hand_evts.read() {
         hand_side.0 = match hand_side.0 {
             HandSide::Right => HandSide::Left,
             HandSide::Left => HandSide::Right,
@@ -1596,15 +1591,10 @@ pub fn sync_third_person_weapon_render_layers(
 // ----------------------------------------------------------------------------
 
 pub fn weapon_reload_input_system(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut reload_evts: EventReader<crate::input::WeaponReloadEvent>,
     mut weapon_state: ResMut<WeaponState>,
-    console: Res<ConsoleState>,
 ) {
-    if console.is_open {
-        return;
-    }
-
-    if keys.just_pressed(KeyCode::KeyR) {
+    for _ in reload_evts.read() {
         match weapon_state.current_weapon {
             WeaponType::Revolver => {
                 if weapon_state.revolver_ammo < weapon_state.revolver_max_ammo && !weapon_state.revolver_is_reloading {

@@ -97,6 +97,7 @@ fn main() {
         .add_plugins(spellbook::SpellbookPlugin)
         .add_plugins(SkillsSheetPlugin)
         .add_plugins(grass::GrassPlugin)
+        .add_plugins(input::InputPlugin)
         .insert_resource(Msaa::Off)
         
         // Architectural Note: Luminous Sky Clear Color.
@@ -105,7 +106,6 @@ fn main() {
 
         .init_state::<GameState>()
         .init_state::<CameraMode>()
-        .add_event::<ActionEvent>() 
         .add_event::<BuildingDestructionEvent>()
         .add_event::<SpawnBuildingEvent>()
         
@@ -267,11 +267,11 @@ fn main() {
 
 fn update_diagnostic_overlay(
     diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
-    keyboard: Res<ButtonInput<KeyCode>>,
+    mut diag_evts: EventReader<crate::input::ToggleDiagnosticOverlayEvent>,
     mut root_q: Query<&mut Style, With<DiagnosticOverlayRoot>>,
     mut text_q: Query<&mut Text, With<DiagnosticOverlayText>>,
 ) {
-    if keyboard.just_pressed(KeyCode::F3) {
+    for _ in diag_evts.read() {
         if let Ok(mut style) = root_q.get_single_mut() {
             style.display = if style.display == Display::None {
                 Display::Flex

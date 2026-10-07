@@ -420,7 +420,7 @@ pub fn handle_editor_brush_painting(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut editor: ResMut<ZoneEditorState>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    mut brush_resize_evts: EventReader<crate::input::EditorBrushResizeEvent>,
     time: Res<Time>,
     mut default_doodad_mats: Local<Option<Handle<StandardMaterial>>>,
 ) {
@@ -429,11 +429,12 @@ pub fn handle_editor_brush_painting(
     }
 
     // Brush radius hotkeys [ and ]
-    if keys.just_pressed(KeyCode::BracketLeft) {
-        editor.brush_radius = (editor.brush_radius - 1.0).max(1.5);
-    }
-    if keys.just_pressed(KeyCode::BracketRight) {
-        editor.brush_radius = (editor.brush_radius + 1.0).min(25.0);
+    for ev in brush_resize_evts.read() {
+        if ev.grow {
+            editor.brush_radius = (editor.brush_radius + 1.0).min(25.0);
+        } else {
+            editor.brush_radius = (editor.brush_radius - 1.0).max(1.5);
+        }
     }
 
     let Some(hit_point) = editor.cursor_hit_point else { return; };
@@ -687,7 +688,8 @@ pub fn handle_editor_brush_painting(
 // ----------------------------------------------------------------------------
 
 pub fn toggle_zone_editor_and_world_map(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut editor_evts: EventReader<crate::input::ToggleZoneEditorEvent>,
+    mut map_evts: EventReader<crate::input::ToggleWorldMapEvent>,
     mut editor: ResMut<ZoneEditorState>,
     mut next_camera: ResMut<NextState<CameraMode>>,
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
@@ -696,8 +698,8 @@ pub fn toggle_zone_editor_and_world_map(
 ) {
     let Ok(mut window) = window_q.get_single_mut() else { return; };
 
-    // Toggle Warcraft 3 Zone Editor with F4
-    if keys.just_pressed(KeyCode::F4) {
+    // Toggle Warcraft 3 Zone Editor
+    for _ in editor_evts.read() {
         editor.is_editor_active = !editor.is_editor_active;
         if editor.is_editor_active {
             next_camera.set(CameraMode::RTS);
@@ -707,8 +709,8 @@ pub fn toggle_zone_editor_and_world_map(
         }
     }
 
-    // Toggle EverQuest World Map with M
-    if keys.just_pressed(KeyCode::KeyM) {
+    // Toggle EverQuest World Map
+    for _ in map_evts.read() {
         editor.is_world_map_open = !editor.is_world_map_open;
         if editor.is_world_map_open {
             window.cursor.visible = true;
@@ -1320,6 +1322,9 @@ pub struct ZoneEditorPlugin;
 impl Plugin for ZoneEditorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ZoneEditorState>()
+            .add_event::<crate::input::ToggleZoneEditorEvent>()
+            .add_event::<crate::input::ToggleWorldMapEvent>()
+            .add_event::<crate::input::EditorBrushResizeEvent>()
             .add_systems(OnEnter(GameState::InGame), setup_zone_editor_visuals_and_ui)
             .add_systems(
                 Update,

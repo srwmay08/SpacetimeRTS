@@ -283,19 +283,13 @@ pub fn setup_skills_sheet_ui(mut commands: Commands) {
 // ----------------------------------------------------------------------------
 
 pub fn toggle_skills_sheet_system(
-    keys: Res<ButtonInput<KeyCode>>,
-    console: Res<ConsoleState>,
+    mut skills_evts: EventReader<crate::input::ToggleSkillsSheetEvent>,
     mut state: ResMut<SkillsSheetState>,
     mut sheet_q: Query<&mut Style, With<SkillsSheetModalRoot>>,
     mut window_q: Query<&mut Window, With<PrimaryWindow>>,
     camera_mode: Res<State<CameraMode>>,
 ) {
-    if console.is_open {
-        return;
-    }
-
-    // Toggle with [L] key
-    if keys.just_pressed(KeyCode::KeyL) {
+    for _ in skills_evts.read() {
         state.is_open = !state.is_open;
 
         if let Ok(mut style) = sheet_q.get_single_mut() {
@@ -459,6 +453,7 @@ pub struct SkillsSheetPlugin;
 impl Plugin for SkillsSheetPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SkillsSheetState>()
+            .add_event::<crate::input::ToggleSkillsSheetEvent>()
             .add_systems(Startup, setup_skills_sheet_ui)
             .add_systems(
                 Update,

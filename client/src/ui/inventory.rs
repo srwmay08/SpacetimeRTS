@@ -36,6 +36,7 @@ pub fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, _window: &W
 pub fn handle_inventory_drag_and_drop(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
+    console: Res<ConsoleState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     slot_query: Query<(&InventorySlotIndex, &GlobalTransform, &Node, Option<&Interaction>)>,
     main_hand_slot_q: Query<(&GlobalTransform, &Node, Option<&Interaction>), With<PaperdollMainHandSlot>>,
@@ -48,6 +49,10 @@ pub fn handle_inventory_drag_and_drop(
     hand_side: Res<EquippedHandSide>,
     mut equipped_bags: ResMut<ClientEquippedBags>,
 ) {
+    if console.is_open {
+        return;
+    }
+
     let Ok(window) = window_query.get_single() else { return; };
     let Some(cursor_pos) = window.cursor_position() else { return; };
 
@@ -292,17 +297,12 @@ pub fn update_drag_ghost_ui(
 
 
 pub fn toggle_inventory_ui(
-    keys: Res<ButtonInput<KeyCode>>, 
-    console: Res<ConsoleState>,
+    mut inv_evts: EventReader<crate::input::ToggleInventoryEvent>,
     mut query: Query<&mut Style, With<InventoryUiRoot>>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     camera_mode: Res<State<CameraMode>>,
 ) {
-    if console.is_open {
-        return;
-    }
-
-    if keys.just_pressed(KeyCode::Tab) || keys.just_pressed(KeyCode::KeyI) {
+    for _ in inv_evts.read() {
         let Ok(mut window) = window_query.get_single_mut() else { return; };
         
         for mut style in query.iter_mut() {
