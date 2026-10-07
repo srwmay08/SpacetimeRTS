@@ -1360,7 +1360,13 @@ pub fn drop_inventory_item(ctx: &ReducerContext, slot_index: u32, mut amount: u3
 
     let drop_x = transform.x + 1.8;
     let drop_z = transform.z + 1.8;
-    let drop_y = get_terrain_height(drop_x, drop_z) + 0.35;
+    let surface_y = get_terrain_height(drop_x, drop_z);
+    let floor_y = if transform.y < surface_y - 2.0 {
+        crate::voxel::find_ground_surface_below(ctx, drop_x, transform.y + 0.5, drop_z)
+    } else {
+        surface_y
+    };
+    let drop_y = floor_y + 0.35;
 
     ctx.db.harvestable_corpse().insert(crate::ai::HarvestableCorpse {
         entity_id: drop_id,

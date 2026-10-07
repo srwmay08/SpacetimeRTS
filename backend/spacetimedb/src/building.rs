@@ -385,11 +385,15 @@ pub fn place_structure(
 
     let (support, d_h, d_v, stability, is_grounded, chosen_parent_id);
 
-    if matches!(base_piece_type(piece_type.as_str()), "Foundation" | "Ramp" | "Workbench" | "Campfire") && parent_id.is_none() {
-        let ground_y = crate::get_terrain_height(x, z);
-        let voxel_mat = voxel::get_voxel_at(ctx, x, y - 0.5, z);
+    let is_starter_ground_piece = matches!(base_piece_type(piece_type.as_str()), "Foundation" | "Ramp" | "Workbench" | "Campfire");
+    let is_rock_anchor_piece = matches!(base_piece_type(piece_type.as_str()), "Wall" | "Floor" | "Roof");
 
-        if (y - ground_y).abs() < 4.0 || voxel_mat.is_solid() {
+    if is_starter_ground_piece && parent_id.is_none() {
+        let ground_y = crate::get_terrain_height(x, z);
+        let voxel_mat = voxel::get_voxel_or_procedural_at(ctx, x, y - 0.5, z);
+        let subterranean_floor_y = voxel::find_ground_surface_below(ctx, x, y + 0.5, z);
+
+        if (y - ground_y).abs() < 4.0 || voxel_mat.is_solid() || (y - subterranean_floor_y).abs() < 2.0 {
             is_grounded = true;
             let material = get_piece_material(&piece_type);
             let (max_sup, _, _, _) = get_material_properties_or_default(ctx, material);
@@ -401,6 +405,16 @@ pub fn place_structure(
         } else {
             return Err("Foundations, Workbenches, and Campfires must anchor to terrain or solid voxels.".to_string());
         }
+    } else if is_rock_anchor_piece && parent_id.is_none() && voxel::is_anchored_to_solid_voxel(ctx, x, y, z) {
+        // Subterranean wall, floor, or ceiling rock anchor without a structural parent
+        is_grounded = true;
+        let material = get_piece_material(&piece_type);
+        let (max_sup, _, _, _) = get_material_properties_or_default(ctx, material);
+        support = max_sup;
+        stability = 100;
+        chosen_parent_id = None;
+        d_h = 0.0;
+        d_v = 0.0;
     } else if let Some(pid) = parent_id {
         let parent = ctx.db.structure().structure_id().find(pid)
             .ok_or_else(|| "Parent structure not found in database.".to_string())?;

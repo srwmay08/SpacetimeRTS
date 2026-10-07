@@ -302,6 +302,36 @@ pub fn get_voxel_or_procedural_at_voxel_coords(
     }
 }
 
+/// Evaluates the voxel material at metric world coordinates (wx, wy, wz),
+/// evaluating loaded DB chunks first, then deterministic procedural strata.
+pub fn get_voxel_or_procedural_at(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32) -> VoxelMaterial {
+    let vx = (wx / VOXEL_SIZE).floor() as i32;
+    let vy = (wy / VOXEL_SIZE).floor() as i32;
+    let vz = (wz / VOXEL_SIZE).floor() as i32;
+    get_voxel_or_procedural_at_voxel_coords(ctx, vx, vy, vz)
+}
+
+/// Checks if a world position is directly supported by or anchored to solid rock or bedrock.
+/// Tests below (-0.5m), above (+2.5m ceiling), and 4 cardinal lateral directions (+-1.5m).
+pub fn is_anchored_to_solid_voxel(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32) -> bool {
+    // Check floor directly below
+    if get_voxel_or_procedural_at(ctx, wx, wy - 0.5, wz).is_solid() {
+        return true;
+    }
+    // Check ceiling directly above
+    if get_voxel_or_procedural_at(ctx, wx, wy + 2.5, wz).is_solid() {
+        return true;
+    }
+    // Check 4 horizontal walls
+    let offsets = [(1.5, 0.0), (-1.5, 0.0), (0.0, 1.5), (0.0, -1.5)];
+    for (ox, oz) in offsets {
+        if get_voxel_or_procedural_at(ctx, wx + ox, wy, wz + oz).is_solid() {
+            return true;
+        }
+    }
+    false
+}
+
 // Architectural Note: Amanatides & Woo 3D Digital Differential Analyzer (DDA).
 // Traverses the voxel grid ray-step by ray-step in exact volumetric order.
 // Runs in O(N) integer and addition arithmetic without square roots or trigonometric
@@ -510,6 +540,8 @@ pub fn mine_single_voxel(
         max_y: wy + 1.0,
         max_z: wz + 1.0,
     });
+
+    crate::building::invalidate_structures_at(ctx, wx, wy, wz);
 
     Ok(current_mat)
 }

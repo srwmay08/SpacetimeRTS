@@ -183,7 +183,13 @@ pub fn spawn_peasant(ctx: &ReducerContext) -> Result<(), String> {
 
     let spawn_x = spawn_transform.x + 2.0 + offset_x;
     let spawn_z = spawn_transform.z + 2.0 + offset_z;
-    let spawn_y = crate::get_terrain_height(spawn_x, spawn_z) + 1.5;
+    let surface_y = crate::get_terrain_height(spawn_x, spawn_z);
+    let ground_y = if spawn_transform.y < surface_y - 2.0 {
+        crate::voxel::find_ground_surface_below(ctx, spawn_x, spawn_transform.y + 0.5, spawn_z)
+    } else {
+        surface_y
+    };
+    let spawn_y = ground_y + 1.5;
 
     ctx.db.transform().insert(Transform {
         entity_id,
@@ -819,7 +825,12 @@ pub fn process_npc_brain_tick(ctx: &ReducerContext, dt: f32) {
             transform.x += (final_vx / v_mag) * move_speed * dt;
             transform.z += (final_vz / v_mag) * move_speed * dt;
             
-            let ground_y = crate::get_terrain_height(transform.x, transform.z);
+            let surface_y = crate::get_terrain_height(transform.x, transform.z);
+            let ground_y = if transform.y < surface_y - 2.0 {
+                crate::voxel::find_ground_surface_below(ctx, transform.x, transform.y + 0.5, transform.z)
+            } else {
+                surface_y
+            };
             transform.y = ground_y + 1.05;
             
             transform.chunk_x = (transform.x / 50.0).floor() as i32;
@@ -1135,7 +1146,12 @@ pub fn process_ai_tick(ctx: &ReducerContext) {
                 transform.z = original_pos.1;
             }
             
-            let ground_y = crate::get_terrain_height(transform.x, transform.z);
+            let surface_y = crate::get_terrain_height(transform.x, transform.z);
+            let ground_y = if transform.y < surface_y - 2.0 {
+                crate::voxel::find_ground_surface_below(ctx, transform.x, transform.y + 0.5, transform.z)
+            } else {
+                surface_y
+            };
             transform.y = ground_y + 1.05;
 
             let dist_moved_sq = (transform.x - original_pos.0).powi(2) + (transform.z - original_pos.1).powi(2);

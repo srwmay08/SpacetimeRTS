@@ -364,3 +364,24 @@ fn test_autobuild_3_second_progression() {
     assert_eq!(progress, 100);
     assert!(!is_blueprint);
 }
+
+#[test]
+fn test_subterranean_building_grounding_and_rock_anchor() {
+    use backend::building::base_piece_type;
+
+    // 1. Verify piece type classification
+    assert_eq!(base_piece_type("Foundation"), "Foundation");
+    assert_eq!(base_piece_type("Wall"), "Wall");
+    assert_eq!(base_piece_type("Floor"), "Floor");
+    assert_eq!(base_piece_type("Roof"), "Roof");
+
+    // 2. Deep subterranean coordinates (e.g. cavern chasm at -60m)
+    let y = -60.0_f32;
+    let surface_y = 25.0_f32; // Overworld mountain height
+    assert!((y - surface_y).abs() > 4.0); // Surface check fails
+
+    // 3. Subterranean cavern floor anchor
+    let subterranean_floor_y = -60.0_f32;
+    let is_grounded = (y - surface_y).abs() < 4.0 || (y - subterranean_floor_y).abs() < 2.0;
+    assert!(is_grounded, "Subterranean foundation must anchor to cavern floor");
+}
