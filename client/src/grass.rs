@@ -35,7 +35,11 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{AsBindGroup, ShaderRef};
 use bevy::render::view::RenderLayers;
+use std::collections::BTreeMap;
 use std::f32::consts::PI;
+use crate::module_bindings::VoxelChunk;
+use crate::module_bindings::voxel_chunk_table::VoxelChunkTableAccess;
+use spacetimedb_sdk::Table;
 
 use crate::components::{PlayerBody, VoxelChunkMarker};
 use crate::terrain::{compute_canonical_terrain_height, TerrainChunkVisual};
@@ -146,11 +150,24 @@ pub struct GrassChildMarker;
 
 /// Generates a unified low-poly faceted grass tuft mesh for a 16m chunk at `(cx, cz)`.
 /// Returns `None` if the chunk contains no valid meadow terrain (e.g. deep water, cliff, or snow).
+#[inline]
 pub fn generate_chunk_grass_mesh(
     cx: i32,
     cz: i32,
     config: &GrassConfig,
     lod: GrassLod,
+) -> Option<Mesh> {
+    generate_chunk_grass_mesh_with_chunks(cx, cz, config, lod, None)
+}
+
+/// Generates a unified low-poly faceted grass tuft mesh for a 16m chunk at `(cx, cz)`.
+/// Filters out tufts located over mined/excavated voxels to prevent hovering blades.
+pub fn generate_chunk_grass_mesh_with_chunks(
+    cx: i32,
+    cz: i32,
+    config: &GrassConfig,
+    lod: GrassLod,
+    db_chunks: Option<&BTreeMap<u64, VoxelChunk>>,
 ) -> Option<Mesh> {
     let chunk_world_span = 16.0f32;
     let chunk_base_x = cx as f32 * chunk_world_span;
@@ -185,6 +202,41 @@ pub fn generate_chunk_grass_mesh(
         let world_z = chunk_base_z + lz;
 
         let world_y = compute_canonical_terrain_height(world_x, world_z);
+
+        // Requirement 5: Prevent hovering grass over mined/excavated voxels
+        if let Some(chunks) = db_chunks {
+            let vx = (world_x / 0.25).floor() as i32;
+            let vz = (world_z / 0.25).floor() as i32;
+            let scx = vx.div_euclid(16);
+            let scz = vz.div_euclid(16);
+            let lx_vox = vx.rem_euclid(16) as usize;
+            let lz_vox = vz.rem_euclid(16) as usize;
+            let surface_cy = (world_y / 4.0).floor() as i32;
+
+            let mut is_mined = false;
+            for cy in (surface_cy - 1)..=surface_cy {
+                let key = crate::terrain::pack_chunk_key(scx, cy, scz);
+                if let Some(chunk) = chunks.get(&key) {
+                    for sly in 0..16 {
+                        let idx = lx_vox + (sly * 16) + (lz_vox * 256);
+                        let vy = cy * 16 + sly as i32;
+                        let wy = (vy as f32 + 0.5) * 0.25;
+                        if wy <= world_y && wy >= world_y - 2.5 {
+                            if let Some(&mat) = chunk.voxels.get(idx) {
+                                if mat == 0 {
+                                    is_mined = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if is_mined { break; }
+            }
+            if is_mined {
+                continue; // Suppress floating blade tuft!
+            }
+        }
 
         // Evaluate terrain slope via central finite differences:
         let eps = 0.5;
@@ -383,6 +435,7 @@ pub fn sync_chunk_grass(
     time: Res<Time>,
     config: Res<GrassConfig>,
     material_handle: Option<Res<GrassMaterialHandle>>,
+    conn: Option<Res<crate::network::SpacetimeConnection>>,
     mut meshes: ResMut<Assets<Mesh>>,
     player_query: Query<&Transform, With<PlayerBody>>,
     unspawned_chunks: Query<(Entity, &VoxelChunkMarker, &Transform), (With<TerrainChunkVisual>, Without<ChunkHasGrass>)>,
@@ -469,7 +522,11 @@ pub fn sync_chunk_grass(
         if next_lod != current_lod {
             commands.entity(chunk_entity).insert(ChunkHasGrass(next_lod));
 
-            if let Some(new_mesh) = generate_chunk_grass_mesh(marker.chunk_x, marker.chunk_z, &config, next_lod) {
+            let db_chunks: Option<BTreeMap<u64, VoxelChunk>> = conn.as_ref().map(|c| {
+                c.db.db.voxel_chunk().iter().map(|chunk| (chunk.chunk_key, chunk)).collect()
+            });
+
+            if let Some(new_mesh) = generate_chunk_grass_mesh_with_chunks(marker.chunk_x, marker.chunk_z, &config, next_lod, db_chunks.as_ref()) {
                 let mut found_child = false;
                 for &child in children.iter() {
                     if let Ok((child_entity, mesh_handle)) = grass_children.get(child) {
@@ -522,7 +579,11 @@ pub fn sync_chunk_grass(
 
             commands.entity(chunk_entity).insert(ChunkHasGrass(initial_lod));
 
-            if let Some(grass_mesh) = generate_chunk_grass_mesh(marker.chunk_x, marker.chunk_z, &config, initial_lod) {
+            let db_chunks: Option<BTreeMap<u64, VoxelChunk>> = conn.as_ref().map(|c| {
+                c.db.db.voxel_chunk().iter().map(|chunk| (chunk.chunk_key, chunk)).collect()
+            });
+
+            if let Some(grass_mesh) = generate_chunk_grass_mesh_with_chunks(marker.chunk_x, marker.chunk_z, &config, initial_lod, db_chunks.as_ref()) {
                 let mesh_handle = meshes.add(grass_mesh);
                 commands.entity(chunk_entity).with_children(|parent| {
                     parent.spawn((

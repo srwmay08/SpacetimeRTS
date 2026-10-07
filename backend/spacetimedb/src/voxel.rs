@@ -7,6 +7,7 @@
 // minimal by operating on packed 64-bit chunk keys with deterministic 16^3 indexing.
 
 use spacetimedb::{table, reducer, ReducerContext, SpacetimeType, Table};
+use noise::{NoiseFn, Perlin};
 use crate::movement::player_session;
 use crate::CombatEvent;
 use crate::combat_event;
@@ -92,6 +93,20 @@ pub fn procedural_stone_or_ore(vx: i32, vy: i32, vz: i32, wy: f32) -> VoxelMater
     } else {
         VoxelMaterial::Stone
     }
+}
+
+/// Evaluates if 3D procedural coordinates carve out a natural subterranean cavern / hollow chamber.
+/// Preserves a 4.0m solid surface crust and stops above bedrock.
+#[inline]
+pub fn is_cave_air_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
+    let cave_crust = 4.0;
+    if wy > terrain_height - cave_crust || wy <= BEDROCK_ELEVATION + 2.0 {
+        return false;
+    }
+    let cave_noise = Perlin::new(1338);
+    let freq = 0.035;
+    let sample = cave_noise.get([wx as f64 * freq, wy as f64 * freq, wz as f64 * freq]);
+    sample > 0.38
 }
 
 /// Architectural Note: Primary key `chunk_key` maps spatial coordinates via
@@ -196,12 +211,14 @@ pub fn ensure_or_create_chunk(ctx: &ReducerContext, cx: i32, cy: i32, cz: i32) -
 
                 if wy <= BEDROCK_ELEVATION {
                     voxels[idx] = VoxelMaterial::Bedrock as u8;
-                } else if wy <= terrain_height - 3.0 {
-                    voxels[idx] = procedural_stone_or_ore(base_voxel_x + lx as i32, base_voxel_y + ly as i32, base_voxel_z + lz as i32, wy) as u8;
-                } else if wy <= terrain_height {
-                    voxels[idx] = VoxelMaterial::Dirt as u8;
-                } else {
+                } else if wy > terrain_height {
                     voxels[idx] = VoxelMaterial::Air as u8;
+                } else if wy > terrain_height - 3.0 {
+                    voxels[idx] = VoxelMaterial::Dirt as u8;
+                } else if is_cave_air_at(wx, wy, wz, terrain_height) {
+                    voxels[idx] = VoxelMaterial::Air as u8;
+                } else {
+                    voxels[idx] = procedural_stone_or_ore(base_voxel_x + lx as i32, base_voxel_y + ly as i32, base_voxel_z + lz as i32, wy) as u8;
                 }
             }
         }
@@ -263,10 +280,16 @@ pub fn find_ground_surface_below(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32
                 continue;
             } else if chunk_top <= BEDROCK_ELEVATION {
                 return BEDROCK_ELEVATION;
-            } else if chunk_bottom <= terrain_height {
-                let surface = terrain_height.min(chunk_top);
-                if surface <= start_y + 0.1 {
-                    return surface.max(BEDROCK_ELEVATION);
+            } else {
+                for ly in (0..16).rev() {
+                    let vy = cy * 16 + ly as i32;
+                    let voxel_top_y = (vy as f32 + 1.0) * VOXEL_SIZE;
+                    if voxel_top_y <= start_y + 0.1 {
+                        let mat = get_voxel_or_procedural_at_voxel_coords(ctx, vx, vy, vz);
+                        if mat.is_solid() {
+                            return voxel_top_y.max(BEDROCK_ELEVATION);
+                        }
+                    }
                 }
             }
         }
@@ -316,12 +339,14 @@ pub fn get_voxel_or_procedural_at_voxel_coords(
 
     if wy <= BEDROCK_ELEVATION {
         VoxelMaterial::Bedrock
-    } else if wy <= terrain_height - 3.0 {
-        procedural_stone_or_ore(vx, vy, vz, wy)
-    } else if wy <= terrain_height {
-        VoxelMaterial::Dirt
-    } else {
+    } else if wy > terrain_height {
         VoxelMaterial::Air
+    } else if wy > terrain_height - 3.0 {
+        VoxelMaterial::Dirt
+    } else if is_cave_air_at(wx, wy, wz, terrain_height) {
+        VoxelMaterial::Air
+    } else {
+        procedural_stone_or_ore(vx, vy, vz, wy)
     }
 }
 
@@ -566,6 +591,8 @@ pub fn mine_single_voxel(
 
     crate::building::invalidate_structures_at(ctx, wx, wy, wz);
 
+    evaluate_structural_collapse(ctx, &[(vx, vy, vz)]);
+
     Ok(current_mat)
 }
 
@@ -737,10 +764,10 @@ fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i3
         let wz = (cz_v as f32 + 0.5) * VOXEL_SIZE;
 
         let (cx, cy, cz, lx, ly, lz) = world_to_voxel(wx, wy, wz);
-        let key = pack_chunk_key(cx, cy, cz);
 
-        if let Some(mut chunk) = ctx.db.voxel_chunk().chunk_key().find(key) {
-            let idx = local_to_index(lx, ly, lz);
+        let mut chunk = ensure_or_create_chunk(ctx, cx, cy, cz);
+        let idx = local_to_index(lx, ly, lz);
+        if chunk.voxels[idx] != VoxelMaterial::Air as u8 {
             chunk.voxels[idx] = VoxelMaterial::Air as u8;
             chunk.last_modified_tick = ctx.timestamp.to_micros_since_unix_epoch() as u64;
             ctx.db.voxel_chunk().chunk_key().update(chunk);

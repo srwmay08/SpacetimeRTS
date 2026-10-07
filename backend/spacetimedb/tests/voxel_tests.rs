@@ -260,3 +260,45 @@ fn test_procedural_ore_vein_generation() {
     }
     assert!(ruby_found, "Must find rare Ruby crystal clusters in deep subterranean stone");
 }
+
+#[test]
+fn test_natural_cavern_carving_and_crust_preservation() {
+    use backend::voxel::is_cave_air_at;
+
+    let terrain_height = 25.0;
+
+    // 1. Surface crust preservation: within 4.0m of surface, must NEVER carve air
+    for wy_offset in [0.0, -1.0, -2.0, -3.0, -3.9] {
+        assert!(
+            !is_cave_air_at(10.0, terrain_height + wy_offset, 10.0, terrain_height),
+            "Surface crust must remain solid at offset {}", wy_offset
+        );
+    }
+
+    // 2. Above surface must never be cave air
+    assert!(!is_cave_air_at(0.0, terrain_height + 5.0, 0.0, terrain_height));
+
+    // 3. Natural hollow caverns must exist in the subterranean strata (-10m to -90m)
+    let mut cave_found = false;
+    let mut solid_found = false;
+    for x in -20..20 {
+        for z in -20..20 {
+            let wx = x as f32 * 4.0;
+            let wz = z as f32 * 4.0;
+            let wy = -30.0;
+            if is_cave_air_at(wx, wy, wz, terrain_height) {
+                cave_found = true;
+            } else {
+                solid_found = true;
+            }
+            if cave_found && solid_found {
+                break;
+            }
+        }
+        if cave_found && solid_found {
+            break;
+        }
+    }
+    assert!(cave_found, "Must procedurally carve hollow subterranean caverns below surface crust");
+    assert!(solid_found, "Must retain solid rock matrix surrounding subterranean caverns");
+}
