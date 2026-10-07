@@ -246,6 +246,42 @@ pub fn sync_resource_nodes(
                             0.10,
                         );
                     }
+                    "Ore:Iron" => {
+                        crate::terrain::spawn_voxel_gibs(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            origin,
+                            28,
+                            Color::srgb(0.65, 0.32, 0.18),
+                            Color::srgb(0.85, 0.50, 0.25),
+                            0.12,
+                        );
+                    }
+                    "Gem:Ruby" => {
+                        crate::terrain::spawn_voxel_gibs(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            origin,
+                            32,
+                            Color::srgb(0.95, 0.08, 0.15),
+                            Color::srgb(1.00, 0.35, 0.45),
+                            0.08,
+                        );
+                    }
+                    "Rubble" | "CollapsedRubble" => {
+                        crate::terrain::spawn_voxel_gibs(
+                            &mut commands,
+                            &mut meshes,
+                            &mut materials,
+                            origin,
+                            30,
+                            Color::srgb(0.40, 0.38, 0.35),
+                            Color::srgb(0.85, 0.72, 0.25),
+                            0.11,
+                        );
+                    }
                     "Bush" => {
                         crate::terrain::spawn_voxel_gibs(
                             &mut commands,
@@ -337,6 +373,24 @@ pub fn sync_resource_nodes(
                 0.0,
                 None,
             ),
+            "Ore:Iron" => (
+                cache.rock_variants[(node.node_id % 4) as usize].clone(),
+                Collider::cuboid(1.4, 1.3, 1.4),
+                0.0,
+                None,
+            ),
+            "Gem:Ruby" => (
+                cache.rock_variants[(node.node_id % 4) as usize].clone(),
+                Collider::sphere(0.65),
+                0.0,
+                None,
+            ),
+            "Rubble" | "CollapsedRubble" => (
+                cache.rock_variants[(node.node_id % 4) as usize].clone(),
+                Collider::cuboid(1.8, 1.0, 1.8),
+                0.0,
+                None,
+            ),
             "Bush" => (
                 cache.bush_foliage_variants[(node.node_id % 4) as usize].clone(),
                 Collider::sphere(0.85),
@@ -380,11 +434,42 @@ pub fn sync_resource_nodes(
             } else {
                 node_mat.clone()
             }
+        } else if clean_type == "Ore:Iron" {
+            materials.add(StandardMaterial {
+                base_color: Color::srgb(0.65, 0.38, 0.22),
+                metallic: 0.75,
+                perceptual_roughness: 0.40,
+                reflectance: 0.5,
+                ..default()
+            })
+        } else if clean_type == "Gem:Ruby" {
+            materials.add(StandardMaterial {
+                base_color: Color::srgb(0.95, 0.05, 0.15),
+                metallic: 0.2,
+                perceptual_roughness: 0.15,
+                reflectance: 0.8,
+                emissive: Color::srgb(0.40, 0.02, 0.05).into(),
+                ..default()
+            })
+        } else if clean_type == "CollapsedRubble" || clean_type == "Rubble" {
+            materials.add(StandardMaterial {
+                base_color: Color::srgb(0.48, 0.46, 0.44),
+                metallic: 0.05,
+                perceptual_roughness: 0.90,
+                reflectance: 0.1,
+                ..default()
+            })
         } else {
             node_mat.clone()
         };
 
-        let (tree_rotation, tree_scale) = if tree_comp_opt.is_some() || clean_type == "Rock" {
+        let is_rock_or_ore = clean_type == "Rock"
+            || clean_type == "Ore:Iron"
+            || clean_type == "Gem:Ruby"
+            || clean_type == "CollapsedRubble"
+            || clean_type == "Rubble";
+
+        let (tree_rotation, tree_scale) = if tree_comp_opt.is_some() || is_rock_or_ore {
             // Stable deterministic pseudo-random hash based on node_id
             let hash1 = ((node.node_id.wrapping_mul(2654435761) ^ (node.node_id >> 16)) % 10000) as f32 / 10000.0;
             let hash2 = (((node.node_id.wrapping_mul(1664525) + 1013904223) ^ (node.node_id >> 11)) % 10000) as f32 / 10000.0;
@@ -392,7 +477,11 @@ pub fn sync_resource_nodes(
             // Randomized degree of rotation around vertical axis (0 to 360 degrees)
             let yaw = hash1 * std::f32::consts::TAU;
 
-            let (width_var, height_var) = if clean_type == "Rock" {
+            let (width_var, height_var) = if clean_type == "Gem:Ruby" {
+                (0.6 + hash1 * 0.15, 0.6 + hash2 * 0.15)
+            } else if clean_type == "CollapsedRubble" || clean_type == "Rubble" {
+                (1.5 + hash1 * 0.30, 0.8 + hash2 * 0.20)
+            } else if clean_type == "Rock" || clean_type == "Ore:Iron" {
                 let h = 0.85 + (hash2 * 0.30);
                 let w = 0.90 + (hash1 * 0.20);
                 (w, h)
@@ -402,9 +491,9 @@ pub fn sync_resource_nodes(
                 (w, h)
             };
 
-            (Quat::from_rotation_y(yaw), Vec3::new(width_var, height_var, width_var))
+            (Quat::from_rotation_y(yaw), Vec3::new(width_var * node.scale, height_var * node.scale, width_var * node.scale))
         } else {
-            (Quat::IDENTITY, Vec3::ONE)
+            (Quat::IDENTITY, Vec3::splat(node.scale))
         };
 
         let mut entity_cmd = commands.spawn((

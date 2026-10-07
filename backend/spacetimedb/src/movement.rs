@@ -116,7 +116,7 @@ pub fn process_movement(
     transform.last_processed_tick = tick_id;
 
     // CQC Dynamic Body Presence: Capsule-to-Capsule Pushback Separation
-    let nearby_entities = crate::spatial::get_nearby_entities(transform.x, transform.z, 2.5);
+    let nearby_entities = crate::spatial::get_nearby_entities_3d(transform.x, transform.y, transform.z, 2.5);
     for other_id in nearby_entities {
         if other_id == session.entity_id { continue; }
         if ctx.db.harvestable_corpse().entity_id().find(other_id).is_some() { continue; }

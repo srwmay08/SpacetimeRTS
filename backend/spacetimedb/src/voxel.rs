@@ -40,6 +40,9 @@ pub enum VoxelMaterial {
     Wood = 4,
     ReinforcedStone = 5,
     Bedrock = 6,
+    IronOre = 7,
+    Ruby = 8,
+    CollapsedRubble = 9,
 }
 
 impl VoxelMaterial {
@@ -51,6 +54,9 @@ impl VoxelMaterial {
             4 => Self::Wood,
             5 => Self::ReinforcedStone,
             6 => Self::Bedrock,
+            7 => Self::IronOre,
+            8 => Self::Ruby,
+            9 => Self::CollapsedRubble,
             _ => Self::Air,
         }
     }
@@ -59,8 +65,11 @@ impl VoxelMaterial {
         match self {
             Self::Air => 0.0,
             Self::Dirt | Self::Sand => 20.0,
+            Self::CollapsedRubble => 40.0,
             Self::Wood => 50.0,
             Self::Stone => 100.0,
+            Self::IronOre => 120.0,
+            Self::Ruby => 150.0,
             Self::ReinforcedStone => 250.0,
             Self::Bedrock => f32::INFINITY,
         }
@@ -68,6 +77,20 @@ impl VoxelMaterial {
 
     pub fn is_solid(&self) -> bool {
         !matches!(self, Self::Air)
+    }
+}
+
+/// Evaluates procedural rock strata to embed Iron ore veins and deep Ruby crystal pockets
+/// via deterministic 3D integer coordinate hashing.
+#[inline]
+pub fn procedural_stone_or_ore(vx: i32, vy: i32, vz: i32, wy: f32) -> VoxelMaterial {
+    let hash = ((vx.wrapping_mul(73856093) ^ vy.wrapping_mul(19349663) ^ vz.wrapping_mul(83492791)) as u32) % 10000;
+    if wy <= -50.0 && wy >= -115.0 && hash < 120 {
+        VoxelMaterial::Ruby
+    } else if wy <= -5.0 && wy >= -75.0 && hash < 450 {
+        VoxelMaterial::IronOre
+    } else {
+        VoxelMaterial::Stone
     }
 }
 
@@ -174,7 +197,7 @@ pub fn ensure_or_create_chunk(ctx: &ReducerContext, cx: i32, cy: i32, cz: i32) -
                 if wy <= BEDROCK_ELEVATION {
                     voxels[idx] = VoxelMaterial::Bedrock as u8;
                 } else if wy <= terrain_height - 3.0 {
-                    voxels[idx] = VoxelMaterial::Stone as u8;
+                    voxels[idx] = procedural_stone_or_ore(base_voxel_x + lx as i32, base_voxel_y + ly as i32, base_voxel_z + lz as i32, wy) as u8;
                 } else if wy <= terrain_height {
                     voxels[idx] = VoxelMaterial::Dirt as u8;
                 } else {
@@ -294,7 +317,7 @@ pub fn get_voxel_or_procedural_at_voxel_coords(
     if wy <= BEDROCK_ELEVATION {
         VoxelMaterial::Bedrock
     } else if wy <= terrain_height - 3.0 {
-        VoxelMaterial::Stone
+        procedural_stone_or_ore(vx, vy, vz, wy)
     } else if wy <= terrain_height {
         VoxelMaterial::Dirt
     } else {

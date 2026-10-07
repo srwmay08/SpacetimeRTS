@@ -1888,27 +1888,54 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
                 return Ok(());
             }
 
-            if !has_pickaxe && v_hit.material == crate::voxel::VoxelMaterial::Stone {
+            let is_hard_rock = matches!(
+                v_hit.material,
+                crate::voxel::VoxelMaterial::Stone
+                    | crate::voxel::VoxelMaterial::IronOre
+                    | crate::voxel::VoxelMaterial::Ruby
+            );
+            if !has_pickaxe && is_hard_rock {
                 return Ok(());
             }
 
-            let tool_dmg = if has_pickaxe { 100.0 } else { 20.0 };
+            let tool_dmg = if has_pickaxe { 160.0 } else { 45.0 };
             if let Ok(mined_mat) = crate::voxel::mine_single_voxel(ctx, v_hit.vx, v_hit.vy, v_hit.vz, tool_dmg) {
+                let event_type = match mined_mat {
+                    crate::voxel::VoxelMaterial::IronOre => "HitIronOre".into(),
+                    crate::voxel::VoxelMaterial::Ruby => "HitRuby".into(),
+                    crate::voxel::VoxelMaterial::CollapsedRubble => "HitRubble".into(),
+                    _ => "HitRock".into(),
+                };
                 ctx.db.combat_event().insert(CombatEvent {
                     id: 0,
-                    event_type: "HitRock".into(),
+                    event_type,
                     x: wx,
                     y: wy,
                     z: wz,
                 });
 
                 let (drop_item, count) = match mined_mat {
+                    crate::voxel::VoxelMaterial::IronOre => ("IronOre", 2),
+                    crate::voxel::VoxelMaterial::Ruby => ("Ruby", 1),
+                    crate::voxel::VoxelMaterial::CollapsedRubble => ("LooseStone", 2),
                     crate::voxel::VoxelMaterial::Stone => ("Stone", 2),
                     crate::voxel::VoxelMaterial::Dirt | crate::voxel::VoxelMaterial::Sand => ("LooseStone", 1),
                     _ => ("Stone", 1),
                 };
 
                 add_item(&mut inventory, drop_item, count);
+
+                // Collapsed rubble buried loot payout!
+                if mined_mat == crate::voxel::VoxelMaterial::CollapsedRubble {
+                    let mut loot_seed = ctx.timestamp.to_micros_since_unix_epoch() as u64 ^ (v_hit.vx as u64).wrapping_mul(31);
+                    let loot_roll = prng(&mut loot_seed);
+                    if loot_roll < 0.35 {
+                        add_item(&mut inventory, "Ruby", 1);
+                    } else if loot_roll < 0.70 {
+                        add_item(&mut inventory, "IronOre", 2);
+                    }
+                }
+
                 ctx.db.inventory().entity_id().update(inventory);
             }
             return Ok(());
@@ -1951,13 +1978,18 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
 
             let amount = (match node.node_type.as_str() {
                 "Tree" | "FallenLog" => 6,
-                "Rock" | "Rubble" => 4,
+                "Rock" | "Rubble" | "CollapsedRubble" => 4,
+                "Ore:Iron" => 3,
+                "Gem:Ruby" => 1,
                 _ => 1,
             } as f32 * node.scale).ceil() as u32;
 
             let item = match node.node_type.as_str() {
                 "Tree" | "FallenLog" => "Wood",
                 "Rock" | "Rubble" => "Stone",
+                "CollapsedRubble" => "LooseStone",
+                "Ore:Iron" => "IronOre",
+                "Gem:Ruby" => "Ruby",
                 "Branch" => "Branch",
                 "Flint" => "Flint",
                 "LooseStone" => "LooseStone",
@@ -1965,6 +1997,18 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
             };
 
             add_item(&mut inventory, item, amount);
+
+            // Collapsed rubble node unearths buried treasure
+            if node.node_type == "CollapsedRubble" {
+                let mut seed = ctx.timestamp.to_micros_since_unix_epoch() as u64 ^ node.node_id;
+                let roll = prng(&mut seed);
+                if roll < 0.35 {
+                    add_item(&mut inventory, "Ruby", 1);
+                } else if roll < 0.70 {
+                    add_item(&mut inventory, "IronOre", 2);
+                }
+            }
+
             // Resin is tapped from felled timber; it moved from the standing Tree to its FallenLog ruin.
             if node.node_type == "FallenLog" && inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0) {
                 add_item(&mut inventory, "Resin", 1);

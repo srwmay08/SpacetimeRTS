@@ -30,8 +30,11 @@ fn test_voxel_material_from_u8_mapping() {
     assert_eq!(VoxelMaterial::from_u8(4), VoxelMaterial::Wood);
     assert_eq!(VoxelMaterial::from_u8(5), VoxelMaterial::ReinforcedStone);
     assert_eq!(VoxelMaterial::from_u8(6), VoxelMaterial::Bedrock);
+    assert_eq!(VoxelMaterial::from_u8(7), VoxelMaterial::IronOre);
+    assert_eq!(VoxelMaterial::from_u8(8), VoxelMaterial::Ruby);
+    assert_eq!(VoxelMaterial::from_u8(9), VoxelMaterial::CollapsedRubble);
     // Out-of-bounds defaults safely to Air
-    assert_eq!(VoxelMaterial::from_u8(7), VoxelMaterial::Air);
+    assert_eq!(VoxelMaterial::from_u8(10), VoxelMaterial::Air);
     assert_eq!(VoxelMaterial::from_u8(255), VoxelMaterial::Air);
 }
 
@@ -42,8 +45,11 @@ fn test_voxel_material_hardness_ratings() {
     assert_eq!(VoxelMaterial::Air.hardness(), 0.0);
     assert_eq!(VoxelMaterial::Dirt.hardness(), 20.0);
     assert_eq!(VoxelMaterial::Sand.hardness(), 20.0);
+    assert_eq!(VoxelMaterial::CollapsedRubble.hardness(), 40.0);
     assert_eq!(VoxelMaterial::Wood.hardness(), 50.0);
     assert_eq!(VoxelMaterial::Stone.hardness(), 100.0);
+    assert_eq!(VoxelMaterial::IronOre.hardness(), 120.0);
+    assert_eq!(VoxelMaterial::Ruby.hardness(), 150.0);
     assert_eq!(VoxelMaterial::ReinforcedStone.hardness(), 250.0);
     assert!(VoxelMaterial::Bedrock.hardness().is_infinite());
 }
@@ -57,6 +63,9 @@ fn test_voxel_material_solidity() {
     assert!(VoxelMaterial::Wood.is_solid());
     assert!(VoxelMaterial::ReinforcedStone.is_solid());
     assert!(VoxelMaterial::Bedrock.is_solid());
+    assert!(VoxelMaterial::IronOre.is_solid());
+    assert!(VoxelMaterial::Ruby.is_solid());
+    assert!(VoxelMaterial::CollapsedRubble.is_solid());
 }
 
 #[test]
@@ -220,4 +229,34 @@ fn test_dda_raymarch_diagonal_and_miss() {
     let inside_hit = inside.unwrap();
     assert_eq!(inside_hit.material, VoxelMaterial::Bedrock);
     assert_eq!(inside_hit.distance, 0.0);
+}
+
+#[test]
+fn test_procedural_ore_vein_generation() {
+    use backend::voxel::procedural_stone_or_ore;
+
+    // 1. Serpentine Iron ore vein distribution at mid-depths (-30.0m)
+    let mut iron_found = false;
+    let mut stone_found = false;
+    for vx in 0..100 {
+        let mat = procedural_stone_or_ore(vx, -120, 10, -30.0);
+        if mat == VoxelMaterial::IronOre {
+            iron_found = true;
+        } else if mat == VoxelMaterial::Stone {
+            stone_found = true;
+        }
+    }
+    assert!(iron_found, "Must find procedurally embedded IronOre in mid-depth stone");
+    assert!(stone_found, "Must have regular Stone matrix surrounding IronOre");
+
+    // 2. Deep Ruby crystal cluster distribution near bedrock (-100.0m)
+    let mut ruby_found = false;
+    for vx in 0..500 {
+        let mat = procedural_stone_or_ore(vx, -400, 25, -100.0);
+        if mat == VoxelMaterial::Ruby {
+            ruby_found = true;
+            break;
+        }
+    }
+    assert!(ruby_found, "Must find rare Ruby crystal clusters in deep subterranean stone");
 }

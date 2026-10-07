@@ -103,3 +103,23 @@ fn test_distance_squared_filtering() {
     assert_eq!(filtered, vec![1, 2, 3]);
     assert!(!filtered.contains(&4));
 }
+
+#[test]
+fn test_world_to_cell_3d_and_filtering() {
+    use backend::spatial::world_to_cell_3d;
+
+    // 1. Positive 3D coordinates
+    assert_eq!(world_to_cell_3d(10.0, 20.0, 30.0), (0, 0, 0));
+    assert_eq!(world_to_cell_3d(60.0, 110.0, 160.0), (1, 2, 3));
+
+    // 2. Negative subterranean coordinates
+    assert_eq!(world_to_cell_3d(10.0, -45.0, 10.0), (0, -1, 0));
+    assert_eq!(world_to_cell_3d(10.0, -100.0, 10.0), (0, -2, 0));
+
+    // 3. Vertical separation: overworld entity (y = 20) vs subterranean entity (y = -60) at same (x, z)
+    let overworld_cell = world_to_cell_3d(25.0, 20.0, 25.0);
+    let cave_cell = world_to_cell_3d(25.0, -60.0, 25.0);
+    assert_ne!(overworld_cell, cave_cell, "Overworld and subterranean entities must occupy separate 3D spatial cells");
+    assert_eq!(overworld_cell.1, 0);
+    assert_eq!(cave_cell.1, -2);
+}
