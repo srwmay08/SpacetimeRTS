@@ -8,7 +8,7 @@
 
 use backend::voxel::{
     local_to_index, pack_chunk_key, unpack_chunk_key, world_to_voxel, VoxelMaterial, CHUNK_SIZE,
-    CHUNK_VOLUME, VOXEL_SIZE,
+    CHUNK_VOLUME, VOXEL_SIZE, BEDROCK_ELEVATION,
 };
 
 #[test]
@@ -18,6 +18,7 @@ fn test_voxel_constants() {
     assert_eq!(CHUNK_SIZE, 16);
     assert_eq!(CHUNK_VOLUME, 4096);
     assert_eq!(VOXEL_SIZE, 0.25);
+    assert_eq!(BEDROCK_ELEVATION, -120.0);
 }
 
 #[test]

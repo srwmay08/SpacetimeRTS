@@ -1648,11 +1648,19 @@ pub fn player_movement_system(
         }
     }
 
-    // Void safety net: failsafe if entity tunnels through unloaded chunks or physics glitch
+    // Bedrock & void safety net: permits 3D subterranean exploration down to BEDROCK_ELEVATION (-120.0m)
+    // while catching players falling through unloaded chunks into the abyss.
     let ground_y = crate::terrain::get_terrain_height(transform.translation.x, transform.translation.z);
-    let min_safe_y = ground_y + 1.0;
-    if (hit.is_none() && transform.translation.y < min_safe_y) || transform.translation.y < ground_y - 1.0 {
-        transform.translation.y = min_safe_y;
+    let bedrock_safe_y = -120.0_f32 + 1.05;
+    if transform.translation.y < bedrock_safe_y {
+        transform.translation.y = bedrock_safe_y;
+        if lin_vel.y < 0.0 { 
+            lin_vel.y = 0.0; 
+        }
+        kcc.is_grounded = true;
+    } else if hit.is_none() && transform.translation.y < ground_y - 1.0 && transform.translation.y > ground_y - 4.0 {
+        // Surface missing-collider grace window: catches players when overworld terrain collider has not yet loaded
+        transform.translation.y = ground_y + 1.0;
         if lin_vel.y < 0.0 { 
             lin_vel.y = 0.0; 
         }

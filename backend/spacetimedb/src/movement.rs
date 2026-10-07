@@ -143,7 +143,8 @@ pub fn process_movement(
         }
     }
     
-    let ground_y = crate::get_terrain_height(transform.x, transform.z);
+    // Subterranean & Overworld Ground Support: evaluates solid voxel surface beneath capsule
+    let ground_y = crate::voxel::find_ground_surface_below(ctx, transform.x, transform.y, transform.z);
     if transform.y < ground_y + 1.05 {
         transform.y = ground_y + 1.05;
     }

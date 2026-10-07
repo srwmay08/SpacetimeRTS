@@ -25,6 +25,11 @@ pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 // volume model with the client Surface Nets dual-contouring mesher.
 pub const VOXEL_SIZE: f32 = 0.25;
 
+/// Absolute bottom boundary of the world.
+/// Bedrock forms an indestructible strata at and below this elevation that players
+/// and mining tools cannot dig, excavate, or tunnel through.
+pub const BEDROCK_ELEVATION: f32 = -120.0;
+
 /// Voxel density and material categorization.
 #[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoxelMaterial {
@@ -166,7 +171,7 @@ pub fn ensure_or_create_chunk(ctx: &ReducerContext, cx: i32, cy: i32, cz: i32) -
                 let wy = (base_voxel_y + ly as i32) as f32 * VOXEL_SIZE;
                 let idx = local_to_index(lx, ly, lz);
 
-                if wy <= 0.0 {
+                if wy <= BEDROCK_ELEVATION {
                     voxels[idx] = VoxelMaterial::Bedrock as u8;
                 } else if wy <= terrain_height - 3.0 {
                     voxels[idx] = VoxelMaterial::Stone as u8;
@@ -190,6 +195,61 @@ pub fn ensure_or_create_chunk(ctx: &ReducerContext, cx: i32, cy: i32, cz: i32) -
 
     ctx.db.voxel_chunk().insert(chunk.clone());
     chunk
+}
+
+// Architectural Note: Column Voxel Ground Surface Scan for Locomotion.
+// Evaluates the highest solid support elevation directly beneath the point (wx, wy, wz).
+// Scans downward through voxel chunks if excavated, falling back to procedural terrain
+// above ground and clamping at BEDROCK_ELEVATION underground.
+pub fn find_ground_surface_below(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32) -> f32 {
+    let terrain_height = crate::get_terrain_height(wx, wz);
+    let feet_y = wy - 1.05;
+    let start_y = (feet_y + 0.5).min(terrain_height + 2.0);
+
+    let vx = (wx / VOXEL_SIZE).floor() as i32;
+    let vz = (wz / VOXEL_SIZE).floor() as i32;
+    let cx = vx.div_euclid(CHUNK_SIZE as i32);
+    let cz = vz.div_euclid(CHUNK_SIZE as i32);
+    let lx = vx.rem_euclid(CHUNK_SIZE as i32) as usize;
+    let lz = vz.rem_euclid(CHUNK_SIZE as i32) as usize;
+
+    let start_cy = (start_y / 4.0).floor() as i32;
+    let min_cy = (BEDROCK_ELEVATION / 4.0).floor() as i32;
+
+    for cy in (min_cy..=start_cy).rev() {
+        let key = pack_chunk_key(cx, cy, cz);
+        if let Some(chunk) = ctx.db.voxel_chunk().chunk_key().find(key) {
+            for ly in (0..16).rev() {
+                let vy = cy * 16 + ly as i32;
+                let voxel_top_y = (vy as f32 + 1.0) * VOXEL_SIZE;
+                if voxel_top_y <= start_y + 0.1 {
+                    let idx = local_to_index(lx, ly, lz);
+                    if let Some(&mat_byte) = chunk.voxels.get(idx) {
+                        let mat = VoxelMaterial::from_u8(mat_byte);
+                        if mat.is_solid() {
+                            return voxel_top_y.max(BEDROCK_ELEVATION);
+                        }
+                    }
+                }
+            }
+        } else {
+            let chunk_bottom = cy as f32 * 4.0;
+            let chunk_top = (cy as f32 + 1.0) * 4.0;
+
+            if chunk_bottom > terrain_height {
+                continue;
+            } else if chunk_top <= BEDROCK_ELEVATION {
+                return BEDROCK_ELEVATION;
+            } else if chunk_bottom <= terrain_height {
+                let surface = terrain_height.min(chunk_top);
+                if surface <= start_y + 0.1 {
+                    return surface.max(BEDROCK_ELEVATION);
+                }
+            }
+        }
+    }
+
+    BEDROCK_ELEVATION
 }
 
 // Architectural Note: Sub-Meter Voxel Sphere Mutation.
