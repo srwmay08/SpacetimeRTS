@@ -41,7 +41,7 @@
 use std::f32::consts::PI;
 use bevy::prelude::*;
 use bevy::pbr::{
-    CascadeShadowConfigBuilder, DirectionalLightShadowMap, FogFalloff, FogSettings,
+    CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, FogFalloff, FogSettings,
     NotShadowCaster,
 };
 use bevy::render::mesh::{Indices, PrimitiveTopology};
@@ -263,6 +263,11 @@ pub struct BinarySkyConfig {
     /// Dynamic scale factor for cosmic starfield points of light (default: 1.0).
     pub starfield_scale: f32,
 
+    /// Runtime directional light active enable toggle for Star A (default: true).
+    pub star_a_enabled: bool,
+    /// Runtime directional light active enable toggle for Star B (default: true).
+    pub star_b_enabled: bool,
+
     // ------------------------------------------------------------------------
     // Cascaded Shadow Map (CSM) Fidelity Profiles
     // ------------------------------------------------------------------------
@@ -272,6 +277,12 @@ pub struct BinarySkyConfig {
     pub star_a_maximum_shadow_distance: f32,
     /// First cascade far bound for Star A in meters (default: 15.0m for near-field contact shadows).
     pub star_a_first_cascade_far_bound: f32,
+    /// Shadow depth bias for Star A DirectionalLight (default: 0.02).
+    pub star_a_shadow_depth_bias: f32,
+    /// Shadow normal bias for Star A DirectionalLight (default: 1.8).
+    pub star_a_shadow_normal_bias: f32,
+    /// Minimum shadow distance for Star A CSM in meters (default: 0.5m).
+    pub star_a_minimum_shadow_distance: f32,
 
     /// Number of CSM cascades for Companion Star B (default: 2 - asymmetric optimization).
     pub star_b_num_cascades: usize,
@@ -279,6 +290,12 @@ pub struct BinarySkyConfig {
     pub star_b_maximum_shadow_distance: f32,
     /// First cascade far bound for Star B in meters (default: 18.0m).
     pub star_b_first_cascade_far_bound: f32,
+    /// Shadow depth bias for Star B DirectionalLight (default: 0.02).
+    pub star_b_shadow_depth_bias: f32,
+    /// Shadow normal bias for Star B DirectionalLight (default: 1.8).
+    pub star_b_shadow_normal_bias: f32,
+    /// Minimum shadow distance for Star B CSM in meters (default: 0.5m).
+    pub star_b_minimum_shadow_distance: f32,
 }
 
 impl Default for BinarySkyConfig {
@@ -311,14 +328,22 @@ impl Default for BinarySkyConfig {
             star_b_color_override: None,
             star_a_shadows_enabled: true,
             star_b_shadows_enabled: true,
+            star_a_enabled: true,
+            star_b_enabled: true,
             ambient_illuminance_lux: None,
             starfield_scale: 1.0,
             star_a_num_cascades: 3,
             star_a_maximum_shadow_distance: 160.0,
             star_a_first_cascade_far_bound: 15.0,
+            star_a_shadow_depth_bias: 0.02,
+            star_a_shadow_normal_bias: 1.8,
+            star_a_minimum_shadow_distance: 0.5,
             star_b_num_cascades: 2,
             star_b_maximum_shadow_distance: 112.5,
             star_b_first_cascade_far_bound: 18.0,
+            star_b_shadow_depth_bias: 0.02,
+            star_b_shadow_normal_bias: 1.8,
+            star_b_minimum_shadow_distance: 0.5,
         }
     }
 }
@@ -1054,7 +1079,7 @@ pub fn setup_binary_sky_environment(
     // Spawn Host Primary Star A Directional Light (Dominant Shadow Caster - Higher Fidelity CSM)
     let cascade_config_a = CascadeShadowConfigBuilder {
         num_cascades: config.star_a_num_cascades,
-        minimum_distance: 0.1,
+        minimum_distance: config.star_a_minimum_shadow_distance,
         maximum_distance: config.star_a_maximum_shadow_distance,
         first_cascade_far_bound: config.star_a_first_cascade_far_bound,
         overlap_proportion: 0.20,
@@ -1067,6 +1092,8 @@ pub fn setup_binary_sky_environment(
                 color: Color::srgb(1.0, 0.97, 0.92),
                 illuminance: config.star_a_base_illuminance_lux,
                 shadows_enabled: true,
+                shadow_depth_bias: config.star_a_shadow_depth_bias,
+                shadow_normal_bias: config.star_a_shadow_normal_bias,
                 ..default()
             },
             transform: Transform::from_xyz(0.0, 100.0, -100.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -1081,7 +1108,7 @@ pub fn setup_binary_sky_environment(
     // Spawn Secondary Dwarf Star B Directional Light (Asymmetric CSM Tier: 2 cascades, 112.5m)
     let cascade_config_b = CascadeShadowConfigBuilder {
         num_cascades: config.star_b_num_cascades,
-        minimum_distance: 0.1,
+        minimum_distance: config.star_b_minimum_shadow_distance,
         maximum_distance: config.star_b_maximum_shadow_distance,
         first_cascade_far_bound: config.star_b_first_cascade_far_bound,
         overlap_proportion: 0.20,
@@ -1094,6 +1121,8 @@ pub fn setup_binary_sky_environment(
                 color: Color::srgb(1.0, 0.65, 0.35),
                 illuminance: config.star_b_base_illuminance_lux,
                 shadows_enabled: true,
+                shadow_depth_bias: config.star_b_shadow_depth_bias,
+                shadow_normal_bias: config.star_b_shadow_normal_bias,
                 ..default()
             },
             transform: Transform::from_xyz(50.0, 60.0, -80.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -1562,17 +1591,34 @@ pub fn sync_stellar_directional_lights(
     ephemeris: Res<BinaryEphemerisState>,
     cache: Res<AtmosphericRadianceCache>,
     mut ambient_light: ResMut<AmbientLight>,
-    mut star_a_query: Query<(&mut DirectionalLight, &mut Transform), (With<PrimaryStar>, Without<SecondaryStar>)>,
-    mut star_b_query: Query<(&mut DirectionalLight, &mut Transform), (With<SecondaryStar>, Without<PrimaryStar>)>,
+    mut star_a_query: Query<(&mut DirectionalLight, &mut Transform, &mut CascadeShadowConfig), (With<PrimaryStar>, Without<SecondaryStar>)>,
+    mut star_b_query: Query<(&mut DirectionalLight, &mut Transform, &mut CascadeShadowConfig), (With<SecondaryStar>, Without<PrimaryStar>)>,
 ) {
     ambient_light.color = cache.ambient_color;
     ambient_light.brightness = config.ambient_illuminance_lux.unwrap_or(cache.ambient_brightness_lux);
 
-    if let Ok((mut light_a, mut transform_a)) = star_a_query.get_single_mut() {
+    if let Ok((mut light_a, mut transform_a, mut cascade_a)) = star_a_query.get_single_mut() {
         light_a.color = config.star_a_color_override.unwrap_or(cache.star_a_color);
-        light_a.illuminance = cache.star_a_illuminance_lux;
+        light_a.illuminance = if config.star_a_enabled { cache.star_a_illuminance_lux } else { 0.0 };
         // Simultaneous dual shadow casting: active whenever above horizon and enabled
-        light_a.shadows_enabled = config.star_a_shadows_enabled && ephemeris.star_a_elevation > -0.05;
+        light_a.shadows_enabled = config.star_a_enabled && config.star_a_shadows_enabled && ephemeris.star_a_elevation > -0.05;
+        light_a.shadow_depth_bias = config.star_a_shadow_depth_bias;
+        light_a.shadow_normal_bias = config.star_a_shadow_normal_bias;
+
+        // Synchronize dynamic cascade changes
+        if cascade_a.minimum_distance != config.star_a_minimum_shadow_distance
+            || cascade_a.bounds.last().copied() != Some(config.star_a_maximum_shadow_distance)
+            || cascade_a.bounds.first().copied() != Some(config.star_a_first_cascade_far_bound)
+        {
+            *cascade_a = CascadeShadowConfigBuilder {
+                num_cascades: config.star_a_num_cascades,
+                minimum_distance: config.star_a_minimum_shadow_distance,
+                maximum_distance: config.star_a_maximum_shadow_distance,
+                first_cascade_far_bound: config.star_a_first_cascade_far_bound,
+                overlap_proportion: 0.20,
+            }
+            .build();
+        }
 
         let target_dir = -ephemeris.star_a_direction;
         if target_dir.length_squared() > 1e-4 {
@@ -1580,11 +1626,28 @@ pub fn sync_stellar_directional_lights(
         }
     }
 
-    if let Ok((mut light_b, mut transform_b)) = star_b_query.get_single_mut() {
+    if let Ok((mut light_b, mut transform_b, mut cascade_b)) = star_b_query.get_single_mut() {
         light_b.color = config.star_b_color_override.unwrap_or(cache.star_b_color);
-        light_b.illuminance = cache.star_b_illuminance_lux;
+        light_b.illuminance = if config.star_b_enabled { cache.star_b_illuminance_lux } else { 0.0 };
         // Simultaneous dual shadow casting: active whenever above horizon and enabled
-        light_b.shadows_enabled = config.star_b_shadows_enabled && ephemeris.star_b_elevation > -0.05;
+        light_b.shadows_enabled = config.star_b_enabled && config.star_b_shadows_enabled && ephemeris.star_b_elevation > -0.05;
+        light_b.shadow_depth_bias = config.star_b_shadow_depth_bias;
+        light_b.shadow_normal_bias = config.star_b_shadow_normal_bias;
+
+        // Synchronize dynamic cascade changes
+        if cascade_b.minimum_distance != config.star_b_minimum_shadow_distance
+            || cascade_b.bounds.last().copied() != Some(config.star_b_maximum_shadow_distance)
+            || cascade_b.bounds.first().copied() != Some(config.star_b_first_cascade_far_bound)
+        {
+            *cascade_b = CascadeShadowConfigBuilder {
+                num_cascades: config.star_b_num_cascades,
+                minimum_distance: config.star_b_minimum_shadow_distance,
+                maximum_distance: config.star_b_maximum_shadow_distance,
+                first_cascade_far_bound: config.star_b_first_cascade_far_bound,
+                overlap_proportion: 0.20,
+            }
+            .build();
+        }
 
         let target_dir = -ephemeris.star_b_direction;
         if target_dir.length_squared() > 1e-4 {
@@ -2551,7 +2614,7 @@ mod tests {
         // Primary star: 3 cascades, 160m
         let cascade_a = CascadeShadowConfigBuilder {
             num_cascades: config.star_a_num_cascades,
-            minimum_distance: 0.1,
+            minimum_distance: config.star_a_minimum_shadow_distance,
             maximum_distance: config.star_a_maximum_shadow_distance,
             first_cascade_far_bound: config.star_a_first_cascade_far_bound,
             overlap_proportion: 0.20,
@@ -2561,7 +2624,7 @@ mod tests {
         // Secondary star: 2 cascades, 112.5m
         let cascade_b = CascadeShadowConfigBuilder {
             num_cascades: config.star_b_num_cascades,
-            minimum_distance: 0.1,
+            minimum_distance: config.star_b_minimum_shadow_distance,
             maximum_distance: config.star_b_maximum_shadow_distance,
             first_cascade_far_bound: config.star_b_first_cascade_far_bound,
             overlap_proportion: 0.20,

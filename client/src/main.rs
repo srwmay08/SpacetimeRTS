@@ -156,6 +156,7 @@ fn main() {
         .init_resource::<LocomotionSettings>()
         .init_resource::<HitMarkerState>()
         .init_resource::<SeasonState>()
+        .init_resource::<TreeFoliageConfig>()
         .init_resource::<TreeMaterialHandles>()
         .init_resource::<FpsLimiterState>()
         .init_resource::<BuildingAssetManifest>()

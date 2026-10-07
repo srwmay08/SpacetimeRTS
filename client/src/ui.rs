@@ -195,6 +195,10 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "limitfps",
     "vsync",
     "help",
+    "light",
+    "csm",
+    "foliage",
+    "tree",
 ];
 
 #[derive(Component)]
@@ -1388,6 +1392,7 @@ pub fn handle_console_input(
     mut diag_pill_query: Query<&mut Style, (With<DiagnosticOverlayRoot>, Without<CelestialHudRoot>)>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut fps_limiter: ResMut<FpsLimiterState>,
+    mut foliage_config: Option<ResMut<crate::tree_colors::TreeFoliageConfig>>,
 ) {
     if !console.is_open {
         return;
@@ -2081,6 +2086,206 @@ pub fn handle_console_input(
                     }
                 }
             }
+            "light" => {
+                if let Some(ref mut cfg) = sky_config {
+                    let sub = tokens.get(1).map(|s| s.to_lowercase());
+                    match sub.as_deref() {
+                        Some("solo") | Some("isolate") | Some("only") => {
+                            let which = tokens.get(2).map(|s| s.to_lowercase());
+                            match which.as_deref() {
+                                Some("a") | Some("stara") | Some("primary") | Some("host") => {
+                                    cfg.star_a_enabled = true;
+                                    cfg.star_b_enabled = false;
+                                    console.logs.push("[Light Isolation] Host Star A ISOLATED. Companion Star B disabled (0 lx).".into());
+                                    console.logs.push("  - Single directional light active: uniform shadow angle and facing direction.".into());
+                                }
+                                Some("b") | Some("starb") | Some("secondary") | Some("companion") => {
+                                    cfg.star_a_enabled = false;
+                                    cfg.star_b_enabled = true;
+                                    console.logs.push("[Light Isolation] Companion Star B ISOLATED. Host Star A disabled (0 lx).".into());
+                                    console.logs.push("  - Single directional light active: amber dwarf illumination.".into());
+                                }
+                                _ => {
+                                    console.logs.push("[Syntax Error] Usage: light solo <a|b> | light dual".into());
+                                }
+                            }
+                        }
+                        Some("a") | Some("stara") => {
+                            cfg.star_a_enabled = true;
+                            cfg.star_b_enabled = false;
+                            console.logs.push("[Light Isolation] Host Star A ISOLATED. Companion Star B disabled (0 lx).".into());
+                        }
+                        Some("b") | Some("starb") => {
+                            cfg.star_a_enabled = false;
+                            cfg.star_b_enabled = true;
+                            console.logs.push("[Light Isolation] Companion Star B ISOLATED. Host Star A disabled (0 lx).".into());
+                        }
+                        Some("dual") | Some("both") | Some("reset") => {
+                            cfg.star_a_enabled = true;
+                            cfg.star_b_enabled = true;
+                            console.logs.push("[Light Isolation] Dual Star lighting RESTORED. Host Star A & Companion Star B both active.".into());
+                        }
+                        Some("shadow") | Some("shadows") => {
+                            let which = tokens.get(2).map(|s| s.to_lowercase());
+                            let state_str = tokens.get(3).map(|s| s.to_lowercase());
+                            let on = state_str.as_deref().map(|s| s != "off" && s != "0" && s != "false").unwrap_or(true);
+                            match which.as_deref() {
+                                Some("a") => {
+                                    cfg.star_a_shadows_enabled = on;
+                                    console.logs.push(format!("[Light] Star A shadows: {}", if on { "ENABLED" } else { "DISABLED" }));
+                                }
+                                Some("b") => {
+                                    cfg.star_b_shadows_enabled = on;
+                                    console.logs.push(format!("[Light] Star B shadows: {}", if on { "ENABLED" } else { "DISABLED" }));
+                                }
+                                Some("both") | None => {
+                                    cfg.star_a_shadows_enabled = on;
+                                    cfg.star_b_shadows_enabled = on;
+                                    console.logs.push(format!("[Light] Dual star shadows: {}", if on { "ENABLED" } else { "DISABLED" }));
+                                }
+                                _ => {
+                                    console.logs.push("[Syntax Error] Usage: light shadows <a|b|both> <on|off>".into());
+                                }
+                            }
+                        }
+                        _ => {
+                            console.logs.push(format!("[Light Status] Host Star A: {} ({:.0} lx, shadows: {}) | Companion Star B: {} ({:.0} lx, shadows: {})",
+                                if cfg.star_a_enabled { "ENABLED" } else { "OFF" },
+                                cfg.star_a_base_illuminance_lux,
+                                cfg.star_a_shadows_enabled,
+                                if cfg.star_b_enabled { "ENABLED" } else { "OFF" },
+                                cfg.star_b_base_illuminance_lux,
+                                cfg.star_b_shadows_enabled,
+                            ));
+                            console.logs.push("Commands: light solo <a|b> | light dual | light shadows <a|b|both> <on|off>".into());
+                        }
+                    }
+                } else {
+                    console.logs.push("[Notice] Binary sky system is active in client world.".into());
+                }
+            }
+            "csm" => {
+                if let Some(ref mut cfg) = sky_config {
+                    let sub = tokens.get(1).map(|s| s.to_lowercase());
+                    match sub.as_deref() {
+                        Some("bias") => {
+                            if let (Some(Ok(depth)), Some(Ok(norm))) = (
+                                tokens.get(2).map(|s| s.parse::<f32>()),
+                                tokens.get(3).map(|s| s.parse::<f32>()),
+                            ) {
+                                cfg.star_a_shadow_depth_bias = depth;
+                                cfg.star_a_shadow_normal_bias = norm;
+                                cfg.star_b_shadow_depth_bias = depth;
+                                cfg.star_b_shadow_normal_bias = norm;
+                                console.logs.push(format!("[CSM] Updated shadow bias: depth_bias = {:.4}, normal_bias = {:.2}", depth, norm));
+                                console.logs.push("  - If dark faces disappear, shadow acne/self-shadowing was the cause.".into());
+                                console.logs.push("  - If contact shadows detach (peter-panning), reduce depth_bias slightly.".into());
+                            } else {
+                                console.logs.push("[Syntax Error] Usage: csm bias <depth_bias> <normal_bias> (e.g. 'csm bias 0.03 2.0')".into());
+                                console.logs.push(format!("  Current: depth = {:.4}, normal = {:.2}", cfg.star_a_shadow_depth_bias, cfg.star_a_shadow_normal_bias));
+                            }
+                        }
+                        Some("dist") | Some("distance") => {
+                            if let Some(Ok(max_d)) = tokens.get(2).map(|s| s.parse::<f32>()) {
+                                cfg.star_a_maximum_shadow_distance = max_d;
+                                if let Some(Ok(first_b)) = tokens.get(3).map(|s| s.parse::<f32>()) {
+                                    cfg.star_a_first_cascade_far_bound = first_b;
+                                }
+                                console.logs.push(format!("[CSM] Star A distance updated: max = {:.1}m, first_cascade_far = {:.1}m",
+                                    cfg.star_a_maximum_shadow_distance, cfg.star_a_first_cascade_far_bound));
+                            } else {
+                                console.logs.push("[Syntax Error] Usage: csm dist <max_dist> [first_cascade_bound] (e.g. 'csm dist 160 18')".into());
+                                console.logs.push(format!("  Current: max = {:.1}m, first_cascade_far = {:.1}m",
+                                    cfg.star_a_maximum_shadow_distance, cfg.star_a_first_cascade_far_bound));
+                            }
+                        }
+                        Some("min") | Some("near") => {
+                            if let Some(Ok(min_d)) = tokens.get(2).map(|s| s.parse::<f32>()) {
+                                cfg.star_a_minimum_shadow_distance = min_d.max(0.01);
+                                cfg.star_b_minimum_shadow_distance = min_d.max(0.01);
+                                console.logs.push(format!("[CSM] Near cascade clip plane updated: min_distance = {:.2}m", cfg.star_a_minimum_shadow_distance));
+                            } else {
+                                console.logs.push("[Syntax Error] Usage: csm min <min_dist> (e.g. 'csm min 0.5')".into());
+                                console.logs.push(format!("  Current: min_distance = {:.2}m", cfg.star_a_minimum_shadow_distance));
+                            }
+                        }
+                        _ => {
+                            console.logs.push(format!("[CSM Status] Star A: depth_bias={:.4}, normal_bias={:.2} | bounds: [{:.1}m .. {:.1}m] (cascades={})",
+                                cfg.star_a_shadow_depth_bias, cfg.star_a_shadow_normal_bias,
+                                cfg.star_a_minimum_shadow_distance, cfg.star_a_maximum_shadow_distance,
+                                cfg.star_a_num_cascades));
+                            console.logs.push(format!("             Star B: depth_bias={:.4}, normal_bias={:.2} | bounds: [{:.1}m .. {:.1}m] (cascades={})",
+                                cfg.star_b_shadow_depth_bias, cfg.star_b_shadow_normal_bias,
+                                cfg.star_b_minimum_shadow_distance, cfg.star_b_maximum_shadow_distance,
+                                cfg.star_b_num_cascades));
+                            console.logs.push("Commands: csm bias <depth> <normal> | csm dist <max> [first] | csm min <min>".into());
+                        }
+                    }
+                } else {
+                    console.logs.push("[Notice] Binary sky system is active in client world.".into());
+                }
+            }
+            "foliage" | "tree" => {
+                if let Some(ref mut f_cfg) = foliage_config {
+                    let sub = tokens.get(1).map(|s| s.to_lowercase());
+                    match sub.as_deref() {
+                        Some("unlit") => {
+                            let state_str = tokens.get(2).map(|s| s.to_lowercase());
+                            let new_unlit = match state_str.as_deref() {
+                                Some("on") | Some("1") | Some("true") => true,
+                                Some("off") | Some("0") | Some("false") => false,
+                                _ => !f_cfg.unlit,
+                            };
+                            f_cfg.unlit = new_unlit;
+                            console.logs.push(format!("[Foliage] Unlit mode: {}", if new_unlit { "ENABLED (Bypasses lighting & shadows)" } else { "DISABLED (Full PBR lighting)" }));
+                            if new_unlit {
+                                console.logs.push("  - If trees are now colorful, geometry & vertex colors are sound (issue is shadow acne or lighting).".into());
+                            }
+                        }
+                        Some("cull") | Some("culling") => {
+                            let mode_str = tokens.get(2).map(|s| s.to_lowercase());
+                            match mode_str.as_deref() {
+                                Some("back") | Some("one") | Some("single") => {
+                                    f_cfg.cull_mode = Some(bevy::render::render_resource::Face::Back);
+                                    console.logs.push("[Foliage] Culling set to Back (single-sided: only frontfaces visible).".into());
+                                    console.logs.push("  - If leaves vanish or turn black, face normal winding was inverted.".into());
+                                }
+                                Some("none") | Some("two") | Some("double") | Some("off") => {
+                                    f_cfg.cull_mode = None;
+                                    console.logs.push("[Foliage] Culling set to None (double-sided ribbons/leaves).".into());
+                                }
+                                _ => {
+                                    let cur_mode = if f_cfg.cull_mode.is_none() { "None (double-sided)" } else { "Back (single-sided)" };
+                                    console.logs.push(format!("[Foliage] Current culling: {}. Usage: foliage cull <none|back>", cur_mode));
+                                }
+                            }
+                        }
+                        Some("white") => {
+                            f_cfg.seasonal_tint_enabled = false;
+                            console.logs.push("[Foliage] Set base_color to pure Color::WHITE (pure baked mesh vertex colors).".into());
+                            console.logs.push("  - Vertex color squaring is eliminated.".into());
+                        }
+                        Some("tint") => {
+                            let state_str = tokens.get(2).map(|s| s.to_lowercase());
+                            let on = match state_str.as_deref() {
+                                Some("on") | Some("1") | Some("true") => true,
+                                Some("off") | Some("0") | Some("false") => false,
+                                _ => !f_cfg.seasonal_tint_enabled,
+                            };
+                            f_cfg.seasonal_tint_enabled = on;
+                            console.logs.push(format!("[Foliage] Seasonal tint multiplier: {}", if on { "ENABLED" } else { "DISABLED (Pure white base_color)" }));
+                        }
+                        _ => {
+                            let cur_cull = if f_cfg.cull_mode.is_none() { "None (double-sided)" } else { "Back (single-sided)" };
+                            console.logs.push(format!("[Foliage Status] Unlit: {} | Culling: {} | Seasonal Tint: {}",
+                                f_cfg.unlit, cur_cull, f_cfg.seasonal_tint_enabled));
+                            console.logs.push("Commands: foliage unlit <on|off> | foliage cull <none|back> | foliage white | foliage tint <on|off>".into());
+                        }
+                    }
+                } else {
+                    console.logs.push("[Notice] Tree foliage material configuration not available.".into());
+                }
+            }
             "starsize" => {
                 if let Some(ref mut cfg) = sky_config {
                     if let Some(scale) = tokens.get(1).and_then(|s| s.parse::<f32>().ok()) {
@@ -2147,6 +2352,13 @@ pub fn handle_console_input(
                 console.logs.push("star <a|b> color <hex> : Sets Star A/B direct light color override".into());
                 console.logs.push("star <a|b> shadows <on>: Toggles shadow casting for Star A or B".into());
                 console.logs.push("dualshadows            : Activates high-contrast dual shadow maps preset".into());
+                console.logs.push("light solo <a|b>       : Isolates to a single star (turns other star to 0 lx)".into());
+                console.logs.push("light dual             : Restores both stars with natural lighting".into());
+                console.logs.push("csm bias <depth> <norm>: Adjusts cascade shadow map biases (depth & normal)".into());
+                console.logs.push("csm dist <max> [first] : Adjusts CSM maximum distance & cascade bounds".into());
+                console.logs.push("foliage unlit <on|off> : Toggles unlit mode on foliage to isolate lighting".into());
+                console.logs.push("foliage cull <none|back: Toggles double-sided vs single-sided face culling".into());
+                console.logs.push("foliage white / tint   : Toggles raw vertex colors vs seasonal tint".into());
                 console.logs.push("ambient <lux>          : Adjusts ambient light fill (deeper shadows)".into());
                 console.logs.push("starsize <scale>       : Scales celestial starfield points of light".into());
                 console.logs.push("weather <clear|aurora> : Sets atmospheric weather preset [F9]".into());

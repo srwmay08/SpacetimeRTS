@@ -194,6 +194,28 @@ pub fn pick_tree_type_spatial(biome: Biome, x: f32, z: f32, node_id: u64) -> &'s
     }
 }
 
+/// Runtime configuration for tree & foliage material diagnostics.
+#[derive(Resource, Debug, Clone)]
+pub struct TreeFoliageConfig {
+    /// When true, renders foliage unlit (bypasses PBR lighting/shadows to inspect albedo).
+    pub unlit: bool,
+    /// Face culling mode (None = double-sided ribbons/leaves, Some(Face::Back) = strict CCW outward faces).
+    pub cull_mode: Option<bevy::render::render_resource::Face>,
+    /// When true, multiplies material base color by seasonal palette.
+    /// When false (default), keeps base_color at pure Color::WHITE so baked mesh vertex colors display without darkening.
+    pub seasonal_tint_enabled: bool,
+}
+
+impl Default for TreeFoliageConfig {
+    fn default() -> Self {
+        Self {
+            unlit: false,
+            cull_mode: None,
+            seasonal_tint_enabled: false,
+        }
+    }
+}
+
 /// Shared StandardMaterial handles for the 4 tree species to enable O(1) seasonal updates.
 #[derive(Resource, Clone)]
 pub struct TreeMaterialHandles {
@@ -206,9 +228,13 @@ pub struct TreeMaterialHandles {
 impl FromWorld for TreeMaterialHandles {
     fn from_world(world: &mut World) -> Self {
         let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+        // CRITICAL LIGHTING FIX: Initialize with Color::WHITE.
+        // Low-poly procedural trees bake their true albedo into Mesh::ATTRIBUTE_COLOR.
+        // In Bevy 0.13 PBR, material.base_color multiplies vertex colors. Setting base_color
+        // to a dark green/brown palette squares the color values, collapsing foliage and bark into flat black.
         Self {
             dead: materials.add(StandardMaterial {
-                base_color: Color::linear_rgba(DEAD_PALETTE.summer[0], DEAD_PALETTE.summer[1], DEAD_PALETTE.summer[2], 1.0),
+                base_color: Color::WHITE,
                 perceptual_roughness: 0.85,
                 reflectance: 0.1,
                 cull_mode: None,
@@ -216,7 +242,7 @@ impl FromWorld for TreeMaterialHandles {
                 ..default()
             }),
             oak: materials.add(StandardMaterial {
-                base_color: Color::linear_rgba(OAK_PALETTE.autumn[0], OAK_PALETTE.autumn[1], OAK_PALETTE.autumn[2], 1.0),
+                base_color: Color::WHITE,
                 perceptual_roughness: 0.85,
                 reflectance: 0.1,
                 cull_mode: None,
@@ -224,7 +250,7 @@ impl FromWorld for TreeMaterialHandles {
                 ..default()
             }),
             pine: materials.add(StandardMaterial {
-                base_color: Color::linear_rgba(PINE_PALETTE.summer[0], PINE_PALETTE.summer[1], PINE_PALETTE.summer[2], 1.0),
+                base_color: Color::WHITE,
                 perceptual_roughness: 0.85,
                 reflectance: 0.1,
                 cull_mode: None,
@@ -232,7 +258,7 @@ impl FromWorld for TreeMaterialHandles {
                 ..default()
             }),
             round: materials.add(StandardMaterial {
-                base_color: Color::linear_rgba(ROUND_PALETTE.autumn[0], ROUND_PALETTE.autumn[1], ROUND_PALETTE.autumn[2], 1.0),
+                base_color: Color::WHITE,
                 perceptual_roughness: 0.85,
                 reflectance: 0.1,
                 cull_mode: None,
@@ -243,28 +269,43 @@ impl FromWorld for TreeMaterialHandles {
     }
 }
 
-/// Updates tree materials based on current seasonal progression.
+/// Updates tree materials based on current seasonal progression and foliage diagnostic settings.
 pub fn update_tree_colors(
     season: Res<SeasonState>,
+    foliage_cfg: Option<Res<TreeFoliageConfig>>,
     tree_mats: Option<Res<TreeMaterialHandles>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut tree_query: Query<(&crate::components::TreeComponent, &Handle<StandardMaterial>)>,
 ) {
+    let seasonal_enabled = foliage_cfg.as_ref().map(|c| c.seasonal_tint_enabled).unwrap_or(false);
+    let unlit_mode = foliage_cfg.as_ref().map(|c| c.unlit).unwrap_or(false);
+    let cull_mode = foliage_cfg.as_ref().and_then(|c| c.cull_mode);
+
+    let sync_mat = |mat: &mut StandardMaterial, palette: &TreePalette| {
+        mat.unlit = unlit_mode;
+        mat.cull_mode = cull_mode;
+        mat.double_sided = cull_mode.is_none();
+        if seasonal_enabled {
+            mat.base_color = get_seasonal_color(palette, season.current, season.progress);
+        } else {
+            mat.base_color = Color::WHITE;
+        }
+    };
+
     if let Some(tree_mats) = tree_mats {
         if let Some(mat) = materials.get_mut(&tree_mats.dead) {
-            mat.base_color = get_seasonal_color(&DEAD_PALETTE, season.current, season.progress);
+            sync_mat(mat, &DEAD_PALETTE);
         }
         if let Some(mat) = materials.get_mut(&tree_mats.oak) {
-            mat.base_color = get_seasonal_color(&OAK_PALETTE, season.current, season.progress);
+            sync_mat(mat, &OAK_PALETTE);
         }
         if let Some(mat) = materials.get_mut(&tree_mats.pine) {
-            mat.base_color = get_seasonal_color(&PINE_PALETTE, season.current, season.progress);
+            sync_mat(mat, &PINE_PALETTE);
         }
         if let Some(mat) = materials.get_mut(&tree_mats.round) {
-            mat.base_color = get_seasonal_color(&ROUND_PALETTE, season.current, season.progress);
+            sync_mat(mat, &ROUND_PALETTE);
         }
     } else {
-        let t = season.progress;
         for (tree_comp, mat_handle) in tree_query.iter_mut() {
             if let Some(mat) = materials.get_mut(mat_handle) {
                 let palette = match tree_comp.species {
@@ -273,7 +314,7 @@ pub fn update_tree_colors(
                     2 => &PINE_PALETTE,
                     _ => &ROUND_PALETTE,
                 };
-                mat.base_color = get_seasonal_color(palette, season.current, t);
+                sync_mat(mat, palette);
             }
         }
     }
