@@ -252,6 +252,268 @@ pub fn find_ground_surface_below(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32
     BEDROCK_ELEVATION
 }
 
+/// Result of an authoritative 3D DDA voxel raymarch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VoxelRayHit {
+    pub vx: i32,
+    pub vy: i32,
+    pub vz: i32,
+    pub material: VoxelMaterial,
+    pub normal: (f32, f32, f32),
+    pub distance: f32,
+}
+
+/// Evaluates the voxel material at discrete integer voxel coordinates (vx, vy, vz),
+/// checking DB chunk tables first, then falling back to deterministic procedural strata.
+pub fn get_voxel_or_procedural_at_voxel_coords(
+    ctx: &ReducerContext,
+    vx: i32,
+    vy: i32,
+    vz: i32,
+) -> VoxelMaterial {
+    let cx = vx.div_euclid(CHUNK_SIZE as i32);
+    let cy = vy.div_euclid(CHUNK_SIZE as i32);
+    let cz = vz.div_euclid(CHUNK_SIZE as i32);
+    let lx = vx.rem_euclid(CHUNK_SIZE as i32) as usize;
+    let ly = vy.rem_euclid(CHUNK_SIZE as i32) as usize;
+    let lz = vz.rem_euclid(CHUNK_SIZE as i32) as usize;
+
+    let key = pack_chunk_key(cx, cy, cz);
+    if let Some(chunk) = ctx.db.voxel_chunk().chunk_key().find(key) {
+        let idx = local_to_index(lx, ly, lz);
+        if let Some(&mat_byte) = chunk.voxels.get(idx) {
+            return VoxelMaterial::from_u8(mat_byte);
+        }
+    }
+
+    let wx = (vx as f32 + 0.5) * VOXEL_SIZE;
+    let wy = (vy as f32 + 0.5) * VOXEL_SIZE;
+    let wz = (vz as f32 + 0.5) * VOXEL_SIZE;
+    let terrain_height = crate::get_terrain_height(wx, wz);
+
+    if wy <= BEDROCK_ELEVATION {
+        VoxelMaterial::Bedrock
+    } else if wy <= terrain_height - 3.0 {
+        VoxelMaterial::Stone
+    } else if wy <= terrain_height {
+        VoxelMaterial::Dirt
+    } else {
+        VoxelMaterial::Air
+    }
+}
+
+// Architectural Note: Amanatides & Woo 3D Digital Differential Analyzer (DDA).
+// Traverses the voxel grid ray-step by ray-step in exact volumetric order.
+// Runs in O(N) integer and addition arithmetic without square roots or trigonometric
+// operations in the inner loop, guaranteeing deterministic, low-energy Wasm reducer execution.
+pub fn dda_raymarch_pure<F>(
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    dx: f32,
+    dy: f32,
+    dz: f32,
+    max_dist: f32,
+    mut query_voxel: F,
+) -> Option<VoxelRayHit>
+where
+    F: FnMut(i32, i32, i32) -> VoxelMaterial,
+{
+    let dir_len = (dx * dx + dy * dy + dz * dz).sqrt();
+    if dir_len < 1e-6 {
+        return None;
+    }
+    let (dir_x, dir_y, dir_z) = (dx / dir_len, dy / dir_len, dz / dir_len);
+
+    let mut vx = (ox / VOXEL_SIZE).floor() as i32;
+    let mut vy = (oy / VOXEL_SIZE).floor() as i32;
+    let mut vz = (oz / VOXEL_SIZE).floor() as i32;
+
+    // Initial check: if ray origin starts inside solid voxel
+    let initial_mat = query_voxel(vx, vy, vz);
+    if initial_mat.is_solid() {
+        return Some(VoxelRayHit {
+            vx,
+            vy,
+            vz,
+            material: initial_mat,
+            normal: (-dir_x, -dir_y, -dir_z),
+            distance: 0.0,
+        });
+    }
+
+    let step_x: i32;
+    let mut t_max_x: f32;
+    let t_delta_x: f32;
+    if dir_x > 0.0 {
+        step_x = 1;
+        let next_boundary_x = (vx + 1) as f32 * VOXEL_SIZE;
+        t_max_x = (next_boundary_x - ox) / dir_x;
+        t_delta_x = VOXEL_SIZE / dir_x;
+    } else if dir_x < 0.0 {
+        step_x = -1;
+        let next_boundary_x = vx as f32 * VOXEL_SIZE;
+        t_max_x = (next_boundary_x - ox) / dir_x;
+        t_delta_x = VOXEL_SIZE / -dir_x;
+    } else {
+        step_x = 0;
+        t_max_x = f32::INFINITY;
+        t_delta_x = f32::INFINITY;
+    }
+
+    let step_y: i32;
+    let mut t_max_y: f32;
+    let t_delta_y: f32;
+    if dir_y > 0.0 {
+        step_y = 1;
+        let next_boundary_y = (vy + 1) as f32 * VOXEL_SIZE;
+        t_max_y = (next_boundary_y - oy) / dir_y;
+        t_delta_y = VOXEL_SIZE / dir_y;
+    } else if dir_y < 0.0 {
+        step_y = -1;
+        let next_boundary_y = vy as f32 * VOXEL_SIZE;
+        t_max_y = (next_boundary_y - oy) / dir_y;
+        t_delta_y = VOXEL_SIZE / -dir_y;
+    } else {
+        step_y = 0;
+        t_max_y = f32::INFINITY;
+        t_delta_y = f32::INFINITY;
+    }
+
+    let step_z: i32;
+    let mut t_max_z: f32;
+    let t_delta_z: f32;
+    if dir_z > 0.0 {
+        step_z = 1;
+        let next_boundary_z = (vz + 1) as f32 * VOXEL_SIZE;
+        t_max_z = (next_boundary_z - oz) / dir_z;
+        t_delta_z = VOXEL_SIZE / dir_z;
+    } else if dir_z < 0.0 {
+        step_z = -1;
+        let next_boundary_z = vz as f32 * VOXEL_SIZE;
+        t_max_z = (next_boundary_z - oz) / dir_z;
+        t_delta_z = VOXEL_SIZE / -dir_z;
+    } else {
+        step_z = 0;
+        t_max_z = f32::INFINITY;
+        t_delta_z = f32::INFINITY;
+    }
+
+    let max_steps = ((max_dist / VOXEL_SIZE).ceil() as usize * 3).min(128);
+
+    for _ in 0..max_steps {
+        let (current_dist, step_normal) = if t_max_x < t_max_y && t_max_x < t_max_z {
+            if t_max_x > max_dist {
+                break;
+            }
+            vx += step_x;
+            let d = t_max_x;
+            t_max_x += t_delta_x;
+            (d, (-step_x as f32, 0.0, 0.0))
+        } else if t_max_y < t_max_z {
+            if t_max_y > max_dist {
+                break;
+            }
+            vy += step_y;
+            let d = t_max_y;
+            t_max_y += t_delta_y;
+            (d, (0.0, -step_y as f32, 0.0))
+        } else {
+            if t_max_z > max_dist {
+                break;
+            }
+            vz += step_z;
+            let d = t_max_z;
+            t_max_z += t_delta_z;
+            (d, (0.0, 0.0, -step_z as f32))
+        };
+
+        let mat = query_voxel(vx, vy, vz);
+        if mat.is_solid() {
+            return Some(VoxelRayHit {
+                vx,
+                vy,
+                vz,
+                material: mat,
+                normal: step_normal,
+                distance: current_dist,
+            });
+        }
+    }
+
+    None
+}
+
+/// Authoritative 3D DDA voxel raymarch against SpacetimeDB chunk tables and procedural strata.
+pub fn dda_raymarch_voxel(
+    ctx: &ReducerContext,
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    dx: f32,
+    dy: f32,
+    dz: f32,
+    max_dist: f32,
+) -> Option<VoxelRayHit> {
+    dda_raymarch_pure(ox, oy, oz, dx, dy, dz, max_dist, |vx, vy, vz| {
+        get_voxel_or_procedural_at_voxel_coords(ctx, vx, vy, vz)
+    })
+}
+
+/// Authoritative single-voxel excavation.
+/// Mutates the target voxel to Air if tool hardness is sufficient, updates chunk replication
+/// timestamps, and emits pathfinding invalidation events.
+pub fn mine_single_voxel(
+    ctx: &ReducerContext,
+    vx: i32,
+    vy: i32,
+    vz: i32,
+    tool_damage: f32,
+) -> Result<VoxelMaterial, String> {
+    let cx = vx.div_euclid(CHUNK_SIZE as i32);
+    let cy = vy.div_euclid(CHUNK_SIZE as i32);
+    let cz = vz.div_euclid(CHUNK_SIZE as i32);
+    let lx = vx.rem_euclid(CHUNK_SIZE as i32) as usize;
+    let ly = vy.rem_euclid(CHUNK_SIZE as i32) as usize;
+    let lz = vz.rem_euclid(CHUNK_SIZE as i32) as usize;
+
+    let mut chunk = ensure_or_create_chunk(ctx, cx, cy, cz);
+    let idx = local_to_index(lx, ly, lz);
+    let current_mat = VoxelMaterial::from_u8(chunk.voxels[idx]);
+
+    if current_mat == VoxelMaterial::Bedrock {
+        return Err("Bedrock is indestructible.".to_string());
+    }
+
+    if current_mat == VoxelMaterial::Air {
+        return Err("Cannot mine air.".to_string());
+    }
+
+    if tool_damage < current_mat.hardness() {
+        return Err(format!("Insufficient tool damage: {} required for {:?}", current_mat.hardness(), current_mat));
+    }
+
+    chunk.voxels[idx] = VoxelMaterial::Air as u8;
+    chunk.last_modified_tick = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    ctx.db.voxel_chunk().chunk_key().update(chunk);
+
+    let wx = (vx as f32 + 0.5) * VOXEL_SIZE;
+    let wy = (vy as f32 + 0.5) * VOXEL_SIZE;
+    let wz = (vz as f32 + 0.5) * VOXEL_SIZE;
+
+    ctx.db.nav_event().insert(crate::NavEvent {
+        id: 0,
+        min_x: wx - 1.0,
+        min_y: wy - 1.0,
+        min_z: wz - 1.0,
+        max_x: wx + 1.0,
+        max_y: wy + 1.0,
+        max_z: wz + 1.0,
+    });
+
+    Ok(current_mat)
+}
+
 // Architectural Note: Sub-Meter Voxel Sphere Mutation.
 // Bounds testing divides metric explosion radius by `VOXEL_SIZE` and measures
 // distances from voxel cell centers `(vx + 0.5) * VOXEL_SIZE` to the detonation epicenter,

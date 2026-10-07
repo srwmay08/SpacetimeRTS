@@ -159,3 +159,65 @@ fn test_world_to_voxel_transform_negative() {
     assert_eq!((cx, cy, cz), (-2, 0, 0));
     assert_eq!((lx, ly, lz), (15, 0, 0));
 }
+
+#[test]
+fn test_dda_raymarch_axis_aligned_hit() {
+    use backend::voxel::dda_raymarch_pure;
+
+    // Ray starting at (0.5, 0.5, 0.5) pointing in +X direction.
+    // Place a stone voxel at vx = 8 (world X = 2.0 to 2.25).
+    let hit = dda_raymarch_pure(0.5, 0.5, 0.5, 1.0, 0.0, 0.0, 5.0, |vx, vy, vz| {
+        if vx == 8 && vy == 2 && vz == 2 {
+            VoxelMaterial::Stone
+        } else {
+            VoxelMaterial::Air
+        }
+    });
+
+    assert!(hit.is_some());
+    let hit = hit.unwrap();
+    assert_eq!(hit.vx, 8);
+    assert_eq!(hit.vy, 2);
+    assert_eq!(hit.vz, 2);
+    assert_eq!(hit.material, VoxelMaterial::Stone);
+    assert_eq!(hit.normal, (-1.0, 0.0, 0.0)); // Struck on west (-X) face
+    assert!((hit.distance - 1.5).abs() < 1e-4); // 8 * 0.25 = 2.0; 2.0 - 0.5 = 1.5m
+}
+
+#[test]
+fn test_dda_raymarch_diagonal_and_miss() {
+    use backend::voxel::dda_raymarch_pure;
+
+    // 1. Diagonal ray pointing towards (+1, -1, +1)
+    let hit = dda_raymarch_pure(0.1, 10.0, 0.1, 1.0, -1.0, 1.0, 10.0, |vx, _vy, vz| {
+        if vx == 5 && vz == 5 {
+            VoxelMaterial::Dirt
+        } else {
+            VoxelMaterial::Air
+        }
+    });
+    assert!(hit.is_some());
+    let hit = hit.unwrap();
+    assert_eq!(hit.material, VoxelMaterial::Dirt);
+
+    // 2. Miss test - no solid voxels in path within max_dist
+    let miss = dda_raymarch_pure(0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 3.0, |_vx, _vy, _vz| {
+        VoxelMaterial::Air
+    });
+    assert!(miss.is_none());
+
+    // 3. Degenerate ray direction (zero length)
+    let zero_dir = dda_raymarch_pure(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, |_vx, _vy, _vz| {
+        VoxelMaterial::Stone
+    });
+    assert!(zero_dir.is_none());
+
+    // 4. Ray starting inside solid voxel
+    let inside = dda_raymarch_pure(0.1, 0.1, 0.1, 1.0, 0.0, 0.0, 3.0, |_vx, _vy, _vz| {
+        VoxelMaterial::Bedrock
+    });
+    assert!(inside.is_some());
+    let inside_hit = inside.unwrap();
+    assert_eq!(inside_hit.material, VoxelMaterial::Bedrock);
+    assert_eq!(inside_hit.distance, 0.0);
+}

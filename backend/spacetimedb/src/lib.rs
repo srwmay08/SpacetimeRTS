@@ -1851,6 +1851,64 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
         return Ok(());
     }
 
+    // Check 3D DDA raymarch against authoritative voxel grid up to 4.5m melee reach
+    let has_pickaxe = inventory.slots.iter().any(|s| s.item_type == "Pickaxe" && s.count > 0);
+    let voxel_hit = crate::voxel::dda_raymarch_voxel(ctx, px, py, pz, dx, dy, dz, 4.5);
+
+    // Determine whether voxel terrain or discrete resource node is closer
+    let should_hit_voxel = match (hit_node.as_ref(), voxel_hit.as_ref()) {
+        (None, Some(_)) => true,
+        (Some(node), Some(v_hit)) => {
+            let node_dist_sq = (node.x - px).powi(2) + (node.y - py).powi(2) + (node.z - pz).powi(2);
+            v_hit.distance * v_hit.distance < node_dist_sq
+        }
+        _ => false,
+    };
+
+    if should_hit_voxel {
+        if let Some(v_hit) = voxel_hit {
+            let wx = (v_hit.vx as f32 + 0.5) * crate::voxel::VOXEL_SIZE;
+            let wy = (v_hit.vy as f32 + 0.5) * crate::voxel::VOXEL_SIZE;
+            let wz = (v_hit.vz as f32 + 0.5) * crate::voxel::VOXEL_SIZE;
+
+            if v_hit.material == crate::voxel::VoxelMaterial::Bedrock {
+                ctx.db.combat_event().insert(CombatEvent {
+                    id: 0,
+                    event_type: "DeflectBedrock".into(),
+                    x: wx,
+                    y: wy,
+                    z: wz,
+                });
+                return Ok(());
+            }
+
+            if !has_pickaxe && v_hit.material == crate::voxel::VoxelMaterial::Stone {
+                return Ok(());
+            }
+
+            let tool_dmg = if has_pickaxe { 100.0 } else { 20.0 };
+            if let Ok(mined_mat) = crate::voxel::mine_single_voxel(ctx, v_hit.vx, v_hit.vy, v_hit.vz, tool_dmg) {
+                ctx.db.combat_event().insert(CombatEvent {
+                    id: 0,
+                    event_type: "HitRock".into(),
+                    x: wx,
+                    y: wy,
+                    z: wz,
+                });
+
+                let (drop_item, count) = match mined_mat {
+                    crate::voxel::VoxelMaterial::Stone => ("Stone", 2),
+                    crate::voxel::VoxelMaterial::Dirt | crate::voxel::VoxelMaterial::Sand => ("LooseStone", 1),
+                    _ => ("Stone", 1),
+                };
+
+                add_item(&mut inventory, drop_item, count);
+                ctx.db.inventory().entity_id().update(inventory);
+            }
+            return Ok(());
+        }
+    }
+
     if let Some(node) = hit_node {
         if node.required_tool == "Stone Axe" {
             let has_axe = inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0);
