@@ -95,6 +95,234 @@ impl LowPolyMeshBuilder {
         self.add_flat_triangle(v0, v2, v3, color);
     }
 
+    /// Emits a flat-shaded triangle with guaranteed outward counter-clockwise winding.
+    pub fn add_flat_triangle_oriented(
+        &mut self,
+        p0: Vec3,
+        mut p1: Vec3,
+        mut p2: Vec3,
+        outward_dir: Vec3,
+        color: [f32; 4],
+    ) {
+        let normal = (p1 - p0).cross(p2 - p0);
+        if normal.dot(outward_dir) < 0.0 {
+            std::mem::swap(&mut p1, &mut p2);
+        }
+        self.add_flat_triangle(p0, p1, p2, color);
+    }
+
+    /// Emits a planar quad with guaranteed outward counter-clockwise winding.
+    pub fn add_flat_quad_oriented(
+        &mut self,
+        v0: Vec3,
+        v1: Vec3,
+        v2: Vec3,
+        v3: Vec3,
+        outward_dir: Vec3,
+        color: [f32; 4],
+    ) {
+        let normal = (v1 - v0).cross(v2 - v0);
+        if normal.dot(outward_dir) < 0.0 {
+            self.add_flat_triangle(v0, v3, v2, color);
+            self.add_flat_triangle(v0, v2, v1, color);
+        } else {
+            self.add_flat_triangle(v0, v1, v2, color);
+            self.add_flat_triangle(v0, v2, v3, color);
+        }
+    }
+
+    /// Emits both front and back faces of a triangle so thin planar elements are never backface-culled.
+    pub fn add_double_flat_triangle(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, color: [f32; 4]) {
+        self.add_flat_triangle(v0, v1, v2, color);
+        self.add_flat_triangle(v0, v2, v1, color);
+    }
+
+    /// Emits both front and back faces of a quad so thin planar elements are never backface-culled.
+    pub fn add_double_flat_quad(&mut self, v0: Vec3, v1: Vec3, v2: Vec3, v3: Vec3, color: [f32; 4]) {
+        self.add_flat_quad(v0, v1, v2, v3, color);
+        self.add_flat_quad(v3, v2, v1, v0, color);
+    }
+
+    /// Emits a flat-shaded box with 6 outward-facing planar quads (12 triangles).
+    pub fn add_faceted_box(&mut self, min: Vec3, max: Vec3, color: [f32; 4]) {
+        // Top Face (+Y)
+        self.add_flat_quad(
+            Vec3::new(min.x, max.y, max.z),
+            Vec3::new(max.x, max.y, max.z),
+            Vec3::new(max.x, max.y, min.z),
+            Vec3::new(min.x, max.y, min.z),
+            [color[0] * 1.05, color[1] * 1.05, color[2] * 1.05, color[3]],
+        );
+        // Bottom Face (-Y)
+        self.add_flat_quad(
+            Vec3::new(min.x, min.y, min.z),
+            Vec3::new(max.x, min.y, min.z),
+            Vec3::new(max.x, min.y, max.z),
+            Vec3::new(min.x, min.y, max.z),
+            [color[0] * 0.70, color[1] * 0.70, color[2] * 0.70, color[3]],
+        );
+        // East Face (+X)
+        self.add_flat_quad(
+            Vec3::new(max.x, min.y, max.z),
+            Vec3::new(max.x, min.y, min.z),
+            Vec3::new(max.x, max.y, min.z),
+            Vec3::new(max.x, max.y, max.z),
+            [color[0] * 0.95, color[1] * 0.95, color[2] * 0.95, color[3]],
+        );
+        // West Face (-X)
+        self.add_flat_quad(
+            Vec3::new(min.x, min.y, min.z),
+            Vec3::new(min.x, min.y, max.z),
+            Vec3::new(min.x, max.y, max.z),
+            Vec3::new(min.x, max.y, min.z),
+            [color[0] * 0.85, color[1] * 0.85, color[2] * 0.85, color[3]],
+        );
+        // South Face (+Z)
+        self.add_flat_quad(
+            Vec3::new(min.x, min.y, max.z),
+            Vec3::new(max.x, min.y, max.z),
+            Vec3::new(max.x, max.y, max.z),
+            Vec3::new(min.x, max.y, max.z),
+            [color[0] * 1.00, color[1] * 1.00, color[2] * 1.00, color[3]],
+        );
+        // North Face (-Z)
+        self.add_flat_quad(
+            Vec3::new(max.x, min.y, min.z),
+            Vec3::new(min.x, min.y, min.z),
+            Vec3::new(min.x, max.y, min.z),
+            Vec3::new(max.x, max.y, min.z),
+            [color[0] * 0.80, color[1] * 0.80, color[2] * 0.80, color[3]],
+        );
+    }
+
+    /// Emits a flat-shaded box given a center position and 3D dimensions.
+    pub fn add_box_center_size(&mut self, center: Vec3, size: Vec3, color: [f32; 4]) {
+        let half = size * 0.5;
+        self.add_faceted_box(center - half, center + half, color);
+    }
+
+    /// Emits a tapered 4-sided frustum with independent base and top dimensions.
+    /// Strictly winds all 6 planar faces counter-clockwise with verified outward face normals.
+    pub fn add_tapered_box(
+        &mut self,
+        min_b: Vec2, max_b: Vec2, y_b: f32,
+        min_t: Vec2, max_t: Vec2, y_t: f32,
+        color: [f32; 4],
+    ) {
+        let b0 = Vec3::new(min_b.x, y_b, min_b.y);
+        let b1 = Vec3::new(max_b.x, y_b, min_b.y);
+        let b2 = Vec3::new(max_b.x, y_b, max_b.y);
+        let b3 = Vec3::new(min_b.x, y_b, max_b.y);
+
+        let t0 = Vec3::new(min_t.x, y_t, min_t.y);
+        let t1 = Vec3::new(max_t.x, y_t, min_t.y);
+        let t2 = Vec3::new(max_t.x, y_t, max_t.y);
+        let t3 = Vec3::new(min_t.x, y_t, max_t.y);
+
+        // North Face (-Z): b1 -> b0 -> t0 -> t1
+        self.add_flat_quad_oriented(b1, b0, t0, t1, -Vec3::Z, [color[0] * 0.80, color[1] * 0.80, color[2] * 0.80, color[3]]);
+        // East Face (+X): b2 -> b1 -> t1 -> t2
+        self.add_flat_quad_oriented(b2, b1, t1, t2, Vec3::X, [color[0] * 0.95, color[1] * 0.95, color[2] * 0.95, color[3]]);
+        // South Face (+Z): b3 -> b2 -> t2 -> t3
+        self.add_flat_quad_oriented(b3, b2, t2, t3, Vec3::Z, [color[0] * 1.00, color[1] * 1.00, color[2] * 1.00, color[3]]);
+        // West Face (-X): b0 -> b3 -> t3 -> t0
+        self.add_flat_quad_oriented(b0, b3, t3, t0, -Vec3::X, [color[0] * 0.85, color[1] * 0.85, color[2] * 0.85, color[3]]);
+
+        // Top cap (+Y): t3 -> t2 -> t1 -> t0
+        self.add_flat_quad_oriented(t3, t2, t1, t0, Vec3::Y, [color[0] * 1.08, color[1] * 1.08, color[2] * 1.08, color[3]]);
+        // Bottom cap (-Y): b0 -> b1 -> b2 -> b3
+        self.add_flat_quad_oriented(b0, b1, b2, b3, -Vec3::Y, [color[0] * 0.70, color[1] * 0.70, color[2] * 0.70, color[3]]);
+    }
+
+    /// Emits a 3D closed triangular wedge (5-sided polyhedron) suitable for ears, horns, or chisel teeth.
+    pub fn add_faceted_wedge(
+        &mut self,
+        base0: Vec3,
+        base1: Vec3,
+        tip: Vec3,
+        thick_offset: Vec3,
+        color: [f32; 4],
+    ) {
+        let half_t = thick_offset * 0.5;
+        let b0_f = base0 + half_t;
+        let b1_f = base1 + half_t;
+        let tip_f = tip + half_t * 0.3;
+
+        let b0_b = base0 - half_t;
+        let b1_b = base1 - half_t;
+        let tip_b = tip - half_t * 0.3;
+
+        let center = (base0 + base1 + tip) / 3.0;
+
+        // Front Face (+thick)
+        self.add_flat_triangle_oriented(b0_f, b1_f, tip_f, thick_offset, [color[0] * 1.05, color[1] * 1.05, color[2] * 1.05, color[3]]);
+        // Back Face (-thick)
+        self.add_flat_triangle_oriented(b1_b, b0_b, tip_b, -thick_offset, [color[0] * 0.85, color[1] * 0.85, color[2] * 0.85, color[3]]);
+        // Bottom Base Quad (between b0 and b1)
+        let base_out = (base0 + base1) * 0.5 - center;
+        self.add_flat_quad_oriented(b0_b, b1_b, b1_f, b0_f, base_out, [color[0] * 0.70, color[1] * 0.70, color[2] * 0.70, color[3]]);
+        // Left Side Quad (between b0 and tip)
+        let left_out = (base0 + tip) * 0.5 - center;
+        self.add_flat_quad_oriented(tip_b, b0_b, b0_f, tip_f, left_out, [color[0] * 0.90, color[1] * 0.90, color[2] * 0.90, color[3]]);
+        // Right Side Quad (between b1 and tip)
+        let right_out = (base1 + tip) * 0.5 - center;
+        self.add_flat_quad_oriented(b1_b, tip_b, tip_f, b1_f, right_out, [color[0] * 0.95, color[1] * 0.95, color[2] * 0.95, color[3]]);
+    }
+
+    /// Emits a diamond cross-section blade segment or spear head with sharp cutting edges and spine ridge.
+    pub fn add_diamond_blade(
+        &mut self,
+        base_center: Vec3,
+        tip_center: Vec3,
+        width_base: f32,
+        width_tip: f32,
+        thick_base: f32,
+        thick_tip: f32,
+        color: [f32; 4],
+        has_pointed_tip: bool,
+    ) {
+        let dir = tip_center - base_center;
+        let len = dir.length();
+        if len < 1e-5 { return; }
+        let w = dir / len;
+        let up_ref = if w.y.abs() > 0.92 { Vec3::X } else { Vec3::Y };
+        let u = w.cross(up_ref).normalize(); // Width axis (cutting edges)
+        let v = w.cross(u).normalize();      // Thickness axis (central spine)
+
+        let b_left = base_center - u * (width_base * 0.5);
+        let b_right = base_center + u * (width_base * 0.5);
+        let b_front = base_center + v * (thick_base * 0.5);
+        let b_back = base_center - v * (thick_base * 0.5);
+        let mid_base = base_center;
+
+        if has_pointed_tip {
+            let tip = tip_center;
+            // 4 facets converging to a sharp needle tip
+            self.add_flat_triangle_oriented(b_left, b_front, tip, (b_left + b_front) * 0.5 + v * 0.2 - mid_base, [color[0] * 1.05, color[1] * 1.05, color[2] * 1.05, color[3]]);
+            self.add_flat_triangle_oriented(b_front, b_right, tip, (b_front + b_right) * 0.5 + v * 0.2 - mid_base, [color[0] * 1.15, color[1] * 1.15, color[2] * 1.15, color[3]]);
+            self.add_flat_triangle_oriented(b_right, b_back, tip, (b_right + b_back) * 0.5 - v * 0.2 - mid_base, [color[0] * 0.90, color[1] * 0.90, color[2] * 0.90, color[3]]);
+            self.add_flat_triangle_oriented(b_back, b_left, tip, (b_back + b_left) * 0.5 - v * 0.2 - mid_base, [color[0] * 0.80, color[1] * 0.80, color[2] * 0.80, color[3]]);
+
+            // Base cap
+            self.add_flat_quad_oriented(b_left, b_back, b_right, b_front, -w, [color[0] * 0.70, color[1] * 0.70, color[2] * 0.70, color[3]]);
+        } else {
+            let t_left = tip_center - u * (width_tip * 0.5);
+            let t_right = tip_center + u * (width_tip * 0.5);
+            let t_front = tip_center + v * (thick_tip * 0.5);
+            let t_back = tip_center - v * (thick_tip * 0.5);
+
+            // 4 side facets
+            self.add_flat_quad_oriented(b_left, b_front, t_front, t_left, -u + v, [color[0] * 1.05, color[1] * 1.05, color[2] * 1.05, color[3]]);
+            self.add_flat_quad_oriented(b_front, b_right, t_right, t_front, u + v, [color[0] * 1.15, color[1] * 1.15, color[2] * 1.15, color[3]]);
+            self.add_flat_quad_oriented(b_right, b_back, t_back, t_right, u - v, [color[0] * 0.90, color[1] * 0.90, color[2] * 0.90, color[3]]);
+            self.add_flat_quad_oriented(b_back, b_left, t_left, t_back, -u - v, [color[0] * 0.80, color[1] * 0.80, color[2] * 0.80, color[3]]);
+
+            // Base cap & Top cap
+            self.add_flat_quad_oriented(b_left, b_back, b_right, b_front, -w, [color[0] * 0.70, color[1] * 0.70, color[2] * 0.70, color[3]]);
+            self.add_flat_quad_oriented(t_left, t_front, t_right, t_back, w, [color[0] * 1.00, color[1] * 1.00, color[2] * 1.00, color[3]]);
+        }
+    }
+
     /// Generates a tapered polygonal prism (trunk, branch, or log) with `sides` facets.
     pub fn add_tapered_prism(
         &mut self,

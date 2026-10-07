@@ -27,98 +27,6 @@ use crate::tuner::spawn_comic_damage_floater;
 // PROCEDURAL MESH BUILDER EXTENSION FOR CREATURE PRIMITIVES
 // ----------------------------------------------------------------------------
 
-trait LowPolyCreatureBuilderExt {
-    fn add_faceted_box(&mut self, min: Vec3, max: Vec3, color: [f32; 4]);
-    fn add_tapered_box(
-        &mut self,
-        min_b: Vec2, max_b: Vec2, y_b: f32,
-        min_t: Vec2, max_t: Vec2, y_t: f32,
-        color: [f32; 4],
-    );
-}
-
-impl LowPolyCreatureBuilderExt for LowPolyMeshBuilder {
-    /// Emits a flat-shaded box with 6 outward-facing planar quads (12 triangles).
-    fn add_faceted_box(&mut self, min: Vec3, max: Vec3, color: [f32; 4]) {
-        // Top Face (+Y)
-        self.add_flat_quad(
-            Vec3::new(min.x, max.y, max.z),
-            Vec3::new(max.x, max.y, max.z),
-            Vec3::new(max.x, max.y, min.z),
-            Vec3::new(min.x, max.y, min.z),
-            [color[0] * 1.05, color[1] * 1.05, color[2] * 1.05, color[3]],
-        );
-        // Bottom Face (-Y)
-        self.add_flat_quad(
-            Vec3::new(min.x, min.y, min.z),
-            Vec3::new(max.x, min.y, min.z),
-            Vec3::new(max.x, min.y, max.z),
-            Vec3::new(min.x, min.y, max.z),
-            [color[0] * 0.70, color[1] * 0.70, color[2] * 0.70, color[3]],
-        );
-        // East Face (+X)
-        self.add_flat_quad(
-            Vec3::new(max.x, min.y, max.z),
-            Vec3::new(max.x, min.y, min.z),
-            Vec3::new(max.x, max.y, min.z),
-            Vec3::new(max.x, max.y, max.z),
-            [color[0] * 0.95, color[1] * 0.95, color[2] * 0.95, color[3]],
-        );
-        // West Face (-X)
-        self.add_flat_quad(
-            Vec3::new(min.x, min.y, min.z),
-            Vec3::new(min.x, min.y, max.z),
-            Vec3::new(min.x, max.y, max.z),
-            Vec3::new(min.x, max.y, min.z),
-            [color[0] * 0.85, color[1] * 0.85, color[2] * 0.85, color[3]],
-        );
-        // South Face (+Z)
-        self.add_flat_quad(
-            Vec3::new(min.x, min.y, max.z),
-            Vec3::new(max.x, min.y, max.z),
-            Vec3::new(max.x, max.y, max.z),
-            Vec3::new(min.x, max.y, max.z),
-            [color[0] * 1.00, color[1] * 1.00, color[2] * 1.00, color[3]],
-        );
-        // North Face (-Z)
-        self.add_flat_quad(
-            Vec3::new(max.x, min.y, min.z),
-            Vec3::new(min.x, min.y, min.z),
-            Vec3::new(min.x, max.y, min.z),
-            Vec3::new(max.x, max.y, min.z),
-            [color[0] * 0.80, color[1] * 0.80, color[2] * 0.80, color[3]],
-        );
-    }
-
-    /// Emits a tapered 4-sided frustum with independent base and top dimensions.
-    fn add_tapered_box(
-        &mut self,
-        min_b: Vec2, max_b: Vec2, y_b: f32,
-        min_t: Vec2, max_t: Vec2, y_t: f32,
-        color: [f32; 4],
-    ) {
-        let b0 = Vec3::new(min_b.x, y_b, min_b.y);
-        let b1 = Vec3::new(max_b.x, y_b, min_b.y);
-        let b2 = Vec3::new(max_b.x, y_b, max_b.y);
-        let b3 = Vec3::new(min_b.x, y_b, max_b.y);
-
-        let t0 = Vec3::new(min_t.x, y_t, min_t.y);
-        let t1 = Vec3::new(max_t.x, y_t, min_t.y);
-        let t2 = Vec3::new(max_t.x, y_t, max_t.y);
-        let t3 = Vec3::new(min_t.x, y_t, max_t.y);
-
-        // Sides
-        self.add_flat_quad(b0, b1, t1, t0, [color[0] * 0.82, color[1] * 0.82, color[2] * 0.82, color[3]]);
-        self.add_flat_quad(b1, b2, t2, t1, [color[0] * 0.95, color[1] * 0.95, color[2] * 0.95, color[3]]);
-        self.add_flat_quad(b2, b3, t3, t2, [color[0] * 1.00, color[1] * 1.00, color[2] * 1.00, color[3]]);
-        self.add_flat_quad(b3, b0, t0, t3, [color[0] * 0.88, color[1] * 0.88, color[2] * 0.88, color[3]]);
-
-        // Top & Bottom caps
-        self.add_flat_quad(t3, t2, t1, t0, [color[0] * 1.08, color[1] * 1.08, color[2] * 1.08, color[3]]);
-        self.add_flat_quad(b0, b1, b2, b3, [color[0] * 0.70, color[1] * 0.70, color[2] * 0.70, color[3]]);
-    }
-}
-
 // ----------------------------------------------------------------------------
 // 1. PROCEDURAL LOW-POLY DEER (RED DEER / FOREST STAG)
 // ----------------------------------------------------------------------------
@@ -148,17 +56,17 @@ pub fn create_lowpoly_deer_mesh() -> Mesh {
             Vec3::new(lx + 0.04, 0.07, lz + 0.04),
             black,
         );
-        // Slender lower leg prism (tapered 4-sided)
+        // Slender lower leg prism (tapered 4-sided, watertight caps)
         builder.add_tapered_prism(
             Vec3::new(lx, 0.07, lz),
             Vec3::new(lx, 0.46, lz),
-            0.030, 0.038, 4, shadow, false, false,
+            0.030, 0.038, 4, shadow, true, true,
         );
-        // Muscular upper leg / haunch
+        // Muscular upper leg / haunch (watertight caps)
         builder.add_tapered_prism(
             Vec3::new(lx, 0.46, lz),
             Vec3::new(lx, 0.82, lz),
-            0.038, 0.075, 4, tawny, false, true,
+            0.038, 0.075, 4, tawny, true, true,
         );
     }
 
@@ -182,7 +90,7 @@ pub fn create_lowpoly_deer_mesh() -> Mesh {
     );
 
     // White chest bib and tail
-    builder.add_flat_quad(
+    builder.add_double_flat_quad(
         Vec3::new(-0.15, 0.76, 0.34),
         Vec3::new(0.15, 0.76, 0.34),
         Vec3::new(0.12, 1.10, 0.34),
@@ -195,11 +103,11 @@ pub fn create_lowpoly_deer_mesh() -> Mesh {
         0.045, 0.015, 4, white, true, true,
     );
 
-    // Slender forward-angled neck
+    // Slender forward-angled neck (watertight caps)
     builder.add_tapered_prism(
         Vec3::new(0.0, 1.04, 0.22),
         Vec3::new(0.0, 1.48, 0.38),
-        0.11, 0.065, 5, tawny, false, true,
+        0.11, 0.065, 5, tawny, true, true,
     );
 
     // Sculpted wedge head with muzzle and black nose pad
@@ -214,17 +122,19 @@ pub fn create_lowpoly_deer_mesh() -> Mesh {
         black,
     );
 
-    // Backward-angled faceted ears
-    builder.add_flat_triangle(
+    // Backward-angled 3D faceted ears (watertight wedges)
+    builder.add_faceted_wedge(
         Vec3::new(-0.07, 1.55, 0.35),
-        Vec3::new(-0.18, 1.70, 0.26),
         Vec3::new(-0.07, 1.62, 0.28),
+        Vec3::new(-0.18, 1.70, 0.26),
+        Vec3::new(-0.02, 0.02, -0.02),
         tawny,
     );
-    builder.add_flat_triangle(
+    builder.add_faceted_wedge(
         Vec3::new(0.07, 1.55, 0.35),
         Vec3::new(0.07, 1.62, 0.28),
         Vec3::new(0.18, 1.70, 0.26),
+        Vec3::new(0.02, 0.02, -0.02),
         tawny,
     );
 
@@ -236,9 +146,9 @@ pub fn create_lowpoly_deer_mesh() -> Mesh {
         let tip1 = Vec3::new(side * 0.26, 2.15, 0.28);
         let tip2 = Vec3::new(side * 0.08, 1.98, 0.48);
 
-        builder.add_tapered_prism(root, fork, 0.024, 0.018, 4, antler, true, false);
-        builder.add_tapered_prism(fork, tip1, 0.018, 0.008, 4, antler, false, true);
-        builder.add_tapered_prism(fork, tip2, 0.015, 0.006, 4, antler, false, true);
+        builder.add_tapered_prism(root, fork, 0.024, 0.018, 4, antler, true, true);
+        builder.add_tapered_prism(fork, tip1, 0.018, 0.008, 4, antler, true, true);
+        builder.add_tapered_prism(fork, tip2, 0.015, 0.006, 4, antler, true, true);
     }
 
     builder.build()
@@ -261,7 +171,7 @@ pub fn create_lowpoly_boar_mesh() -> Mesh {
     let tusk = [0.96, 0.93, 0.86, 1.0];
     let hoof = [0.14, 0.12, 0.10, 1.0];
 
-    // 4 Stocky legs
+    // 4 Stocky legs (watertight capped prisms)
     let leg_offsets = [
         (-0.20, -0.28),
         (0.20, -0.28),
@@ -278,7 +188,7 @@ pub fn create_lowpoly_boar_mesh() -> Mesh {
         builder.add_tapered_prism(
             Vec3::new(lx, 0.06, lz),
             Vec3::new(lx, 0.36, lz),
-            0.058, 0.085, 4, umber, false, true,
+            0.058, 0.085, 4, umber, true, true,
         );
     }
 
@@ -288,15 +198,15 @@ pub fn create_lowpoly_boar_mesh() -> Mesh {
         Vec2::new(-0.28, -0.40), Vec2::new(0.28, 0.24), 0.72,
         umber,
     );
-    // Ochre flank stripes
-    builder.add_flat_quad(
+    // Ochre flank stripes (double-sided so visible from all angles)
+    builder.add_double_flat_quad(
         Vec3::new(-0.285, 0.40, -0.32),
         Vec3::new(-0.285, 0.40, 0.16),
         Vec3::new(-0.285, 0.62, 0.12),
         Vec3::new(-0.285, 0.62, -0.28),
         ochre,
     );
-    builder.add_flat_quad(
+    builder.add_double_flat_quad(
         Vec3::new(0.285, 0.40, 0.16),
         Vec3::new(0.285, 0.40, -0.32),
         Vec3::new(0.285, 0.62, -0.28),
@@ -337,17 +247,19 @@ pub fn create_lowpoly_boar_mesh() -> Mesh {
         0.032, 0.008, 4, tusk, true, true,
     );
 
-    // Bristly ears
-    builder.add_flat_triangle(
+    // Bristly 3D faceted ears (watertight wedges)
+    builder.add_faceted_wedge(
         Vec3::new(-0.16, 0.64, 0.32),
-        Vec3::new(-0.26, 0.76, 0.26),
         Vec3::new(-0.14, 0.70, 0.24),
+        Vec3::new(-0.26, 0.76, 0.26),
+        Vec3::new(-0.02, 0.02, -0.02),
         umber,
     );
-    builder.add_flat_triangle(
+    builder.add_faceted_wedge(
         Vec3::new(0.16, 0.64, 0.32),
         Vec3::new(0.14, 0.70, 0.24),
         Vec3::new(0.26, 0.76, 0.26),
+        Vec3::new(0.02, 0.02, -0.02),
         umber,
     );
 
@@ -376,9 +288,9 @@ pub fn create_lowpoly_goblin_mesh() -> Mesh {
     builder.add_faceted_box(Vec3::new(-0.20, 0.0, -0.12), Vec3::new(-0.06, 0.12, 0.14), iron_dark);
     builder.add_faceted_box(Vec3::new(0.06, 0.0, -0.12), Vec3::new(0.20, 0.12, 0.14), iron_dark);
 
-    // Squat muscular legs
-    builder.add_tapered_prism(Vec3::new(-0.13, 0.12, 0.0), Vec3::new(-0.11, 0.44, 0.0), 0.075, 0.09, 4, skin, false, true);
-    builder.add_tapered_prism(Vec3::new(0.13, 0.12, 0.0), Vec3::new(0.11, 0.44, 0.0), 0.075, 0.09, 4, skin, false, true);
+    // Squat muscular legs (watertight caps)
+    builder.add_tapered_prism(Vec3::new(-0.13, 0.12, 0.0), Vec3::new(-0.11, 0.44, 0.0), 0.075, 0.09, 4, skin, true, true);
+    builder.add_tapered_prism(Vec3::new(0.13, 0.12, 0.0), Vec3::new(0.11, 0.44, 0.0), 0.075, 0.09, 4, skin, true, true);
 
     // Studded war belt with gold buckle & tassets
     builder.add_faceted_box(Vec3::new(-0.20, 0.44, -0.14), Vec3::new(0.20, 0.56, 0.14), leather);
@@ -395,9 +307,9 @@ pub fn create_lowpoly_goblin_mesh() -> Mesh {
     builder.add_tapered_prism(Vec3::new(-0.24, 0.86, 0.0), Vec3::new(-0.36, 0.96, 0.0), 0.12, 0.08, 4, iron_dark, true, true);
     builder.add_tapered_prism(Vec3::new(0.24, 0.86, 0.0), Vec3::new(0.36, 0.96, 0.0), 0.12, 0.08, 4, iron_dark, true, true);
 
-    // Muscular arms & iron bracers
-    builder.add_tapered_prism(Vec3::new(-0.28, 0.84, 0.0), Vec3::new(-0.26, 0.46, 0.05), 0.07, 0.055, 4, skin, false, false);
-    builder.add_tapered_prism(Vec3::new(0.28, 0.84, 0.0), Vec3::new(0.26, 0.46, 0.05), 0.07, 0.055, 4, skin, false, false);
+    // Muscular arms & iron bracers (watertight caps)
+    builder.add_tapered_prism(Vec3::new(-0.28, 0.84, 0.0), Vec3::new(-0.26, 0.46, 0.05), 0.07, 0.055, 4, skin, true, true);
+    builder.add_tapered_prism(Vec3::new(0.28, 0.84, 0.0), Vec3::new(0.26, 0.46, 0.05), 0.07, 0.055, 4, skin, true, true);
     builder.add_faceted_box(Vec3::new(-0.31, 0.42, 0.0), Vec3::new(-0.21, 0.56, 0.10), iron);
     builder.add_faceted_box(Vec3::new(0.21, 0.42, 0.0), Vec3::new(0.31, 0.56, 0.10), iron);
 
@@ -416,9 +328,21 @@ pub fn create_lowpoly_goblin_mesh() -> Mesh {
     builder.add_faceted_box(Vec3::new(-0.11, 1.08, 0.14), Vec3::new(-0.04, 1.14, 0.17), eye);
     builder.add_faceted_box(Vec3::new(0.04, 1.08, 0.14), Vec3::new(0.11, 1.14, 0.17), eye);
 
-    // Large pointed lateral ears
-    builder.add_flat_triangle(Vec3::new(-0.14, 1.06, 0.0), Vec3::new(-0.36, 1.18, -0.04), Vec3::new(-0.14, 1.18, -0.02), skin);
-    builder.add_flat_triangle(Vec3::new(0.14, 1.06, 0.0), Vec3::new(0.14, 1.18, -0.02), Vec3::new(0.36, 1.18, -0.04), skin);
+    // Large pointed lateral ears (watertight 3D wedges)
+    builder.add_faceted_wedge(
+        Vec3::new(-0.14, 1.06, 0.0),
+        Vec3::new(-0.14, 1.18, -0.02),
+        Vec3::new(-0.36, 1.18, -0.04),
+        Vec3::new(-0.02, 0.01, 0.02),
+        skin,
+    );
+    builder.add_faceted_wedge(
+        Vec3::new(0.14, 1.06, 0.0),
+        Vec3::new(0.14, 1.18, -0.02),
+        Vec3::new(0.36, 1.18, -0.04),
+        Vec3::new(0.02, 0.01, 0.02),
+        skin,
+    );
 
     // Horned iron helmet
     builder.add_tapered_box(
@@ -456,8 +380,8 @@ pub fn create_lowpoly_dummy_mesh() -> Mesh {
     builder.add_faceted_box(Vec3::new(-0.55, 0.0, -0.10), Vec3::new(0.55, 0.08, 0.10), wood_dark);
     builder.add_faceted_box(Vec3::new(-0.10, 0.0, -0.55), Vec3::new(0.10, 0.08, 0.55), wood_dark);
 
-    // Thick vertical wooden mounting post (Y: 0.0 to 1.85)
-    builder.add_tapered_prism(Vec3::new(0.0, 0.08, 0.0), Vec3::new(0.0, 1.85, 0.0), 0.11, 0.08, 6, wood_light, false, true);
+    // Thick vertical wooden mounting post (Y: 0.0 to 1.85, watertight caps)
+    builder.add_tapered_prism(Vec3::new(0.0, 0.08, 0.0), Vec3::new(0.0, 1.85, 0.0), 0.11, 0.08, 6, wood_light, true, true);
 
     // Burlap straw-stuffed torso (Y: 0.55 to 1.42)
     builder.add_tapered_box(
@@ -528,27 +452,27 @@ pub fn create_lowpoly_peasant_mesh() -> Mesh {
     builder.add_faceted_box(Vec3::new(-0.18, 0.0, -0.10), Vec3::new(-0.05, 0.14, 0.14), boots);
     builder.add_faceted_box(Vec3::new(0.05, 0.0, -0.10), Vec3::new(0.18, 0.14, 0.14), boots);
 
-    // Trousers (4-sided tapered prisms)
-    builder.add_tapered_prism(Vec3::new(-0.11, 0.14, 0.0), Vec3::new(-0.10, 0.52, 0.0), 0.068, 0.082, 4, pants, false, true);
-    builder.add_tapered_prism(Vec3::new(0.11, 0.14, 0.0), Vec3::new(0.10, 0.52, 0.0), 0.068, 0.082, 4, pants, false, true);
+    // Trousers (4-sided tapered prisms, fully capped)
+    builder.add_tapered_prism(Vec3::new(-0.11, 0.14, 0.0), Vec3::new(-0.10, 0.52, 0.0), 0.068, 0.082, 4, pants, true, true);
+    builder.add_tapered_prism(Vec3::new(0.11, 0.14, 0.0), Vec3::new(0.10, 0.52, 0.0), 0.068, 0.082, 4, pants, true, true);
 
-    // Blue peasant tunic / shirt torso
+    // Blue peasant tunic / shirt torso (watertight frustum)
     builder.add_tapered_box(
         Vec2::new(-0.19, -0.12), Vec2::new(0.19, 0.12), 0.52,
         Vec2::new(-0.22, -0.14), Vec2::new(0.22, 0.14), 0.98,
         shirt,
     );
 
-    // Shoulders & Sleeves
-    builder.add_tapered_prism(Vec3::new(-0.23, 0.90, 0.0), Vec3::new(-0.28, 0.58, 0.0), 0.075, 0.058, 4, shirt, true, false);
-    builder.add_tapered_prism(Vec3::new(0.23, 0.90, 0.0), Vec3::new(0.28, 0.58, 0.0), 0.075, 0.058, 4, shirt, true, false);
+    // Shoulders & Sleeves (fully capped)
+    builder.add_tapered_prism(Vec3::new(-0.23, 0.90, 0.0), Vec3::new(-0.28, 0.58, 0.0), 0.075, 0.058, 4, shirt, true, true);
+    builder.add_tapered_prism(Vec3::new(0.23, 0.90, 0.0), Vec3::new(0.28, 0.58, 0.0), 0.075, 0.058, 4, shirt, true, true);
 
     // Hands
     builder.add_faceted_box(Vec3::new(-0.31, 0.44, -0.04), Vec3::new(-0.25, 0.58, 0.06), skin);
     builder.add_faceted_box(Vec3::new(0.25, 0.44, -0.04), Vec3::new(0.31, 0.58, 0.06), skin);
 
-    // Stylized head & neck
-    builder.add_tapered_prism(Vec3::new(0.0, 0.96, 0.0), Vec3::new(0.0, 1.05, 0.0), 0.065, 0.060, 4, skin, false, false);
+    // Stylized head & neck (watertight neck prism)
+    builder.add_tapered_prism(Vec3::new(0.0, 0.96, 0.0), Vec3::new(0.0, 1.05, 0.0), 0.065, 0.060, 4, skin, true, true);
     builder.add_tapered_box(
         Vec2::new(-0.11, -0.10), Vec2::new(0.11, 0.12), 1.04,
         Vec2::new(-0.12, -0.11), Vec2::new(0.12, 0.11), 1.28,
@@ -580,7 +504,7 @@ pub fn create_lowpoly_pet_mesh() -> Mesh {
     let nose = [0.10, 0.10, 0.10, 1.0];
     let ears = [0.68, 0.38, 0.12, 1.0];
 
-    // 4 legs
+    // 4 legs (watertight capped prisms)
     let leg_pts = [
         (-0.10, -0.16),
         (0.10, -0.16),
@@ -596,17 +520,17 @@ pub fn create_lowpoly_pet_mesh() -> Mesh {
         builder.add_tapered_prism(
             Vec3::new(lx, 0.04, lz),
             Vec3::new(lx, 0.22, lz),
-            0.032, 0.048, 4, coat, false, true,
+            0.032, 0.048, 4, coat, true, true,
         );
     }
 
-    // Torso with cream underside
+    // Torso with cream underside (double-sided quad for belly)
     builder.add_tapered_box(
         Vec2::new(-0.14, -0.24), Vec2::new(0.14, 0.20), 0.18,
         Vec2::new(-0.13, -0.22), Vec2::new(0.13, 0.18), 0.38,
         coat,
     );
-    builder.add_flat_quad(
+    builder.add_double_flat_quad(
         Vec3::new(-0.11, 0.18, -0.20),
         Vec3::new(0.11, 0.18, -0.20),
         Vec3::new(0.11, 0.18, 0.18),
@@ -631,17 +555,19 @@ pub fn create_lowpoly_pet_mesh() -> Mesh {
         nose,
     );
 
-    // Perky triangular ears
-    builder.add_flat_triangle(
+    // Perky 3D faceted ears (watertight wedges)
+    builder.add_faceted_wedge(
         Vec3::new(-0.07, 0.46, 0.16),
-        Vec3::new(-0.11, 0.58, 0.18),
         Vec3::new(-0.03, 0.48, 0.22),
+        Vec3::new(-0.11, 0.58, 0.18),
+        Vec3::new(-0.02, 0.01, 0.01),
         ears,
     );
-    builder.add_flat_triangle(
+    builder.add_faceted_wedge(
         Vec3::new(0.07, 0.46, 0.16),
         Vec3::new(0.03, 0.48, 0.22),
         Vec3::new(0.11, 0.58, 0.18),
+        Vec3::new(0.02, 0.01, 0.01),
         ears,
     );
 
