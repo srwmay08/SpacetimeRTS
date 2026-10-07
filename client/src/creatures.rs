@@ -585,6 +585,78 @@ pub fn create_lowpoly_pet_mesh() -> Mesh {
 pub use create_lowpoly_pet_mesh as create_voxel_pet_mesh;
 
 // ----------------------------------------------------------------------------
+// 7. PROCEDURAL LOW-POLY ADVENTURER CORPSE & LOOT SACK
+// ----------------------------------------------------------------------------
+
+pub fn create_lowpoly_corpse_mesh() -> Mesh {
+    let mut builder = LowPolyMeshBuilder::new();
+
+    let leather = [0.46, 0.32, 0.20, 1.0];
+    let dark_leather = [0.28, 0.19, 0.12, 1.0];
+    let strap = [0.20, 0.13, 0.08, 1.0];
+    let rope = [0.72, 0.65, 0.48, 1.0];
+    let brass = [0.85, 0.72, 0.32, 1.0];
+    let cloth = [0.38, 0.42, 0.45, 1.0];
+    let bone = [0.90, 0.88, 0.82, 1.0];
+
+    // 1. Base cushion resting directly on terrain surface
+    builder.add_tapered_box(
+        Vec2::new(-0.25, -0.35), Vec2::new(0.25, 0.35), 0.0,
+        Vec2::new(-0.28, -0.38), Vec2::new(0.28, 0.38), 0.16,
+        dark_leather,
+    );
+
+    // 2. Main bulging backpack / adventurer's loot bundle
+    builder.add_tapered_box(
+        Vec2::new(-0.28, -0.38), Vec2::new(0.28, 0.38), 0.16,
+        Vec2::new(-0.16, -0.22), Vec2::new(0.16, 0.22), 0.36,
+        leather,
+    );
+
+    // 3. Tied sack neck with rope cinch
+    builder.add_tapered_prism(
+        Vec3::new(0.0, 0.36, 0.0),
+        Vec3::new(0.0, 0.46, 0.0),
+        0.12, 0.06, 6, rope, true, true,
+    );
+
+    // 4. Heavy brass buckle clasp
+    builder.add_faceted_box(
+        Vec3::new(-0.06, 0.24, 0.26),
+        Vec3::new(0.06, 0.32, 0.30),
+        brass,
+    );
+
+    // 5. Cross-binding harness straps
+    builder.add_faceted_box(
+        Vec3::new(-0.29, 0.18, -0.10),
+        Vec3::new(0.29, 0.22, -0.06),
+        strap,
+    );
+    builder.add_faceted_box(
+        Vec3::new(-0.29, 0.18, 0.08),
+        Vec3::new(0.29, 0.22, 0.12),
+        strap,
+    );
+
+    // 6. Rolled traveler bedroll alongside pack
+    builder.add_tapered_prism(
+        Vec3::new(-0.34, 0.10, -0.30),
+        Vec3::new(-0.34, 0.10, 0.30),
+        0.08, 0.08, 6, cloth, true, true,
+    );
+
+    // 7. Carved bone / signet crest
+    builder.add_faceted_box(
+        Vec3::new(-0.035, 0.20, 0.27),
+        Vec3::new(0.035, 0.24, 0.30),
+        bone,
+    );
+
+    builder.build()
+}
+
+// ----------------------------------------------------------------------------
 // CREATURE ENTITY CREATION & MESH CACHING
 // ----------------------------------------------------------------------------
 
@@ -593,7 +665,7 @@ use bevy::pbr::NotShadowCaster;
 use crate::components::{NetworkEntity, LogicalPosition, LogicalRotation, Selectable, PeasantUnit, SelectionRing, RTSProxy};
 use crate::core::{GameState, GameLayer};
 
-/// Cached GPU mesh handles for fauna and humanoid NPCs.
+/// Cached GPU mesh handles for fauna, humanoid NPCs, and world objects.
 pub struct CachedCreatureMeshes {
     pub deer: Handle<Mesh>,
     pub boar: Handle<Mesh>,
@@ -601,6 +673,7 @@ pub struct CachedCreatureMeshes {
     pub peasant: Handle<Mesh>,
     pub pet: Handle<Mesh>,
     pub dummy: Handle<Mesh>,
+    pub corpse: Handle<Mesh>,
 }
 
 impl CachedCreatureMeshes {
@@ -612,8 +685,66 @@ impl CachedCreatureMeshes {
             peasant: meshes.add(create_lowpoly_peasant_mesh()),
             pet: meshes.add(create_lowpoly_pet_mesh()),
             dummy: meshes.add(create_lowpoly_dummy_mesh()),
+            corpse: meshes.add(create_lowpoly_corpse_mesh()),
         }
     }
+}
+
+/// Spawns a low-poly harvestable corpse / loot cache with a low-profile sensor collider and golden selection ring.
+pub fn spawn_corpse_visual_entity(
+    commands: &mut Commands,
+    cache: &CachedCreatureMeshes,
+    materials: &mut Assets<StandardMaterial>,
+    meshes: &mut Assets<Mesh>,
+    id: u64,
+    db_t: &crate::module_bindings::Transform,
+) -> Entity {
+    let mut entity_cmds = commands.spawn((
+        Name::new(format!("Corpse_{}", id)),
+        StateScoped(GameState::InGame),
+        NetworkEntity(id),
+        SpatialBundle::from_transform(Transform::from_xyz(db_t.x, db_t.y, db_t.z)),
+        LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
+        LogicalRotation(Quat::IDENTITY),
+        Selectable, 
+        RigidBody::Kinematic, 
+        Collider::cylinder(0.2, 0.45),
+        Sensor,
+        CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Environment, GameLayer::Glass]),
+    ));
+
+    entity_cmds.with_children(|parent| {
+        parent.spawn((
+            PbrBundle {
+                mesh: cache.corpse.clone(),
+                material: materials.add(StandardMaterial {
+                    base_color: Color::WHITE,
+                    perceptual_roughness: 0.85,
+                    ..default()
+                }),
+                transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                ..default()
+            },
+            RenderLayers::from_layers(&[0, 1, 2]), RTSProxy,
+        ));
+        parent.spawn((
+            PbrBundle {
+                mesh: meshes.add(bevy::math::primitives::Torus::new(0.5, 0.04)),
+                material: materials.add(StandardMaterial { 
+                    base_color: Color::srgb(0.9, 0.75, 0.2), 
+                    unlit: true, 
+                    ..default() 
+                }),
+                transform: Transform::from_xyz(0.0, 0.05, 0.0), 
+                visibility: Visibility::Hidden, 
+                ..default()
+            },
+            RenderLayers::layer(2), SelectionRing,
+            NotShadowCaster,
+        ));
+    });
+
+    entity_cmds.id()
 }
 
 /// Spawns a fully assembled 3D creature / NPC entity with its visual PBR mesh, physics collider, and selection ring.
@@ -993,6 +1124,7 @@ mod tests {
         assert!(meshes.get(&cache.peasant).is_some());
         assert!(meshes.get(&cache.pet).is_some());
         assert!(meshes.get(&cache.dummy).is_some());
+        assert!(meshes.get(&cache.corpse).is_some());
 
         // Verify low-poly vertex budgets (each creature between 40 and 1200 vertices / <400 triangles, ~95% fewer than micro-voxels)
         let deer_mesh = meshes.get(&cache.deer).unwrap();
@@ -1012,5 +1144,8 @@ mod tests {
 
         let dummy_mesh = meshes.get(&cache.dummy).unwrap();
         assert!(dummy_mesh.count_vertices() > 40 && dummy_mesh.count_vertices() < 1200, "Dummy verts: {}", dummy_mesh.count_vertices());
+
+        let corpse_mesh = meshes.get(&cache.corpse).unwrap();
+        assert!(corpse_mesh.count_vertices() > 40 && corpse_mesh.count_vertices() < 800, "Corpse verts: {}", corpse_mesh.count_vertices());
     }
 }

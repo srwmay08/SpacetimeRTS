@@ -198,12 +198,29 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
 
             if let Some(mut transform) = ctx.db.transform().entity_id().find(target_id) {
                 if let Some(mut inv) = ctx.db.inventory().entity_id().find(target_id) {
+                    const SPREAD_OFFSETS: [(f32, f32); 8] = [
+                        (0.0, 0.0),
+                        (0.5, 0.0),
+                        (-0.5, 0.0),
+                        (0.0, 0.5),
+                        (0.0, -0.5),
+                        (0.35, 0.35),
+                        (-0.35, 0.35),
+                        (0.35, -0.35),
+                    ];
                     let mut salt = 1000u64;
+                    let mut dropped_slot_idx = 0usize;
                     for slot in &inv.slots {
                         if slot.count > 0 {
                             let corpse_id = ((ctx.timestamp.to_micros_since_unix_epoch() as u64) << 16)
                                 ^ (target_id.wrapping_add(salt));
                             salt += 1;
+
+                            let (ox, oz) = SPREAD_OFFSETS[dropped_slot_idx % SPREAD_OFFSETS.len()];
+                            dropped_slot_idx += 1;
+                            let drop_x = transform.x + ox;
+                            let drop_z = transform.z + oz;
+                            let drop_y = crate::get_terrain_height(drop_x, drop_z) + 0.15;
 
                             ctx.db.harvestable_corpse().insert(crate::ai::HarvestableCorpse {
                                 entity_id: corpse_id,
@@ -213,12 +230,18 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
 
                             ctx.db.transform().insert(crate::movement::Transform {
                                 entity_id: corpse_id,
-                                x: transform.x,
-                                y: transform.y,
-                                z: transform.z,
-                                chunk_x: transform.chunk_x,
-                                chunk_z: transform.chunk_z,
+                                x: drop_x,
+                                y: drop_y,
+                                z: drop_z,
+                                chunk_x: (drop_x / 50.0).floor() as i32,
+                                chunk_z: (drop_z / 50.0).floor() as i32,
                                 last_processed_tick: 0,
+                            });
+
+                            ctx.db.health().insert(crate::combat::Health {
+                                entity_id: corpse_id,
+                                current: 1.0,
+                                max: 1.0,
                             });
                         }
                     }
@@ -229,6 +252,7 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
                 transform.x = 0.0;
                 transform.z = 0.0;
                 transform.y = crate::get_terrain_height(0.0, 0.0) + 1.05;
+                transform.last_processed_tick = transform.last_processed_tick.wrapping_add(1);
                 ctx.db.transform().entity_id().update(transform);
             }
 

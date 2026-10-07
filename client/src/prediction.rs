@@ -9,10 +9,12 @@
 // displacement, applying smooth correction without false snapping or physics desyncs.
 
 use bevy::prelude::*;
-use avian3d::prelude::Position as PhysicsPosition;
+use avian3d::prelude::{Position as PhysicsPosition, LinearVelocity};
 use std::collections::VecDeque;
 use crate::network::SpacetimeConnection;
 use crate::core::NetworkTickTimer;
+use crate::components::RtsCameraRig;
+use crate::camera::{CharacterCameraSettings, CameraTransitionState};
 
 use crate::module_bindings::process_movement_reducer::process_movement;
 
@@ -90,16 +92,66 @@ fn reconcile_server_state(
     mut query: Query<(
         &mut Transform,
         Option<&mut PhysicsPosition>,
+        Option<&mut LinearVelocity>,
         &mut InputBuffer,
         &AuthoritativeState,
         &mut LocalMovementTracker,
     ), Changed<AuthoritativeState>>,
+    mut cam_settings: Option<ResMut<CharacterCameraSettings>>,
+    mut transition_state: Option<ResMut<CameraTransitionState>>,
+    mut rts_rig_query: Query<&mut Transform, (With<RtsCameraRig>, Without<AuthoritativeState>)>,
 ) {
     // Architectural Note: 0.25m threshold (0.0625m^2) absorbs natural slope elevation
     // clamping while catching true authoritative desyncs.
     const TOLERANCE_SQ: f32 = 0.25 * 0.25;
+    // Discrepancy threshold: A positional jump > 3.0m (9.0m^2) indicates a death respawn / hard teleport.
+    const TELEPORT_THRESHOLD_SQ: f32 = 3.0 * 3.0;
 
-    for (mut transform, maybe_physics_pos, mut buffer, auth_state, mut tracker) in query.iter_mut() {
+    for (mut transform, maybe_physics_pos, maybe_lin_vel, mut buffer, auth_state, mut tracker) in query.iter_mut() {
+        let direct_dist_sq = transform.translation.distance_squared(auth_state.position);
+
+        if direct_dist_sq > TELEPORT_THRESHOLD_SQ {
+            // Hard teleport / death respawn detected: Flush all pre-death movement deltas,
+            // zero residual physics momentum, and align player body & camera horizontally.
+            buffer.queue.clear();
+            transform.translation = auth_state.position;
+            transform.rotation = Quat::IDENTITY;
+
+            if let Some(mut phys_pos) = maybe_physics_pos {
+                phys_pos.0 = auth_state.position;
+            }
+            if let Some(mut lin_vel) = maybe_lin_vel {
+                lin_vel.0 = Vec3::ZERO;
+            }
+            tracker.last_position = auth_state.position;
+
+            // Level camera pitch, yaw, and reset free-look offsets
+            if let Some(ref mut settings) = cam_settings {
+                settings.current_pitch = 0.0;
+                settings.free_look_yaw = 0.0;
+                settings.free_look_pitch = 0.0;
+                settings.current_distance = settings.target_distance;
+            }
+
+            // Halt any active camera transition from old death coordinates
+            if let Some(ref mut trans) = transition_state {
+                trans.is_transitioning = false;
+            }
+
+            // Snap RTS camera rig to the respawn coordinates so tactical view is centered
+            for mut rig_t in rts_rig_query.iter_mut() {
+                rig_t.translation.x = auth_state.position.x;
+                rig_t.translation.z = auth_state.position.z;
+                rig_t.translation.y = auth_state.position.y;
+            }
+
+            tracing::info!(
+                "Respawn / Hard Teleport Reconciliation: Snapped to {:?}, leveled camera pitch, reset yaw, and cleared prediction buffer.",
+                auth_state.position
+            );
+            continue;
+        }
+
         // 1. Discard acknowledged inputs
         buffer.queue.retain(|input| input.tick_id > auth_state.last_processed_tick);
 
@@ -129,5 +181,73 @@ fn reconcile_server_state(
                 divergence_sq.sqrt()
             );
         }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// UNIT TESTS: PREDICTION & RECONCILIATION
+// ----------------------------------------------------------------------------
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    #[test]
+    fn test_respawn_hard_teleport_reconciles_view_angle_and_rig() {
+        let mut app = App::new();
+        app.add_systems(Update, reconcile_server_state);
+
+        app.insert_resource(CharacterCameraSettings {
+            current_pitch: 0.75,
+            free_look_yaw: 0.42,
+            free_look_pitch: -0.31,
+            target_distance: 3.5,
+            current_distance: 3.5,
+            ..default()
+        });
+
+        // Spawn RTS camera rig at old death location
+        let rig_id = app.world_mut().spawn((
+            RtsCameraRig,
+            Transform::from_xyz(85.0, 12.0, 95.0),
+        )).id();
+
+        // Spawn player with pending inputs at old death location
+        let mut buffer = InputBuffer::default();
+        buffer.queue.push_back(BufferedInput {
+            tick_id: 10,
+            delta: Vec3::new(1.0, 0.0, 1.0),
+        });
+
+        let player_id = app.world_mut().spawn((
+            Transform::from_xyz(85.0, 12.0, 95.0).with_rotation(Quat::from_rotation_y(1.57)),
+            buffer,
+            AuthoritativeState {
+                position: Vec3::new(0.0, 2.0, 0.0), // Respawn at origin
+                last_processed_tick: 11,
+            },
+            LocalMovementTracker {
+                last_position: Vec3::new(85.0, 12.0, 95.0),
+            },
+        )).id();
+
+        // Run reconciliation system
+        app.update();
+
+        // Verify player transform, rotation, buffer, and camera state
+        let player_transform = app.world().get::<Transform>(player_id).unwrap();
+        assert_eq!(player_transform.translation, Vec3::new(0.0, 2.0, 0.0));
+        assert_eq!(player_transform.rotation, Quat::IDENTITY);
+
+        let input_buffer = app.world().get::<InputBuffer>(player_id).unwrap();
+        assert!(input_buffer.queue.is_empty(), "Prediction queue must be cleared on hard respawn");
+
+        let cam_settings = app.world().resource::<CharacterCameraSettings>();
+        assert_eq!(cam_settings.current_pitch, 0.0);
+        assert_eq!(cam_settings.free_look_yaw, 0.0);
+        assert_eq!(cam_settings.free_look_pitch, 0.0);
+
+        let rig_transform = app.world().get::<Transform>(rig_id).unwrap();
+        assert_eq!(rig_transform.translation, Vec3::new(0.0, 2.0, 0.0), "RTS camera rig must snap to respawn coordinates");
     }
 }

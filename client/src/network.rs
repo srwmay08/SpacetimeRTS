@@ -372,6 +372,18 @@ pub fn sync_transforms(
             log_pos.0 = Vec3::new(db_t.x, db_t.y, db_t.z);
             spawned_ids.insert(net_entity.0);
         } else {
+            // Entity was removed from server DB (killed / despawned / harvested).
+            // Spawn death voxel gibs at its last known position for instant combat impact feedback.
+            crate::terrain::spawn_voxel_gibs(
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                log_pos.0 + Vec3::Y * 0.8,
+                16,
+                Color::srgb(0.65, 0.15, 0.15),
+                Color::srgb(0.40, 0.35, 0.30),
+                0.22,
+            );
             commands.entity(entity).despawn_recursive();
             continue;
         }
@@ -385,8 +397,9 @@ pub fn sync_transforms(
         let id = db_t.entity_id;
         if Some(id) == my_entity_id { 
             if let Ok(mut auth_state) = player_query.get_single_mut() {
-                if auth_state.last_processed_tick != db_t.last_processed_tick {
-                    auth_state.position = Vec3::new(db_t.x, db_t.y, db_t.z);
+                let server_pos = Vec3::new(db_t.x, db_t.y, db_t.z);
+                if auth_state.last_processed_tick != db_t.last_processed_tick || auth_state.position.distance_squared(server_pos) > 9.0 {
+                    auth_state.position = server_pos;
                     auth_state.last_processed_tick = db_t.last_processed_tick;
                 }
             }
@@ -395,6 +408,20 @@ pub fn sync_transforms(
 
         let dist_sq = (db_t.x - player_pos.x).powi(2) + (db_t.z - player_pos.z).powi(2);
         if dist_sq > creature_load_radius_sq || spawned_ids.contains(&id) {
+            continue;
+        }
+
+        let is_corpse = conn.db.db.harvestable_corpse().entity_id().find(&id).is_some();
+        if is_corpse {
+            crate::creatures::spawn_corpse_visual_entity(
+                &mut commands,
+                cache,
+                &mut materials,
+                &mut meshes,
+                id,
+                &db_t,
+            );
+            spawned_ids.insert(id);
             continue;
         }
         

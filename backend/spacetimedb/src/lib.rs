@@ -1842,6 +1842,15 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
                     }
                     ctx.db.harvestable_corpse().entity_id().delete(target.entity_id);
                 }
+            } else {
+                add_item(&mut inventory, &corpse.loot_item, corpse.amount);
+                ctx.db.inventory().entity_id().update(inventory);
+                ctx.db.transform().entity_id().delete(target.entity_id);
+                ctx.db.faction_component().entity_id().delete(target.entity_id);
+                if ctx.db.npc_brain().entity_id().find(target.entity_id).is_some() {
+                    ctx.db.npc_brain().entity_id().delete(target.entity_id);
+                }
+                ctx.db.harvestable_corpse().entity_id().delete(target.entity_id);
             }
             return Ok(());
         }

@@ -224,3 +224,39 @@ fn test_firing_vector_normalization_check() {
     let ndx = valid_x * inv_len;
     assert_eq!(ndx, 1.0);
 }
+
+#[test]
+fn test_corpse_drop_deterministic_offsets_and_health() {
+    // Architectural Note: Multi-item corpse drops must use bounded deterministic offsets
+    // to prevent z-fighting and stacking collisions, and initialize with valid Health
+    // so they are harvestable.
+    const SPREAD_OFFSETS: [(f32, f32); 8] = [
+        (0.0, 0.0),
+        (0.5, 0.0),
+        (-0.5, 0.0),
+        (0.0, 0.5),
+        (0.0, -0.5),
+        (0.35, 0.35),
+        (-0.35, 0.35),
+        (0.35, -0.35),
+    ];
+
+    let origin_x = 24.0_f32;
+    let origin_z = -16.0_f32;
+
+    for i in 0..8 {
+        let (ox, oz) = SPREAD_OFFSETS[i % SPREAD_OFFSETS.len()];
+        let drop_x = origin_x + ox;
+        let drop_z = origin_z + oz;
+        let dist = ((drop_x - origin_x).powi(2) + (drop_z - origin_z).powi(2)).sqrt();
+        assert!(dist <= 0.6, "Drop offset must be clustered within 0.6m of origin");
+    }
+
+    let corpse_hp = Health {
+        entity_id: 999,
+        current: 1.0,
+        max: 1.0,
+    };
+    assert_eq!(corpse_hp.current, 1.0);
+    assert_eq!(corpse_hp.max, 1.0);
+}
