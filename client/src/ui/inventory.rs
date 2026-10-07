@@ -274,11 +274,18 @@ pub fn update_drag_ghost_ui(
     let Ok(mut text) = text_query.get_single_mut() else { return; };
 
     if drag_drop.is_dragging {
-        style.display = Display::Flex;
-        style.left = Val::Px(drag_drop.current_pos.x - 27.5);
-        style.top = Val::Px(drag_drop.current_pos.y - 27.5);
-        text.sections[0].value = format!("{}\n(x{})", drag_drop.item_type, drag_drop.count);
-    } else {
+        if style.display != Display::Flex {
+            style.display = Display::Flex;
+        }
+        let l = Val::Px(drag_drop.current_pos.x - 27.5);
+        let t = Val::Px(drag_drop.current_pos.y - 27.5);
+        if style.left != l { style.left = l; }
+        if style.top != t { style.top = t; }
+        let new_text = format!("{}\n(x{})", drag_drop.item_type, drag_drop.count);
+        if text.sections[0].value != new_text {
+            text.sections[0].value = new_text;
+        }
+    } else if style.display != Display::None {
         style.display = Display::None;
     }
 }
@@ -319,6 +326,7 @@ pub fn update_inventory_ui(
     player_query: Query<&Transform, With<PlayerBody>>,
     hand_side: Res<EquippedHandSide>,
     equipped_bags: Res<ClientEquippedBags>,
+    inventory_root_q: Query<&Style, With<InventoryUiRoot>>,
     mut header_q: Query<&mut Text, (With<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
     mut name_q: Query<(&mut Text, &InventorySlotName), Without<InventorySlotCount>>,
     mut count_q: Query<(&mut Text, &InventorySlotCount), Without<InventorySlotName>>,
@@ -330,23 +338,36 @@ pub fn update_inventory_ui(
     mut capacity_header_q: Query<&mut Text, (With<InventoryCapacityHeader>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
     mut workbench_recipe_styles: Query<&mut Style, With<RequiresWorkbenchRecipe>>,
 ) {
+    // 1. Performance Guard: Zero overhead when the Inventory modal is closed
+    if let Ok(root_style) = inventory_root_q.get_single() {
+        if root_style.display == Display::None {
+            return;
+        }
+    }
+
     let Some(identity) = &conn.identity else { return; };
     if let Some(player) = conn.db.db.player().identity().find(identity) {
         if let Some(inventory) = conn.db.db.inventory().entity_id().find(&player.entity_id) {
             
             for (mut text, name) in name_q.iter_mut() {
-                if let Some(slot) = inventory.slots.get(name.0) {
-                    text.sections[0].value = if slot.count > 0 { slot.item_type.clone() } else { "".to_string() };
+                let new_val = if let Some(slot) = inventory.slots.get(name.0) {
+                    if slot.count > 0 { slot.item_type.as_str() } else { "" }
                 } else {
-                    text.sections[0].value = "".to_string();
+                    ""
+                };
+                if text.sections[0].value != new_val {
+                    text.sections[0].value = new_val.to_string();
                 }
             }
             
             for (mut text, count) in count_q.iter_mut() {
-                if let Some(slot) = inventory.slots.get(count.0) {
-                    text.sections[0].value = if slot.count > 1 { slot.count.to_string() } else { "".to_string() };
+                let new_val = if let Some(slot) = inventory.slots.get(count.0) {
+                    if slot.count > 1 { slot.count.to_string() } else { String::new() }
                 } else {
-                    text.sections[0].value = "".to_string();
+                    String::new()
+                };
+                if text.sections[0].value != new_val {
+                    text.sections[0].value = new_val;
                 }
             }
 
@@ -356,44 +377,76 @@ pub fn update_inventory_ui(
             let off_weapon = loadout.as_ref().map(|l| l.off_hand.as_str()).unwrap_or("None");
 
             for mut text in main_hand_text_q.iter_mut() {
-                text.sections[0].value = if main_weapon == "None" || main_weapon.is_empty() {
-                    "MainHand: [Unarmed]".to_string()
+                let new_val = if main_weapon == "None" || main_weapon.is_empty() {
+                    "MainHand: [Unarmed]"
                 } else {
-                    format!("MainHand: {}", main_weapon)
+                    main_weapon
                 };
+                let formatted = if new_val == "MainHand: [Unarmed]" {
+                    new_val.to_string()
+                } else {
+                    format!("MainHand: {}", new_val)
+                };
+                if text.sections[0].value != formatted {
+                    text.sections[0].value = formatted;
+                }
             }
 
             for mut text in off_hand_text_q.iter_mut() {
-                text.sections[0].value = if off_weapon == "None" || off_weapon.is_empty() {
-                    "OffHand: [Empty]".to_string()
+                let new_val = if off_weapon == "None" || off_weapon.is_empty() {
+                    "OffHand: [Empty]"
                 } else {
-                    format!("OffHand: {}", off_weapon)
+                    off_weapon
                 };
+                let formatted = if new_val == "OffHand: [Empty]" {
+                    new_val.to_string()
+                } else {
+                    format!("OffHand: {}", new_val)
+                };
+                if text.sections[0].value != formatted {
+                    text.sections[0].value = formatted;
+                }
             }
 
             for mut text in primary_hand_text_q.iter_mut() {
-                text.sections[0].value = match hand_side.0 {
-                    HandSide::Right => "[⇄] PRIMARY HAND: RIGHT [H]".to_string(),
-                    HandSide::Left => "[⇄] PRIMARY HAND: LEFT [H]".to_string(),
+                let new_val = match hand_side.0 {
+                    HandSide::Right => "[⇄] PRIMARY HAND: RIGHT [H]",
+                    HandSide::Left => "[⇄] PRIMARY HAND: LEFT [H]",
                 };
+                if text.sections[0].value != new_val {
+                    text.sections[0].value = new_val.to_string();
+                }
             }
 
             // Sync Bags & Capacity
             for (mut text, b_idx) in bag_text_q.iter_mut() {
-                if let Some(ref bag) = equipped_bags.bags[b_idx.0] {
-                    text.sections[0].value = format!("Bag {}: {}", b_idx.0 + 1, bag.name);
+                let new_val = if let Some(ref bag) = equipped_bags.bags[b_idx.0] {
+                    format!("Bag {}: {}", b_idx.0 + 1, bag.name)
                 } else {
-                    text.sections[0].value = format!("Bag {}: [Empty Bag Slot]", b_idx.0 + 1);
+                    format!("Bag {}: [Empty Bag Slot]", b_idx.0 + 1)
+                };
+                if text.sections[0].value != new_val {
+                    text.sections[0].value = new_val;
                 }
             }
 
             for (mut text, b_idx) in bag_tooltip_q.iter_mut() {
-                if let Some(ref bag) = equipped_bags.bags[b_idx.0] {
-                    text.sections[0].value = format!("+{} Slots | Cap: {:?} | {}% WR", bag.capacity, bag.size_cap, bag.weight_reduction_pct);
-                    text.sections[0].style.color = Color::srgb(0.4, 0.9, 0.5);
+                let (new_val, new_col) = if let Some(ref bag) = equipped_bags.bags[b_idx.0] {
+                    (
+                        format!("+{} Slots | Cap: {:?} | {}% WR", bag.capacity, bag.size_cap, bag.weight_reduction_pct),
+                        Color::srgb(0.4, 0.9, 0.5)
+                    )
                 } else {
-                    text.sections[0].value = "Right-click bag in inventory to equip".to_string();
-                    text.sections[0].style.color = Color::srgb(0.65, 0.70, 0.65);
+                    (
+                        "Right-click bag in inventory to equip".to_string(),
+                        Color::srgb(0.65, 0.70, 0.65)
+                    )
+                };
+                if text.sections[0].value != new_val {
+                    text.sections[0].value = new_val;
+                }
+                if text.sections[0].style.color != new_col {
+                    text.sections[0].style.color = new_col;
                 }
             }
 
@@ -403,7 +456,10 @@ pub fn update_inventory_ui(
             let free_slots = total_cap.saturating_sub(used_slots);
 
             for mut text in capacity_header_q.iter_mut() {
-                text.sections[0].value = format!("BAG INVENTORY (Free: {} / {} Slots)", free_slots, total_cap);
+                let new_val = format!("BAG INVENTORY (Free: {} / {} Slots)", free_slots, total_cap);
+                if text.sections[0].value != new_val {
+                    text.sections[0].value = new_val;
+                }
             }
         }
     }
@@ -422,12 +478,16 @@ pub fn update_inventory_ui(
     };
 
     for mut header in header_q.iter_mut() {
-        if near_workbench {
-            header.sections[0].value = "CRAFTING RECIPES [WORKBENCH ACTIVE]".to_string();
-            header.sections[0].style.color = Color::srgb(1.0, 0.85, 0.2);
+        let (new_text, new_col) = if near_workbench {
+            ("CRAFTING RECIPES [WORKBENCH ACTIVE]", Color::srgb(1.0, 0.85, 0.2))
         } else {
-            header.sections[0].value = "FIELD CRAFTING [HAND CRAFTING]".to_string();
-            header.sections[0].style.color = Color::srgb(0.7, 0.7, 0.7);
+            ("FIELD CRAFTING [HAND CRAFTING]", Color::srgb(0.7, 0.7, 0.7))
+        };
+        if header.sections[0].value != new_text {
+            header.sections[0].value = new_text.to_string();
+        }
+        if header.sections[0].style.color != new_col {
+            header.sections[0].style.color = new_col;
         }
     }
 

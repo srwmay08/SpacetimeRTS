@@ -1914,24 +1914,35 @@ pub fn update_hotbar_ui_system(
         }
     }
 
-    for (k_marker, mut text) in key_text_q.iter_mut() {
-        let slot = k_marker.0;
-        if slot < 16 {
-            let key_str = keycode_display_name(keybinds.keybinds[slot]);
-            text.sections[0].value = format!("[{}]", key_str);
+    if keybinds.is_changed() || key_text_q.iter().next().map_or(false, |(_, t)| t.sections[0].value.is_empty()) {
+        for (k_marker, mut text) in key_text_q.iter_mut() {
+            let slot = k_marker.0;
+            if slot < 16 {
+                let key_str = keycode_display_name(keybinds.keybinds[slot]);
+                let new_val = format!("[{}]", key_str);
+                if text.sections[0].value != new_val {
+                    text.sections[0].value = new_val;
+                }
+            }
         }
     }
 
-    for (n_marker, mut text) in name_text_q.iter_mut() {
-        let slot = n_marker.0;
-        if slot < 16 {
-            if let Some(spell_id) = hotbar.slots[slot] {
-                let def = spell_id.def();
-                text.sections[0].value = def.icon.to_string();
-                text.sections[0].style.color = def.color;
-            } else {
-                text.sections[0].value = "---".into();
-                text.sections[0].style.color = Color::srgb(0.3, 0.3, 0.3);
+    if hotbar.is_changed() || name_text_q.iter().next().map_or(false, |(_, t)| t.sections[0].value.is_empty()) {
+        for (n_marker, mut text) in name_text_q.iter_mut() {
+            let slot = n_marker.0;
+            if slot < 16 {
+                let (new_icon, new_color) = if let Some(spell_id) = hotbar.slots[slot] {
+                    let def = spell_id.def();
+                    (def.icon, def.color)
+                } else {
+                    ("---", Color::srgb(0.3, 0.3, 0.3))
+                };
+                if text.sections[0].value != new_icon {
+                    text.sections[0].value = new_icon.to_string();
+                }
+                if text.sections[0].style.color != new_color {
+                    text.sections[0].style.color = new_color;
+                }
             }
         }
     }
@@ -1940,10 +1951,13 @@ pub fn update_hotbar_ui_system(
         let slot = cd_marker.0;
         if slot < 16 {
             let cd = hotbar.cooldowns[slot];
-            if cd > 0.0 {
-                text.sections[0].value = format!("{:.1}s", cd);
+            let new_val = if cd > 0.0 {
+                format!("{:.1}s", cd)
             } else {
-                text.sections[0].value = "".into();
+                String::new()
+            };
+            if text.sections[0].value != new_val {
+                text.sections[0].value = new_val;
             }
         }
     }
@@ -2231,7 +2245,7 @@ pub fn update_spellbook_display_system(
     icon_box_entities: Query<(Entity, &SpellbookSlotIconBox)>,
     tab_button_entities: Query<(Entity, &SpellbookTabButton)>,
 ) {
-    if !spellbook_state.is_open {
+    if !spellbook_state.is_open || !spellbook_state.is_changed() {
         return;
     }
 
@@ -2242,42 +2256,51 @@ pub fn update_spellbook_display_system(
     // 1. Page Indicator Text
     if let Ok(entity) = page_indicator_entities.get_single() {
         if let Ok(mut text) = text_q.get_mut(entity) {
-            text.sections[0].value = format!("Page {} of {}", current_page + 1, total_pages);
+            let new_val = format!("Page {} of {}", current_page + 1, total_pages);
+            if text.sections[0].value != new_val {
+                text.sections[0].value = new_val;
+            }
         }
     }
 
     // 2. Rank Filter Checkbox Text
     if let Ok(entity) = rank_filter_entities.get_single() {
         if let Ok(mut text) = text_q.get_mut(entity) {
-            text.sections[0].value = if spellbook_state.rank_filter {
-                "[X] Rank Filter".to_string()
+            let new_val = if spellbook_state.rank_filter {
+                "[X] Rank Filter"
             } else {
-                "[ ] Rank Filter".to_string()
+                "[ ] Rank Filter"
             };
+            if text.sections[0].value != new_val {
+                text.sections[0].value = new_val.to_string();
+            }
         }
     }
 
     // 3. Auto UpRank Checkbox Text
     if let Ok(entity) = auto_uprank_entities.get_single() {
         if let Ok(mut text) = text_q.get_mut(entity) {
-            text.sections[0].value = if spellbook_state.auto_uprank {
-                "[X] Auto UpRank".to_string()
+            let new_val = if spellbook_state.auto_uprank {
+                "[X] Auto UpRank"
             } else {
-                "[ ] Auto UpRank".to_string()
+                "[ ] Auto UpRank"
             };
+            if text.sections[0].value != new_val {
+                text.sections[0].value = new_val.to_string();
+            }
         }
     }
 
     // 4. Tab Buttons Styling
     for (entity, tab_marker) in tab_button_entities.iter() {
         if let Ok((mut bg, mut border)) = color_q.get_mut(entity) {
-            if tab_marker.0 == spellbook_state.category_filter {
-                *bg = Color::srgb(0.48, 0.35, 0.22).into();
-                *border = Color::srgb(0.92, 0.78, 0.42).into();
+            let (new_bg, new_border): (BackgroundColor, BorderColor) = if tab_marker.0 == spellbook_state.category_filter {
+                (Color::srgb(0.48, 0.35, 0.22).into(), Color::srgb(0.92, 0.78, 0.42).into())
             } else {
-                *bg = Color::srgb(0.24, 0.17, 0.12).into();
-                *border = Color::srgb(0.40, 0.30, 0.20).into();
-            }
+                (Color::srgb(0.24, 0.17, 0.12).into(), Color::srgb(0.40, 0.30, 0.20).into())
+            };
+            if *bg != new_bg { *bg = new_bg; }
+            if *border != new_border { *border = new_border; }
         }
     }
 
@@ -2286,20 +2309,19 @@ pub fn update_spellbook_display_system(
         if let Ok((mut bg, mut border)) = color_q.get_mut(entity) {
             let slot_idx = slot_card.0;
             let spell_idx = current_page * 12 + slot_idx;
-            if spell_idx < filtered.len() {
+            let (new_bg, new_border): (BackgroundColor, BorderColor) = if spell_idx < filtered.len() {
                 let def = filtered[spell_idx];
                 let is_selected = spellbook_state.selected_spell_for_slotting == Some(def.spell_id);
                 if is_selected {
-                    *bg = Color::srgba(0.95, 0.88, 0.65, 0.85).into();
-                    *border = Color::srgb(0.85, 0.60, 0.15).into();
+                    (Color::srgba(0.95, 0.88, 0.65, 0.85).into(), Color::srgb(0.85, 0.60, 0.15).into())
                 } else {
-                    *bg = Color::srgba(0.84, 0.77, 0.64, 0.45).into();
-                    *border = Color::srgb(0.70, 0.62, 0.48).into();
+                    (Color::srgba(0.84, 0.77, 0.64, 0.45).into(), Color::srgb(0.70, 0.62, 0.48).into())
                 }
             } else {
-                *bg = Color::srgba(0.82, 0.75, 0.62, 0.15).into();
-                *border = Color::srgb(0.76, 0.70, 0.60).into();
-            }
+                (Color::srgba(0.82, 0.75, 0.62, 0.15).into(), Color::srgb(0.76, 0.70, 0.60).into())
+            };
+            if *bg != new_bg { *bg = new_bg; }
+            if *border != new_border { *border = new_border; }
         }
     }
 
@@ -2308,14 +2330,14 @@ pub fn update_spellbook_display_system(
         if let Ok((mut bg, mut border)) = color_q.get_mut(entity) {
             let slot_idx = icon_box.0;
             let spell_idx = current_page * 12 + slot_idx;
-            if spell_idx < filtered.len() {
+            let (new_bg, new_border): (BackgroundColor, BorderColor) = if spell_idx < filtered.len() {
                 let def = filtered[spell_idx];
-                *bg = Color::srgb(0.14, 0.11, 0.08).into();
-                *border = def.color.into();
+                (Color::srgb(0.14, 0.11, 0.08).into(), def.color.into())
             } else {
-                *bg = Color::srgb(0.25, 0.20, 0.15).into();
-                *border = Color::srgb(0.42, 0.35, 0.28).into();
-            }
+                (Color::srgb(0.25, 0.20, 0.15).into(), Color::srgb(0.42, 0.35, 0.28).into())
+            };
+            if *bg != new_bg { *bg = new_bg; }
+            if *border != new_border { *border = new_border; }
         }
     }
 
@@ -2324,12 +2346,17 @@ pub fn update_spellbook_display_system(
         if let Ok(mut text) = text_q.get_mut(entity) {
             let slot_idx = icon_marker.0;
             let spell_idx = current_page * 12 + slot_idx;
-            if spell_idx < filtered.len() {
+            let (new_icon, new_color) = if spell_idx < filtered.len() {
                 let def = filtered[spell_idx];
-                text.sections[0].value = def.icon.to_string();
-                text.sections[0].style.color = def.color;
+                (def.icon, def.color)
             } else {
-                text.sections[0].value = "".to_string();
+                ("", Color::NONE)
+            };
+            if text.sections[0].value != new_icon {
+                text.sections[0].value = new_icon.to_string();
+            }
+            if text.sections[0].style.color != new_color {
+                text.sections[0].style.color = new_color;
             }
         }
     }
@@ -2339,13 +2366,17 @@ pub fn update_spellbook_display_system(
         if let Ok(mut text) = text_q.get_mut(entity) {
             let slot_idx = name_marker.0;
             let spell_idx = current_page * 12 + slot_idx;
-            if spell_idx < filtered.len() {
+            let (new_name, new_color) = if spell_idx < filtered.len() {
                 let def = filtered[spell_idx];
-                text.sections[0].value = def.name.to_string();
-                text.sections[0].style.color = Color::srgb(0.18, 0.10, 0.05);
+                (def.name, Color::srgb(0.18, 0.10, 0.05))
             } else {
-                text.sections[0].value = "(Empty Slot)".to_string();
-                text.sections[0].style.color = Color::srgb(0.55, 0.48, 0.40);
+                ("(Empty Slot)", Color::srgb(0.55, 0.48, 0.40))
+            };
+            if text.sections[0].value != new_name {
+                text.sections[0].value = new_name.to_string();
+            }
+            if text.sections[0].style.color != new_color {
+                text.sections[0].style.color = new_color;
             }
         }
     }
@@ -2355,12 +2386,17 @@ pub fn update_spellbook_display_system(
         if let Ok(mut text) = text_q.get_mut(entity) {
             let slot_idx = rank_marker.0;
             let spell_idx = current_page * 12 + slot_idx;
-            if spell_idx < filtered.len() {
+            let (new_rank, new_color) = if spell_idx < filtered.len() {
                 let def = filtered[spell_idx];
-                text.sections[0].value = def.rank.to_string();
-                text.sections[0].style.color = Color::srgb(0.48, 0.38, 0.26);
+                (def.rank, Color::srgb(0.48, 0.38, 0.26))
             } else {
-                text.sections[0].value = "".to_string();
+                ("", Color::NONE)
+            };
+            if text.sections[0].value != new_rank {
+                text.sections[0].value = new_rank.to_string();
+            }
+            if text.sections[0].style.color != new_color {
+                text.sections[0].style.color = new_color;
             }
         }
     }
@@ -2370,12 +2406,17 @@ pub fn update_spellbook_display_system(
         if let Ok(mut text) = text_q.get_mut(entity) {
             let slot_idx = cd_marker.0;
             let spell_idx = current_page * 12 + slot_idx;
-            if spell_idx < filtered.len() {
+            let (new_cd, new_color) = if spell_idx < filtered.len() {
                 let def = filtered[spell_idx];
-                text.sections[0].value = format!("{:.1}s CD", def.cooldown_seconds);
-                text.sections[0].style.color = Color::srgb(0.55, 0.40, 0.25);
+                (format!("{:.1}s CD", def.cooldown_seconds), Color::srgb(0.55, 0.40, 0.25))
             } else {
-                text.sections[0].value = "".to_string();
+                (String::new(), Color::NONE)
+            };
+            if text.sections[0].value != new_cd {
+                text.sections[0].value = new_cd;
+            }
+            if text.sections[0].style.color != new_color {
+                text.sections[0].style.color = new_color;
             }
         }
     }
@@ -2608,16 +2649,22 @@ pub fn update_spell_drag_ghost_ui(
     let Ok(mut text) = text_query.get_single_mut() else { return; };
 
     if spell_drag.is_dragging {
-        style.display = Display::Flex;
-        style.left = Val::Px(spell_drag.current_pos.x - 25.0);
-        style.top = Val::Px(spell_drag.current_pos.y - 25.0);
+        if style.display != Display::Flex {
+            style.display = Display::Flex;
+        }
+        let l = Val::Px(spell_drag.current_pos.x - 25.0);
+        let t = Val::Px(spell_drag.current_pos.y - 25.0);
+        if style.left != l { style.left = l; }
+        if style.top != t { style.top = t; }
         let label = if let Some(spell_id) = spell_drag.spell_id {
             spell_id.def().name
         } else {
             "Spell"
         };
-        text.sections[0].value = label.to_string();
-    } else {
+        if text.sections[0].value != label {
+            text.sections[0].value = label.to_string();
+        }
+    } else if style.display != Display::None {
         style.display = Display::None;
     }
 }
@@ -2855,13 +2902,16 @@ pub fn handle_options_panel_interactions(
             .and_then(|d| d.average())
             .unwrap_or(60.0);
 
-        text.sections[0].value = format!(
+        let new_text = format!(
             "Visible Range: {:.0}m ({} chunks) | FPS: {:.0} | Spawn Full Zone: {}",
             render_settings.visible_range_meters,
             render_settings.view_distance_chunks,
             fps,
             if render_settings.spawn_full_zone { "ACTIVE" } else { "OFF" }
         );
+        if text.sections[0].value != new_text {
+            text.sections[0].value = new_text;
+        }
     }
 }
 

@@ -359,12 +359,18 @@ pub fn sync_skills_sheet_data(
 
     for (fill_marker, mut style) in fill_q.iter_mut() {
         let (_level, progress) = get_skill_stats(fill_marker.0, skill_data.as_ref());
-        style.width = Val::Percent((progress * 100.0).clamp(5.0, 100.0));
+        let new_width = Val::Percent((progress * 100.0).clamp(5.0, 100.0));
+        if style.width != new_width {
+            style.width = new_width;
+        }
     }
 
     for (text_marker, mut text) in text_q.iter_mut() {
         let (level, _) = get_skill_stats(text_marker.0, skill_data.as_ref());
-        text.sections[0].value = level.to_string();
+        let new_text = level.to_string();
+        if text.sections[0].value != new_text {
+            text.sections[0].value = new_text;
+        }
     }
 }
 

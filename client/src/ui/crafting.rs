@@ -109,19 +109,23 @@ pub fn update_build_ui(
     if build_state.is_changed() {
         for (mut vis, mut text) in ui_query.iter_mut() {
             if build_state.is_active {
-                *vis = Visibility::Inherited;
+                if *vis != Visibility::Inherited {
+                    *vis = Visibility::Inherited;
+                }
                 let (mode_label, cost_label) = if let Some(tmpl) = build_state.selected_template {
                     (format!("Template: {}", tmpl.name()), format!("{} Wood", tmpl.wood_cost()))
                 } else {
                     (format!("Piece: {}", build_state.selected_piece.name()), format!("{} Wood", build_state.selected_piece.wood_cost()))
                 };
-                text.sections[0].value = format!(
+                let new_text = format!(
                     "BUILD MODE: ACTIVE | Style: Frontier Wood & Stone | {} (Cost: {})\n[Y] Toggle Template Mode | [R] Cycle Piece | [Q/E] Rotate | [Right-Click] Catalog | [B] Exit", 
                     mode_label,
                     cost_label
                 );
-
-            } else {
+                if text.sections[0].value != new_text {
+                    text.sections[0].value = new_text;
+                }
+            } else if *vis != Visibility::Hidden {
                 *vis = Visibility::Hidden;
             }
         }

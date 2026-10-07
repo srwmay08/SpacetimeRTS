@@ -801,36 +801,20 @@ pub fn update_tuner_ui_display(
     tuner: Res<WeaponTunerState>,
     mut display_q: Query<(&TunerFieldDisplay, &mut Text)>,
 ) {
-    if !tuner.is_open {
+    if !tuner.is_open || !tuner.is_changed() {
         return;
     }
 
     for (display, mut text) in display_q.iter_mut() {
-        match display.0.as_str() {
-            "preset_name" => {
-                text.sections[0].value = format!("Preset: {}", tuner.weapon_name);
-            }
-            "grip_val" => {
-                text.sections[0].value = tuner.grip_str().to_string();
-            }
-            "cat_val" => {
-                text.sections[0].value = tuner.category_str().to_string();
-            }
-            "dmg_type_val" => {
-                text.sections[0].value = tuner.damage_type_str().to_string();
-            }
-            "base_damage_val" => {
-                text.sections[0].value = format!("{:.1} HP", tuner.base_damage);
-            }
-            "atk_speed_val" => {
-                text.sections[0].value = format!("{:.2} /s", tuner.attack_speed);
-            }
-            "reach_val" => {
-                text.sections[0].value = format!("{:.1} m", tuner.reach_meters);
-            }
-            "armor_pen_val" => {
-                text.sections[0].value = format!("{:.0} %", tuner.armor_penetration * 100.0);
-            }
+        let new_val = match display.0.as_str() {
+            "preset_name" => format!("Preset: {}", tuner.weapon_name),
+            "grip_val" => tuner.grip_str().to_string(),
+            "cat_val" => tuner.category_str().to_string(),
+            "dmg_type_val" => tuner.damage_type_str().to_string(),
+            "base_damage_val" => format!("{:.1} HP", tuner.base_damage),
+            "atk_speed_val" => format!("{:.2} /s", tuner.attack_speed),
+            "reach_val" => format!("{:.1} m", tuner.reach_meters),
+            "armor_pen_val" => format!("{:.0} %", tuner.armor_penetration * 100.0),
             "knockback_val" => {
                 let tag = if tuner.knockback_force > 70.0 {
                     " (YEET)"
@@ -839,21 +823,16 @@ pub fn update_tuner_ui_display(
                 } else {
                     ""
                 };
-                text.sections[0].value = format!("{:.1} m/s{}", tuner.knockback_force, tag);
+                format!("{:.1} m/s{}", tuner.knockback_force, tag)
             }
-            "proj_kind_val" => {
-                text.sections[0].value = tuner.projectile_kind_str().to_string();
-            }
-            "vel_val" => {
-                text.sections[0].value = format!("{:.1} m/s", tuner.muzzle_velocity);
-            }
-            "grav_val" => {
-                text.sections[0].value = format!("{:.1} m/s²", tuner.gravity);
-            }
-            "blast_val" => {
-                text.sections[0].value = format!("{:.1} m", tuner.blast_radius);
-            }
-            _ => {}
+            "proj_kind_val" => tuner.projectile_kind_str().to_string(),
+            "vel_val" => format!("{:.1} m/s", tuner.muzzle_velocity),
+            "grav_val" => format!("{:.1} m/s²", tuner.gravity),
+            "blast_val" => format!("{:.1} m", tuner.blast_radius),
+            _ => continue,
+        };
+        if text.sections[0].value != new_val {
+            text.sections[0].value = new_val;
         }
     }
 }

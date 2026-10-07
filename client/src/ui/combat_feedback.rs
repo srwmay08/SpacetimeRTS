@@ -110,15 +110,23 @@ pub fn update_marquee_ui(
             let min_y = start.y.min(end.y);
             let max_y = start.y.max(end.y);
 
-            style.left = Val::Px(min_x);
-            style.top = Val::Px(min_y);
-            style.width = Val::Px(max_x - min_x);
-            style.height = Val::Px(max_y - min_y);
-            *vis = Visibility::Inherited;
+            let l = Val::Px(min_x);
+            let t = Val::Px(min_y);
+            let w = Val::Px(max_x - min_x);
+            let h = Val::Px(max_y - min_y);
+            if style.left != l { style.left = l; }
+            if style.top != t { style.top = t; }
+            if style.width != w { style.width = w; }
+            if style.height != h { style.height = h; }
+            if *vis != Visibility::Inherited {
+                *vis = Visibility::Inherited;
+            }
             return;
         }
     }
-    *vis = Visibility::Hidden;
+    if *vis != Visibility::Hidden {
+        *vis = Visibility::Hidden;
+    }
 }
 
 pub fn visualize_selection(
@@ -128,13 +136,21 @@ pub fn visualize_selection(
 ) {
     for children in selected_query.iter() {
         for &child in children.iter() {
-            if let Ok(mut vis) = ring_query.get_mut(child) { *vis = Visibility::Inherited; }
+            if let Ok(mut vis) = ring_query.get_mut(child) {
+                if *vis != Visibility::Inherited {
+                    *vis = Visibility::Inherited;
+                }
+            }
         }
     }
 
     for children in unselected_query.iter() {
         for &child in children.iter() {
-            if let Ok(mut vis) = ring_query.get_mut(child) { *vis = Visibility::Hidden; }
+            if let Ok(mut vis) = ring_query.get_mut(child) {
+                if *vis != Visibility::Hidden {
+                    *vis = Visibility::Hidden;
+                }
+            }
         }
     }
 }

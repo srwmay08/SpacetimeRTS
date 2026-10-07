@@ -136,6 +136,7 @@ pub fn update_celestial_hud_ui(
     weather: Option<Res<crate::binary_sky::AtmosphericWeather>>,
     root_q: Query<&Style, With<CelestialHudRoot>>,
     mut text_q: Query<&mut Text, With<CelestialHudText>>,
+    mut last_display: Local<Option<(u32, u32, &'static str, &'static str)>>,
 ) {
     if let Ok(style) = root_q.get_single() {
         if style.display == Display::None {
@@ -166,6 +167,12 @@ pub fn update_celestial_hud_ui(
         crate::binary_sky::WeatherType::OvercastPrecipitation => "Overcast Rain",
     };
 
+    let current = (h, m, icon, weather_str);
+    if *last_display == Some(current) && !text.sections[0].value.is_empty() {
+        return;
+    }
+    *last_display = Some(current);
+
     let formatted = format!("{:02}:{:02} ({}) | {} [F8/F9]", h, m, icon, weather_str);
     if text.sections[0].value != formatted {
         text.sections[0].value = formatted;
@@ -194,6 +201,10 @@ pub fn toggle_action_bar_visibility(
     camera_mode: Res<State<CameraMode>>,
     mut query: Query<&mut Style, With<ActionBarUiRoot>>
 ) {
+    if !camera_mode.is_changed() {
+        return;
+    }
+
     let desired_display = if *camera_mode.get() == CameraMode::RTS {
         Display::Flex
     } else {
@@ -279,10 +290,14 @@ pub fn update_reticle_crosshair_ui(
 ) {
     let Ok(mut root_vis) = root_q.get_single_mut() else { return; };
     if *camera_mode.get() != CameraMode::FPS || !settings.enabled {
-        *root_vis = Visibility::Hidden;
+        if *root_vis != Visibility::Hidden {
+            *root_vis = Visibility::Hidden;
+        }
         return;
     }
-    *root_vis = Visibility::Inherited;
+    if *root_vis != Visibility::Inherited {
+        *root_vis = Visibility::Inherited;
+    }
 
     let base_color = settings.color_preset.to_color().with_alpha(settings.opacity);
     let border_color = if settings.outline {
@@ -304,48 +319,38 @@ pub fn update_reticle_crosshair_ui(
     let len = settings.length;
     let outline_thick = if settings.outline { settings.outline_thickness } else { 0.0 };
 
-    for (arm, mut style, mut bg, mut bc) in arms_q.iter_mut() {
-        *bg = base_color.into();
-        *bc = border_color.into();
-        style.border = UiRect::all(Val::Px(outline_thick));
+    let new_bg: BackgroundColor = base_color.into();
+    let new_bc: BorderColor = border_color.into();
+    let new_border = UiRect::all(Val::Px(outline_thick));
 
-        match arm.0 {
-            CrosshairArmDir::Top => {
-                style.width = Val::Px(thick);
-                style.height = Val::Px(len);
-                style.left = Val::Px(-thick / 2.0);
-                style.top = Val::Px(-effective_gap - len);
-            }
-            CrosshairArmDir::Bottom => {
-                style.width = Val::Px(thick);
-                style.height = Val::Px(len);
-                style.left = Val::Px(-thick / 2.0);
-                style.top = Val::Px(effective_gap);
-            }
-            CrosshairArmDir::Left => {
-                style.width = Val::Px(len);
-                style.height = Val::Px(thick);
-                style.left = Val::Px(-effective_gap - len);
-                style.top = Val::Px(-thick / 2.0);
-            }
-            CrosshairArmDir::Right => {
-                style.width = Val::Px(len);
-                style.height = Val::Px(thick);
-                style.left = Val::Px(effective_gap);
-                style.top = Val::Px(-thick / 2.0);
-            }
-        }
+    for (arm, mut style, mut bg, mut bc) in arms_q.iter_mut() {
+        if *bg != new_bg { *bg = new_bg; }
+        if *bc != new_bc { *bc = new_bc; }
+        if style.border != new_border { style.border = new_border; }
+
+        let (new_w, new_h, new_l, new_t) = match arm.0 {
+            CrosshairArmDir::Top => (Val::Px(thick), Val::Px(len), Val::Px(-thick / 2.0), Val::Px(-effective_gap - len)),
+            CrosshairArmDir::Bottom => (Val::Px(thick), Val::Px(len), Val::Px(-thick / 2.0), Val::Px(effective_gap)),
+            CrosshairArmDir::Left => (Val::Px(len), Val::Px(thick), Val::Px(-effective_gap - len), Val::Px(-thick / 2.0)),
+            CrosshairArmDir::Right => (Val::Px(len), Val::Px(thick), Val::Px(effective_gap), Val::Px(-thick / 2.0)),
+        };
+        if style.width != new_w { style.width = new_w; }
+        if style.height != new_h { style.height = new_h; }
+        if style.left != new_l { style.left = new_l; }
+        if style.top != new_t { style.top = new_t; }
     }
 
     if let Ok((mut dot_style, mut dot_bg)) = dot_q.get_single_mut() {
         if settings.dot {
-            dot_style.display = Display::Flex;
-            dot_style.width = Val::Px(settings.dot_size);
-            dot_style.height = Val::Px(settings.dot_size);
-            dot_style.left = Val::Px(-settings.dot_size / 2.0);
-            dot_style.top = Val::Px(-settings.dot_size / 2.0);
-            *dot_bg = base_color.into();
-        } else {
+            if dot_style.display != Display::Flex { dot_style.display = Display::Flex; }
+            let s = Val::Px(settings.dot_size);
+            let half_s = Val::Px(-settings.dot_size / 2.0);
+            if dot_style.width != s { dot_style.width = s; }
+            if dot_style.height != s { dot_style.height = s; }
+            if dot_style.left != half_s { dot_style.left = half_s; }
+            if dot_style.top != half_s { dot_style.top = half_s; }
+            if *dot_bg != new_bg { *dot_bg = new_bg; }
+        } else if dot_style.display != Display::None {
             dot_style.display = Display::None;
         }
     }
@@ -413,17 +418,29 @@ pub fn update_reticle_adjacent_hud(
             _ => Color::srgb(0.0, 1.0, 1.0),
         };
 
-        text.sections[0].value = val;
-        text.sections[0].style.color = color;
+        if text.sections[0].value != val {
+            text.sections[0].value = val;
+        }
+        if text.sections[0].style.color != color {
+            text.sections[0].style.color = color;
+        }
     }
 
     // 2. Bow Charge Bar (Directly below crosshair)
     if let Ok((mut bar_style, mut bar_bg)) = bow_bar_q.get_single_mut() {
         if weapon_state.current_weapon == crate::weapons::WeaponType::Bow && weapon_state.bow_drawing {
-            bar_style.display = Display::Flex;
-            bar_style.width = Val::Px(weapon_state.bow_charge * 40.0);
-            *bar_bg = Color::srgb(1.0, 0.85, 0.2).into();
-        } else {
+            if bar_style.display != Display::Flex {
+                bar_style.display = Display::Flex;
+            }
+            let desired_w = Val::Px(weapon_state.bow_charge * 40.0);
+            if bar_style.width != desired_w {
+                bar_style.width = desired_w;
+            }
+            let desired_bg: BackgroundColor = Color::srgb(1.0, 0.85, 0.2).into();
+            if *bar_bg != desired_bg {
+                *bar_bg = desired_bg;
+            }
+        } else if bar_style.display != Display::None {
             bar_style.display = Display::None;
         }
     }
@@ -447,8 +464,12 @@ pub fn update_reticle_adjacent_hud(
                 }
             }
         }
-        text.sections[0].value = alert_str;
-        text.sections[0].style.color = alert_col;
+        if text.sections[0].value != alert_str {
+            text.sections[0].value = alert_str;
+        }
+        if text.sections[0].style.color != alert_col {
+            text.sections[0].style.color = alert_col;
+        }
     }
 }
 
@@ -465,7 +486,9 @@ pub fn update_reticle_abilities_and_hitmarker(
     hit_marker_state.timer.tick(time.delta());
     if let Ok((mut hm_style, children)) = hitmarker_q.get_single_mut() {
         if !hit_marker_state.timer.finished() {
-            hm_style.display = Display::Flex;
+            if hm_style.display != Display::Flex {
+                hm_style.display = Display::Flex;
+            }
             let tick_color = if hit_marker_state.is_crit {
                 Color::srgb(1.0, 0.2, 0.2) // Red/Gold for Crit
             } else if hit_marker_state.is_armor {
@@ -473,12 +496,15 @@ pub fn update_reticle_abilities_and_hitmarker(
             } else {
                 Color::WHITE // White for Bodyshot
             };
+            let new_bg: BackgroundColor = tick_color.into();
             for &child in children.iter() {
                 if let Ok(mut bg) = hitmarker_ticks_q.get_mut(child) {
-                    *bg = tick_color.into();
+                    if *bg != new_bg {
+                        *bg = new_bg;
+                    }
                 }
             }
-        } else {
+        } else if hm_style.display != Display::None {
             hm_style.display = Display::None;
         }
     }

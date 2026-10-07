@@ -1228,13 +1228,16 @@ pub fn update_console_ui(
 
     if let Ok(mut input_text) = input_query.get_single_mut() {
         let cursor_char = if console.show_cursor { "_" } else { " " };
-        input_text.sections[0].value = format!("{}{}", console.input_buffer, cursor_char);
+        let new_input = format!("{}{}", console.input_buffer, cursor_char);
+        if input_text.sections[0].value != new_input {
+            input_text.sections[0].value = new_input;
+        }
     }
 
     // Dynamic suggestions banner
     if let Ok(mut sugg_text) = sugg_query.get_single_mut() {
         let trimmed = console.input_buffer.trim_start();
-        if trimmed.starts_with("giveitem") || trimmed.starts_with("give") {
+        let (new_sugg, new_color) = if trimmed.starts_with("giveitem") || trimmed.starts_with("give") {
             let cmd_prefix = if trimmed.starts_with("giveitem") { "giveitem" } else { "give" };
             let arg = trimmed.strip_prefix(cmd_prefix).unwrap_or("").trim_start();
             let matches: Vec<&'static str> = CANONICAL_ITEMS.iter()
@@ -1243,24 +1246,28 @@ pub fn update_console_ui(
                 .collect();
 
             if matches.is_empty() {
-                sugg_text.sections[0].value = "[No items match query | Press Tab to browse catalogue]".to_string();
-                sugg_text.sections[0].style.color = Color::srgb(0.9, 0.4, 0.4);
+                ("[No items match query | Press Tab to browse catalogue]".to_string(), Color::srgb(0.9, 0.4, 0.4))
             } else {
                 let shown = if matches.len() > 6 {
                     format!("{}, ... ({} matches)", matches[..6].join(", "), matches.len())
                 } else {
                     matches.join(", ")
                 };
-                sugg_text.sections[0].value = format!("[Tab to auto-fill]: {}", shown);
-                sugg_text.sections[0].style.color = Color::srgb(0.65, 0.85, 0.65);
+                (format!("[Tab to auto-fill]: {}", shown), Color::srgb(0.65, 0.85, 0.65))
             }
         } else {
             let matches: Vec<&'static str> = CONSOLE_COMMANDS.iter()
                 .filter(|&&c| c.starts_with(&trimmed.to_lowercase()))
                 .copied()
                 .collect();
-            sugg_text.sections[0].value = format!("[Tab to complete]: {}", matches.join(", "));
-            sugg_text.sections[0].style.color = Color::srgb(0.5, 0.75, 0.9);
+            (format!("[Tab to complete]: {}", matches.join(", ")), Color::srgb(0.5, 0.75, 0.9))
+        };
+
+        if sugg_text.sections[0].value != new_sugg {
+            sugg_text.sections[0].value = new_sugg;
+        }
+        if sugg_text.sections[0].style.color != new_color {
+            sugg_text.sections[0].style.color = new_color;
         }
     }
 }

@@ -93,43 +93,61 @@ pub fn update_interaction_prompt(
                     _ => "[E] Gather",
                 };
 
-                text.sections[0].value = prompt.to_string();
-                *vis = Visibility::Inherited;
+                if text.sections[0].value != prompt {
+                    text.sections[0].value = prompt.to_string();
+                }
+                if *vis != Visibility::Inherited {
+                    *vis = Visibility::Inherited;
+                }
                 return;
             }
         } else if let Ok(ruin) = ruin_query.get(hit_data.entity) {
-            text.sections[0].value = format!("[E] Mine {} (Yield: {})", ruin.node_type, ruin.yield_amount);
-            *vis = Visibility::Inherited;
+            let new_prompt = format!("[E] Mine {} (Yield: {})", ruin.node_type, ruin.yield_amount);
+            if text.sections[0].value != new_prompt {
+                text.sections[0].value = new_prompt;
+            }
+            if *vis != Visibility::Inherited {
+                *vis = Visibility::Inherited;
+            }
             return;
         } else if let Some(struct_id) = resolve_structure_id(hit_data.entity, &structure_query, &door_query, &parent_query) {
             if let Some(s) = conn.db.db.structure().structure_id().find(&struct_id) {
                 let is_hammer = active_item.0.as_deref() == Some("Hammer");
-                if s.piece_type == "Door" && !s.is_blueprint {
+                let new_prompt = if s.piece_type == "Door" && !s.is_blueprint {
                     let is_open = conn.db.db.door_state().structure_id().find(&struct_id).map_or(false, |d| d.is_open);
-                    text.sections[0].value = if is_open {
+                    if is_open {
                         "[E] Close Door".to_string()
                     } else {
                         "[E] Open Door".to_string()
-                    };
+                    }
                 } else if s.piece_type == "Workbench" && !s.is_blueprint {
-                    text.sections[0].value = "[E] Open Workbench".to_string();
+                    "[E] Open Workbench".to_string()
                 } else if s.is_blueprint {
-                    text.sections[0].value = format!("Autobuilding {} ({}%)...", s.piece_type, s.construction_progress);
+                    format!("Autobuilding {} ({}%)...", s.piece_type, s.construction_progress)
                 } else if s.current_health < s.max_health {
-                    text.sections[0].value = if is_hammer {
+                    if is_hammer {
                         format!("[E] Repair Structure ({:.0}/{:.0} HP)", s.current_health, s.max_health)
                     } else {
                         format!("Damaged ({:.0}/{:.0} HP) - Equip Hammer", s.current_health, s.max_health)
-                    };
+                    }
                 } else {
-                    text.sections[0].value = format!("{} ({:.0}/{:.0} HP)", s.piece_type, s.current_health, s.max_health);
+                    format!("{} ({:.0}/{:.0} HP)", s.piece_type, s.current_health, s.max_health)
+                };
+                if text.sections[0].value != new_prompt {
+                    text.sections[0].value = new_prompt;
                 }
-                *vis = Visibility::Inherited;
+                if *vis != Visibility::Inherited {
+                    *vis = Visibility::Inherited;
+                }
                 return;
             }
         }
     }
 
-    text.sections[0].value = "".to_string();
-    *vis = Visibility::Hidden;
+    if !text.sections[0].value.is_empty() {
+        text.sections[0].value.clear();
+    }
+    if *vis != Visibility::Hidden {
+        *vis = Visibility::Hidden;
+    }
 }

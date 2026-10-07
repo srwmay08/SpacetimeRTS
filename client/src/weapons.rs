@@ -1647,33 +1647,45 @@ pub fn update_weapon_hud(
 ) {
     let Ok((mut vis, mut text)) = text_q.get_single_mut() else { return; };
     if *camera_mode.get() != CameraMode::FPS {
-        *vis = Visibility::Hidden;
+        if *vis != Visibility::Hidden {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
 
-    *vis = Visibility::Inherited;
+    if *vis != Visibility::Inherited {
+        *vis = Visibility::Inherited;
+    }
+
+    // Only recompute and re-format strings when weapon state, equipped hand, or camera mode changes
+    if !weapon_state.is_changed() && !hand_side.is_changed() && !camera_mode.is_changed() && !text.sections[0].value.is_empty() {
+        return;
+    }
+
     let hand_str = match hand_side.0 {
         HandSide::Right => "PRIMARY: RIGHT [H to Swap]",
         HandSide::Left => "PRIMARY: LEFT [H to Swap]",
     };
 
-    if weapon_state.current_weapon == WeaponType::None && weapon_state.offhand_weapon == WeaponType::None {
-        text.sections[0].value = format!("{}\nUNARMED [BARE FISTS]\n[LMB] Right Jab | [RMB] Left Jab", hand_str);
-        return;
-    }
-
-    let main_desc = format!("MAIN: {} [LMB]", weapon_state.current_weapon.display_name());
-    let off_desc = if weapon_state.current_weapon.is_one_handed() || weapon_state.current_weapon == WeaponType::None {
-        if weapon_state.offhand_weapon == WeaponType::None {
-            "OFF: Bare Fist [RMB]".to_string()
-        } else {
-            format!("OFF: {} [RMB]", weapon_state.offhand_weapon.display_name())
-        }
+    let new_val = if weapon_state.current_weapon == WeaponType::None && weapon_state.offhand_weapon == WeaponType::None {
+        format!("{}\nUNARMED [BARE FISTS]\n[LMB] Right Jab | [RMB] Left Jab", hand_str)
     } else {
-        "TWO-HANDED [LMB Attack | Hold]".to_string()
+        let main_desc = format!("MAIN: {} [LMB]", weapon_state.current_weapon.display_name());
+        let off_desc = if weapon_state.current_weapon.is_one_handed() || weapon_state.current_weapon == WeaponType::None {
+            if weapon_state.offhand_weapon == WeaponType::None {
+                "OFF: Bare Fist [RMB]".to_string()
+            } else {
+                format!("OFF: {} [RMB]", weapon_state.offhand_weapon.display_name())
+            }
+        } else {
+            "TWO-HANDED [LMB Attack | Hold]".to_string()
+        };
+        format!("{}\n{}\n{}", hand_str, main_desc, off_desc)
     };
 
-    text.sections[0].value = format!("{}\n{}\n{}", hand_str, main_desc, off_desc);
+    if text.sections[0].value != new_val {
+        text.sections[0].value = new_val;
+    }
 }
 
 // ----------------------------------------------------------------------------
