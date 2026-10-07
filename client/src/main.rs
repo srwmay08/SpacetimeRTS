@@ -64,6 +64,17 @@ pub enum UpdateSet {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let is_sparring = args.iter().any(|arg| arg == "--sparring" || arg == "-s" || arg == "sparring")
+        || std::env::var("SPARRING_MODE").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false)
+        || std::env::var("SPARRING").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false);
+
+    if is_sparring {
+        println!("🥋 Launching client in Sparring Sandbox Mode (--sparring)");
+    } else {
+        println!("🌲 Launching client in Main World (Run with '-- --sparring' to enter the Sparring Yard)");
+    }
+
     App::new()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
@@ -118,8 +129,17 @@ fn main() {
         .insert_resource(DragDropState::default())
         .insert_resource(ActiveItemSlot(0))
         .insert_resource(CachedPlayerEntity::default())
-        .insert_resource(ActiveEquippedItem(Some("Longsword".to_string())))
-        .insert_resource(ActiveOffHandItem(Some("Wooden Shield".to_string())))
+        .insert_resource(SparringMode(is_sparring))
+        .insert_resource(if is_sparring {
+            ActiveEquippedItem(Some("Longsword".to_string()))
+        } else {
+            ActiveEquippedItem(None)
+        })
+        .insert_resource(if is_sparring {
+            ActiveOffHandItem(Some("Wooden Shield".to_string()))
+        } else {
+            ActiveOffHandItem(None)
+        })
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState::default())
         .init_resource::<MouseFlickTracker>()

@@ -808,7 +808,13 @@ pub fn setup_sparring_yard(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    sparring_mode: Res<SparringMode>,
 ) {
+    if !sparring_mode.0 {
+        return;
+    }
+    info!("🥋 Sparring Yard initialized! Spawning Martial Arts Training Dummy & Sparring Goblin Raider.");
+
     let spawn_x = 0.0;
     let spawn_z = 0.0;
     let terrain_y = crate::terrain::get_terrain_height(spawn_x, spawn_z);

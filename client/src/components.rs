@@ -565,4 +565,7 @@ pub struct CombatAudioHandles {
     pub sword_clang: Handle<AudioSource>,
     pub shield_block: Handle<AudioSource>,
     pub flesh_impact: Handle<AudioSource>,
-}
+}
+
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SparringMode(pub bool);
