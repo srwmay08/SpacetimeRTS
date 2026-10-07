@@ -27,9 +27,20 @@ use crate::components::*;
 use crate::core::GameLayer;
 use crate::trees::{TreeMeshCache, create_lowpoly_fallen_log_mesh};
 use crate::props::{
-    create_lowpoly_rock_mesh, create_lowpoly_bush_foliage_mesh, create_lowpoly_bush_berries_mesh,
-    create_lowpoly_branch_mesh, create_lowpoly_flint_mesh, create_lowpoly_stone_mesh,
+    create_lowpoly_rock_mesh, create_lowpoly_bush_mesh, create_lowpoly_bush_foliage_mesh,
+    create_lowpoly_bush_berries_mesh, create_lowpoly_branch_mesh, create_lowpoly_flint_mesh,
+    create_lowpoly_stone_mesh,
 };
+
+/// Maximum distance (m) to load resource nodes into the client ECS bubble.
+/// 128m radius provides a dense, continuous forest and resource field around the player
+/// while keeping active ECS entities strictly within the 2,000–3,500 budget (~2,400 entities).
+pub const RESOURCE_NODE_LOAD_RADIUS: f32 = 128.0;
+pub const RESOURCE_NODE_LOAD_RADIUS_SQ: f32 = RESOURCE_NODE_LOAD_RADIUS * RESOURCE_NODE_LOAD_RADIUS; // 16,384 m^2
+
+/// Unload distance (m) with hysteresis to prevent churn at the boundary.
+pub const RESOURCE_NODE_UNLOAD_RADIUS: f32 = 144.0;
+pub const RESOURCE_NODE_UNLOAD_RADIUS_SQ: f32 = RESOURCE_NODE_UNLOAD_RADIUS * RESOURCE_NODE_UNLOAD_RADIUS; // 20,736 m^2
 
 /// Near distance threshold (m) within which trees and foliage cast directional shadows (cascades 0 & 1).
 pub const TREE_SHADOW_NEAR_DIST: f32 = 56.0;
@@ -96,8 +107,13 @@ impl CachedResourceMeshes {
             meshes.add(create_lowpoly_bush_berries_mesh(3579)),
             meshes.add(create_lowpoly_bush_berries_mesh(4680)),
         ];
-        let bush_variants = bush_foliage_variants.clone();
-        let bush = bush_foliage_variants[0].clone();
+        let bush_variants = vec![
+            meshes.add(create_lowpoly_bush_mesh(1337)),
+            meshes.add(create_lowpoly_bush_mesh(2468)),
+            meshes.add(create_lowpoly_bush_mesh(3579)),
+            meshes.add(create_lowpoly_bush_mesh(4680)),
+        ];
+        let bush = bush_variants[0].clone();
 
         Self {
             tree_cache,
@@ -149,13 +165,19 @@ pub fn sync_resource_nodes(
         })
     }).clone();
 
-    // Synchronize resource node load/unload distance with terrain chunks (224m default / 240m unload at fog limit)
+    // Synchronize resource node load/unload distance with performance budget (128m load / 144m unload)
     let (node_load_radius, node_unload_radius) = if let Some(ref rs) = render_settings {
-        let vr = if rs.spawn_full_zone { 64.0 * 16.0 } else { rs.view_distance_chunks as f32 * 16.0 };
-        let ur = if rs.spawn_full_zone { 70.0 * 16.0 } else { rs.unload_distance_chunks.max(rs.view_distance_chunks + 1) as f32 * 16.0 };
-        (vr, ur)
+        if rs.spawn_full_zone {
+            (64.0 * 16.0, 70.0 * 16.0)
+        } else {
+            let vr = (rs.view_distance_chunks as f32 * 16.0).min(RESOURCE_NODE_LOAD_RADIUS);
+            let ur = (rs.unload_distance_chunks.max(rs.view_distance_chunks + 1) as f32 * 16.0)
+                .min(RESOURCE_NODE_UNLOAD_RADIUS)
+                .max(vr + 16.0);
+            (vr, ur)
+        }
     } else {
-        (crate::terrain::LOW_POLY_RADIUS_CHUNKS as f32 * 16.0, crate::terrain::LOW_POLY_UNLOAD_RADIUS_CHUNKS as f32 * 16.0)
+        (RESOURCE_NODE_LOAD_RADIUS, RESOURCE_NODE_UNLOAD_RADIUS)
     };
     let node_load_radius_sq = node_load_radius * node_load_radius;
     let node_unload_radius_sq = node_unload_radius * node_unload_radius;
@@ -392,7 +414,7 @@ pub fn sync_resource_nodes(
                 None,
             ),
             "Bush" => (
-                cache.bush_foliage_variants[(node.node_id % 4) as usize].clone(),
+                cache.bush_variants[(node.node_id % 4) as usize].clone(),
                 Collider::sphere(0.85),
                 0.0,
                 None,
@@ -496,6 +518,11 @@ pub fn sync_resource_nodes(
             (Quat::IDENTITY, Vec3::splat(node.scale))
         };
 
+        let is_solid = match clean_type {
+            "Branch" | "Flint" | "LooseStone" | "Bush" => false,
+            _ => true,
+        };
+
         let mut entity_cmd = commands.spawn((
             PbrBundle {
                 mesh, 
@@ -511,32 +538,24 @@ pub fn sync_resource_nodes(
                 node_id: node.node_id,
                 node_type: clean_type.to_string(),
             },
-            RigidBody::Static,
-            collider,
-            CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
         ));
+
+        if is_solid {
+            entity_cmd.insert((
+                RigidBody::Static,
+                collider,
+                CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
+            ));
+        } else {
+            entity_cmd.insert((
+                collider,
+                Sensor,
+                CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
+            ));
+        }
 
         if let Some(tc) = tree_comp_opt {
             entity_cmd.insert(tc);
-        }
-
-        if clean_type == "Bush" {
-            // Spawn jewel berries as a child entity equipped with NotShadowCaster:
-            // The bush foliage casts volumetric shadows onto the terrain, but berries are excluded from shadow cascades.
-            let bush_idx = (node.node_id % 4) as usize;
-            let berries_mesh = cache.bush_berries_variants[bush_idx].clone();
-            let berries_mat = node_mat.clone();
-            entity_cmd.with_children(|parent| {
-                parent.spawn((
-                    PbrBundle {
-                        mesh: berries_mesh,
-                        material: berries_mat,
-                        transform: BevyTransform::IDENTITY,
-                        ..default()
-                    },
-                    NotShadowCaster,
-                ));
-            });
         }
 
         // Performance Optimization: Exclude small ground clutter (twigs, stones, flint)
@@ -694,5 +713,14 @@ mod tests {
         assert!(TREE_SHADOW_NEAR_DIST < TREE_SHADOW_FAR_DIST);
         assert_eq!(TREE_SHADOW_NEAR_DIST_SQ, 3136.0);
         assert_eq!(TREE_SHADOW_FAR_DIST_SQ, 4096.0);
+    }
+
+    #[test]
+    fn test_resource_node_load_and_unload_radius() {
+        assert_eq!(RESOURCE_NODE_LOAD_RADIUS, 128.0);
+        assert_eq!(RESOURCE_NODE_UNLOAD_RADIUS, 144.0);
+        assert!(RESOURCE_NODE_LOAD_RADIUS < RESOURCE_NODE_UNLOAD_RADIUS);
+        assert_eq!(RESOURCE_NODE_LOAD_RADIUS_SQ, 16384.0);
+        assert_eq!(RESOURCE_NODE_UNLOAD_RADIUS_SQ, 20736.0);
     }
 }
