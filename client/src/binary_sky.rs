@@ -2595,4 +2595,20 @@ mod tests {
         let star_a = lights.iter().find(|(_, is_p, _)| *is_p).expect("Star A must exist");
         assert!(star_a.0.shadows_enabled, "Star A must have shadows enabled at default high noon");
     }
+
+    #[test]
+    fn test_drg_performance_illusion_point_lights_shadows_disabled() {
+        // Deep Rock Galactic Performance Invariant:
+        // Local point lights (torches, runes, projectiles) must NEVER enable shadows,
+        // preventing expensive omnidirectional cubemap depth passes.
+        let default_torch_light = PointLight {
+            color: Color::srgb(1.0, 0.75, 0.4),
+            intensity: 3500.0,
+            range: 8.0,
+            shadows_enabled: false,
+            ..default()
+        };
+        assert!(!default_torch_light.shadows_enabled, "Local point lights must have shadows_enabled = false");
+        assert!(default_torch_light.range <= 16.0, "Local point lights must maintain tight inverse-square radius");
+    }
 }

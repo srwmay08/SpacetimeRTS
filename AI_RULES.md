@@ -68,10 +68,12 @@ All client systems must operate strictly within the **16.67ms (60 FPS)** frame b
    - **Active Visible ECS Entities:** Maintain **$\approx 2,000 - 3,500$ entities** in the player's active view bubble. Exceeding 6,000 entities degrades Bevy's transform propagation and frustum culling.
    - **World Resource Nodes (Server DB):** Capped at **$\approx 8,000$ total nodes** across the 400m map (~3.5k trees, ~4.5k minerals/foraging). This guarantees fast client subscription sync (<180 KB snapshot) and microsecond spatial lookups.
    - **Distance Streaming:** Resource nodes must be streamed dynamically (e.g. loaded within 224m and unloaded beyond 240m with hysteresis).
-2. **Shadow Caster Budget:**
-   - Directional cascades must render at most **$\le 150$ shadow-casting entities** within near distance ($\le 56\text{m}$).
-   - All distant foliage (>56m), ground clutter (loose rocks, flint, branches), ruby berries, and grass MUST be tagged with `NotShadowCaster` to prevent shadow cascade geometry explosion.
-   - Directional light shadow map resolution is capped at **2048x2048** (never 4096) to preserve GPU fill-rate.
+2. **Shadow Caster Budget & Lighting Hierarchy:**
+   - **Exclusive Directional Shadow Casters:** ONLY the two celestial directional lights (Host Star A and Companion Star B) may have `shadows_enabled: true`.
+   - **Deep Rock Galactic (DRG) Performance Illusions for Local Lights:** ALL local point lights and spot lights (torches, campfires, glowing runes, projectiles, muzzle flashes, bioluminescent crystals) MUST set `shadows_enabled: false`. Dynamic illumination from local sources must be simulated using high-intensity HDR emissive materials (`LinearRgba > 2.0`), tight inverse-square attenuation radii (`range <= 16.0m`), and screen-space bloom illusions. Never spawn omnidirectional cubemap shadow passes.
+   - **Near Distance Entity Cap:** Directional cascades must render at most **$\le 150$ shadow-casting entities** within near distance ($\le 56\text{m}$).
+   - **Exemption Tags:** All distant foliage (>56m), ground clutter (loose rocks, flint, branches), ruby berries, and grass MUST be tagged with `NotShadowCaster` to prevent shadow cascade geometry explosion.
+   - **Resolution Cap:** Directional light shadow map resolution is capped at **2048x2048** (never 4096) to preserve GPU fill-rate.
 3. **Draw Calls & Chunk Batching:**
    - Draw calls per frame should stay within **300 - 700**.
    - Procedural grass and ground foliage must ALWAYS be batched into single unified meshes per 16m chunk attached to terrain entities. **Never spawn individual ECS entities for grass blades.**

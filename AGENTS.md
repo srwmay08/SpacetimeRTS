@@ -28,6 +28,7 @@ You must strictly obey the following project expectations on every turn. Refer t
 - **Frame Budget:** 16.67ms (60 FPS) target across all gameplay and physics systems.
 - **Client ECS Entities:** Keep active visible entities in the player bubble around **2,000 – 3,500**. Use distance streaming for world nodes (load within 224m, unload past 240m).
 - **Shadow Map & Fill-Rate Preservation:** Directional light shadow maps must not exceed **2048x2048**. Cull dynamic tree/bush shadows beyond **56m**. Tag grass, berries, and small ground clutter with `NotShadowCaster`.
+- **DRG Lighting Illusions (No Local Shadows):** ONLY celestial Host Star A and Companion Star B directional lights may have `shadows_enabled: true`. ALL local point/spot lights (torches, runes, projectiles, abilities) MUST set `shadows_enabled: false` and rely on HDR emissive materials + bloom illusions. Never spawn point light shadow cubemaps.
 - **World Node Cap:** Keep total world resource nodes in the database around **~8,000** (~3.5k trees, ~4.5k minerals/foraging).
 
 ## 4. Stylized Visual & Foliage Standards
