@@ -23,10 +23,10 @@ use tracing::info;
 use crate::core::*;
 use crate::components::*;
 use crate::trees::{create_lowpoly_oak_mesh, create_lowpoly_pine_mesh, create_lowpoly_dead_tree_mesh};
-use crate::props::{create_voxel_rock_mesh, create_voxel_bush_mesh, create_voxel_flint_mesh};
+use crate::props::{create_lowpoly_rock_mesh, create_lowpoly_bush_mesh, create_lowpoly_flint_mesh};
 use crate::creatures::{
-    create_voxel_peasant_mesh, create_voxel_goblin_mesh, create_voxel_deer_mesh,
-    create_voxel_boar_mesh,
+    create_lowpoly_peasant_mesh, create_lowpoly_goblin_mesh, create_lowpoly_deer_mesh,
+    create_lowpoly_boar_mesh,
 };
 
 // ----------------------------------------------------------------------------
@@ -548,9 +548,9 @@ pub fn handle_editor_brush_painting(
                     DoodadChoice::AutumnOak => (meshes.add(create_lowpoly_oak_mesh(1001)), 1.0),
                     DoodadChoice::AlpinePine => (meshes.add(create_lowpoly_pine_mesh(2002)), 1.1),
                     DoodadChoice::DeadTree => (meshes.add(create_lowpoly_dead_tree_mesh(3003)), 1.0),
-                    DoodadChoice::GraniteBoulder => (meshes.add(create_voxel_rock_mesh()), 1.3),
-                    DoodadChoice::KnappedFlint => (meshes.add(create_voxel_flint_mesh()), 1.0),
-                    DoodadChoice::BerryBush => (meshes.add(create_voxel_bush_mesh()), 1.0),
+                    DoodadChoice::GraniteBoulder => (meshes.add(create_lowpoly_rock_mesh(1337)), 1.3),
+                    DoodadChoice::KnappedFlint => (meshes.add(create_lowpoly_flint_mesh(1337)), 1.0),
+                    DoodadChoice::BerryBush => (meshes.add(create_lowpoly_bush_mesh(1337)), 1.0),
                 };
 
                 let rot_y = (hit_point.x * 12.3 + hit_point.z * 45.6).sin() * std::f32::consts::PI;
@@ -601,7 +601,7 @@ pub fn handle_editor_brush_painting(
                     UnitChoice::PeasantWorker => {
                         commands.spawn((
                             PbrBundle {
-                                mesh: meshes.add(create_voxel_peasant_mesh()),
+                                mesh: meshes.add(create_lowpoly_peasant_mesh()),
                                 material: white_mat,
                                 transform: BevyTransform::from_translation(hit_point + Vec3::new(0.0, 1.05, 0.0)),
                                 ..default()
@@ -614,7 +614,7 @@ pub fn handle_editor_brush_painting(
                     UnitChoice::ArmoredGoblin => {
                         commands.spawn((
                             PbrBundle {
-                                mesh: meshes.add(create_voxel_goblin_mesh()),
+                                mesh: meshes.add(create_lowpoly_goblin_mesh()),
                                 material: white_mat,
                                 transform: BevyTransform::from_translation(hit_point + Vec3::new(0.0, 1.05, 0.0)),
                                 ..default()
@@ -627,7 +627,7 @@ pub fn handle_editor_brush_painting(
                     UnitChoice::WildStag => {
                         commands.spawn((
                             PbrBundle {
-                                mesh: meshes.add(create_voxel_deer_mesh()),
+                                mesh: meshes.add(create_lowpoly_deer_mesh()),
                                 material: white_mat,
                                 transform: BevyTransform::from_translation(hit_point + Vec3::new(0.0, 1.05, 0.0)),
                                 ..default()
@@ -640,7 +640,7 @@ pub fn handle_editor_brush_painting(
                     UnitChoice::WildBoar => {
                         commands.spawn((
                             PbrBundle {
-                                mesh: meshes.add(create_voxel_boar_mesh()),
+                                mesh: meshes.add(create_lowpoly_boar_mesh()),
                                 material: white_mat,
                                 transform: BevyTransform::from_translation(hit_point + Vec3::new(0.0, 0.8, 0.0)),
                                 ..default()

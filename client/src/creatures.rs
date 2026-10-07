@@ -154,9 +154,6 @@ pub fn create_lowpoly_deer_mesh() -> Mesh {
     builder.build()
 }
 
-// Backwards-compatibility shim for zone editor and legacy systems
-pub use create_lowpoly_deer_mesh as create_voxel_deer_mesh;
-
 // ----------------------------------------------------------------------------
 // 2. PROCEDURAL LOW-POLY BOAR (TUSKED RAIDER)
 // ----------------------------------------------------------------------------
@@ -266,9 +263,6 @@ pub fn create_lowpoly_boar_mesh() -> Mesh {
     builder.build()
 }
 
-// Backwards-compatibility shim for zone editor and legacy systems
-pub use create_lowpoly_boar_mesh as create_voxel_boar_mesh;
-
 // ----------------------------------------------------------------------------
 // 3. PROCEDURAL LOW-POLY GOBLIN (RAIDER / WARRIOR)
 // ----------------------------------------------------------------------------
@@ -356,9 +350,6 @@ pub fn create_lowpoly_goblin_mesh() -> Mesh {
 
     builder.build()
 }
-
-// Backwards-compatibility shim for zone editor and legacy systems
-pub use create_lowpoly_goblin_mesh as create_voxel_goblin_mesh;
 
 // ----------------------------------------------------------------------------
 // 3b. PROCEDURAL LOW-POLY TRAINING DUMMY (STRAW & TIMBER)
@@ -489,9 +480,6 @@ pub fn create_lowpoly_peasant_mesh() -> Mesh {
     builder.build()
 }
 
-// Backwards-compatibility shim for zone editor and legacy systems
-pub use create_lowpoly_peasant_mesh as create_voxel_peasant_mesh;
-
 // ----------------------------------------------------------------------------
 // 5. PROCEDURAL LOW-POLY PET (COMPANION CANINE / FOX)
 // ----------------------------------------------------------------------------
@@ -580,9 +568,6 @@ pub fn create_lowpoly_pet_mesh() -> Mesh {
 
     builder.build()
 }
-
-// Backwards-compatibility shim for zone editor and legacy systems
-pub use create_lowpoly_pet_mesh as create_voxel_pet_mesh;
 
 // ----------------------------------------------------------------------------
 // 7. PROCEDURAL LOW-POLY ADVENTURER CORPSE & LOOT SACK

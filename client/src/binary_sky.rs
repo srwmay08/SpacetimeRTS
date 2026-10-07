@@ -591,17 +591,9 @@ impl Material for StarAuroraDomeMaterial {
     }
 }
 
-/// Compatibility alias preserving external API and test suite expectations.
-pub type AuroraMaterial = StarAuroraDomeMaterial;
-pub type AuroraUniforms = SkyUniforms;
-
 /// Component tag for the procedural planetary aurora sky dome.
 #[derive(Component, Debug, Default)]
 pub struct StarAuroraDome;
-
-/// Deprecated component tag for legacy ribbon queries and test compatibility.
-#[derive(Component, Debug, Default)]
-pub struct AuroraCurtain;
 
 /// Component tag for the procedural atmospheric sky dome rendering Rayleigh/Mie scattering.
 #[derive(Component, Debug, Default)]
@@ -981,12 +973,6 @@ pub fn create_sky_dome_mesh() -> Mesh {
     mesh
 }
 
-/// Legacy dual ribbon curtain generator, deprecated in favor of procedural sky dome.
-#[deprecated(note = "Legacy dual ribbon mesh retired in favor of procedural sky dome (create_sky_dome_mesh)")]
-pub fn create_aurora_mesh() -> Mesh {
-    create_sky_dome_mesh()
-}
-
 /// Generates a cylindrical volume of downward precipitation streaks for stormy weather.
 pub fn create_precipitation_mesh(drop_count: usize) -> Mesh {
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
@@ -1214,7 +1200,6 @@ pub fn setup_binary_sky_environment(
             ..default()
         },
         StarAuroraDome,
-        AuroraCurtain,
         AtmosphericSkyDome,
         NotShadowCaster,
         RenderLayers::from_layers(&[0, 1, 2]),
@@ -2303,17 +2288,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
-    fn test_aurora_mesh_generation() {
-        let mesh = create_aurora_mesh();
-        assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
-        assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
-        assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
-        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
-        assert!(mesh.indices().is_some());
-    }
-
-    #[test]
     fn test_precipitation_mesh_generation() {
         let mesh = create_precipitation_mesh(100);
         assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
@@ -2419,8 +2393,8 @@ mod tests {
         assert_eq!(*star_vis, Visibility::Visible, "Starfield must be visible at deep night");
         assert_eq!(star_tf.translation, active_pos, "Starfield must track active camera translation");
 
-        // 2. Verify Aurora Curtain is visible when StellarWindAurora is active
-        let mut aurora_query = app.world_mut().query_filtered::<(&Transform, &Visibility), With<AuroraCurtain>>();
+        // 2. Verify Aurora Sky Dome is visible when StellarWindAurora is active
+        let mut aurora_query = app.world_mut().query_filtered::<(&Transform, &Visibility), With<StarAuroraDome>>();
         let (aurora_tf, aurora_vis) = aurora_query.single(app.world());
         assert_eq!(*aurora_vis, Visibility::Visible, "Aurora must be visible when StellarWindAurora is active");
         assert_eq!(aurora_tf.translation.x, active_pos.x);
@@ -2488,7 +2462,7 @@ mod tests {
         let mut starfield_query = app.world_mut().query_filtered::<Entity, (With<CosmicStarfield>, With<NotShadowCaster>)>();
         assert_eq!(starfield_query.iter(app.world()).count(), 1, "Starfield must have NotShadowCaster");
 
-        let mut aurora_query = app.world_mut().query_filtered::<Entity, (With<AuroraCurtain>, With<NotShadowCaster>)>();
+        let mut aurora_query = app.world_mut().query_filtered::<Entity, (With<StarAuroraDome>, With<NotShadowCaster>)>();
         assert_eq!(aurora_query.iter(app.world()).count(), 1, "Aurora must have NotShadowCaster");
 
         let mut rain_query = app.world_mut().query_filtered::<Entity, (With<PrecipitationStreaks>, With<NotShadowCaster>)>();

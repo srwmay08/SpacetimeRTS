@@ -27,7 +27,7 @@ use spacetimedb_sdk::Table;
 use crate::core::*;
 use crate::components::*;
 use crate::network::SpacetimeConnection;
-use crate::creatures::create_voxel_pet_mesh;
+use crate::creatures::create_lowpoly_pet_mesh;
 use crate::module_bindings::voxel_chunk_table::VoxelChunkTableAccess;
 use crate::module_bindings::VoxelChunk;
 
@@ -1024,7 +1024,7 @@ pub fn spawn_initial_world(
 
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(create_voxel_pet_mesh()),
+            mesh: meshes.add(create_lowpoly_pet_mesh()),
             material: materials.add(StandardMaterial { 
                 base_color: Color::WHITE, 
                 perceptual_roughness: 0.85, 

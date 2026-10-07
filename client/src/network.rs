@@ -30,7 +30,7 @@ use crate::module_bindings::npc_brain_table::NpcBrainTableAccess;
 use crate::module_bindings::pet_component_table::PetComponentTableAccess; 
 use crate::core::*;
 use crate::components::*;
-use crate::creatures::create_voxel_peasant_mesh;
+use crate::creatures::create_lowpoly_peasant_mesh;
 
 const DB_NAME: &str = "hybrid-backend";
 
@@ -191,7 +191,7 @@ pub fn init_network_connection(
     player_entity_commands.with_children(|parent| {
         parent.spawn((
             PbrBundle {
-                mesh: meshes.add(create_voxel_peasant_mesh()),
+                mesh: meshes.add(create_lowpoly_peasant_mesh()),
                 material: materials.add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.85, ..default() }),
                 transform: BevyTransform::from_xyz(0.0, -1.05, 0.0),
                 ..default()

@@ -707,16 +707,6 @@ pub fn base_piece_name(piece_type: &str) -> &str {
 
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
-// ARCHIVED MULTI-RACE ARCHITECTURAL PROCEDURAL MODELS
-// ----------------------------------------------------------------------------
-// Architectural Note:
-// High Elf and Dark Elf procedural mesh builders have been archived into
-// `crate::legacy_architectural_factions` in favor of the unified Frontier
-// Timber & Stone aesthetic. Re-exported with deprecation for backward compatibility.
-#[allow(deprecated, unused_imports)]
-pub use crate::legacy_architectural_factions::*;
-
-
 // ----------------------------------------------------------------------------
 // DATA-DRIVEN BUILDING ASSET MANIFEST & GENERIC RUBBLE POOL RESOURCES
 // ----------------------------------------------------------------------------
@@ -881,24 +871,7 @@ impl BuildingAssetManifest {
         }
     }
 
-    #[deprecated(note = "Building system unified to Frontier style; use get_piece_mesh(piece_type, damage)")]
-    #[allow(deprecated)]
-    pub fn get_faction_piece_mesh(
-        &self,
-        _faction: BuildingFaction,
-        piece_type: ModularPieceType,
-        damage: VisualDamageState,
-    ) -> Handle<Mesh> {
-        self.get_piece_mesh(piece_type, damage)
-    }
-
     pub fn get_door_leaf_mesh(&self) -> Handle<Mesh> {
-        self.door_leaf.clone()
-    }
-
-    #[deprecated(note = "Building system unified to Frontier style; use get_door_leaf_mesh()")]
-    #[allow(deprecated)]
-    pub fn get_faction_door_leaf_mesh(&self, _faction: BuildingFaction) -> Handle<Mesh> {
         self.door_leaf.clone()
     }
 
@@ -910,22 +883,10 @@ impl BuildingAssetManifest {
         }
     }
 
-    #[deprecated(note = "Building system unified to Frontier style; use get_material(is_blueprint)")]
-    #[allow(deprecated)]
-    pub fn get_faction_material(&self, _faction: BuildingFaction, is_blueprint: bool) -> Handle<StandardMaterial> {
-        self.get_material(is_blueprint)
-    }
-
     pub fn get_collider(&self, piece_type: ModularPieceType) -> Collider {
         self.pieces.get(&piece_type)
             .map(|v| v.collider.clone())
             .unwrap_or_else(|| Collider::cuboid(4.0, 1.0, 4.0))
-    }
-
-    #[deprecated(note = "Building system unified to Frontier style; use get_collider(piece_type)")]
-    #[allow(deprecated)]
-    pub fn get_faction_collider(&self, _faction: BuildingFaction, piece_type: ModularPieceType) -> Collider {
-        self.get_collider(piece_type)
     }
 }
 
@@ -1877,20 +1838,6 @@ pub fn spawn_frontier_destruction_fx(
         Color::srgb(0.48, 0.46, 0.44),
         0.14,
     );
-}
-
-#[deprecated(note = "Building system unified to Frontier style; use spawn_frontier_destruction_fx")]
-#[allow(deprecated, dead_code)]
-pub fn spawn_faction_destruction_fx(
-
-    commands: &mut Commands,
-    manifest: &BuildingAssetManifest,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    origin: Vec3,
-    _faction: BuildingFaction,
-) {
-    spawn_frontier_destruction_fx(commands, manifest, meshes, materials, origin);
 }
 
 pub fn update_building_destruction_animations(

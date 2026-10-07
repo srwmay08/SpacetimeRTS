@@ -138,9 +138,6 @@ pub struct InteriorProp;
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SpacetimeBuildingId(pub u64);
 
-#[allow(unused_imports)]
-pub use SpacetimeBuildingId as SpacetimeEntity;
-
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct BuildingHealth {
     pub current: u32,
@@ -233,9 +230,6 @@ impl BuildingFaction {
     }
 }
 
-#[allow(unused_imports, deprecated)]
-pub use BuildingFaction as ArchitecturalFaction;
-
 /// Event emitted whenever a building is destroyed (via health zero, collapse cascade, or DB removal).
 /// Subscribed to by destruction animation and faction-specific shard/rubble generators.
 #[derive(Event, Debug, Clone)]
@@ -247,9 +241,6 @@ pub struct BuildingDestructionEvent {
     pub position: Vec3,
     pub rotation: Quat,
 }
-
-#[allow(unused_imports)]
-pub use BuildingDestructionEvent as BuildingDestroyedEvent;
 
 /// Event to trigger modular building spawns from network listeners or local commands.
 #[derive(Event, Debug, Clone)]

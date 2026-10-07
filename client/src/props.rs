@@ -59,10 +59,6 @@ pub fn create_lowpoly_rock_mesh(seed: u64) -> Mesh {
     builder.build()
 }
 
-pub fn create_voxel_rock_mesh() -> Mesh {
-    create_lowpoly_rock_mesh(1337)
-}
-
 /// Procedural low-poly faceted berry bush matching the BlendSwap #9440 geometric tree style.
 /// Emits a stylized, 8-faceted octahedral jewel berry with crisp flat-shaded normals.
 /// Highly optimized: requires only 8 triangles (24 vertices) compared to 20 triangles (60 vertices) of an icosahedron.
@@ -194,10 +190,6 @@ pub fn create_lowpoly_bush_mesh(seed: u64) -> Mesh {
     foliage.build()
 }
 
-pub fn create_voxel_bush_mesh() -> Mesh {
-    create_lowpoly_bush_mesh(1337)
-}
-
 /// Procedural low-poly fallen branch matching the geometric tree aesthetic.
 /// Features a tapered main limb with broken sapwood butt end and branching side twigs (~48 vertices).
 pub fn create_lowpoly_branch_mesh(seed: u64) -> Mesh {
@@ -233,10 +225,6 @@ pub fn create_lowpoly_branch_mesh(seed: u64) -> Mesh {
     builder.add_tapered_prism(t2_start, t2_end, 0.015, 0.006, 4, bark_dark, true, true);
 
     builder.build()
-}
-
-pub fn create_voxel_branch_mesh() -> Mesh {
-    create_lowpoly_branch_mesh(1337)
 }
 
 /// Procedural low-poly knapped flint shard.
@@ -281,10 +269,6 @@ pub fn create_lowpoly_flint_mesh(seed: u64) -> Mesh {
     builder.build()
 }
 
-pub fn create_voxel_flint_mesh() -> Mesh {
-    create_lowpoly_flint_mesh(1337)
-}
-
 /// Procedural low-poly loose river stone / granite pebble.
 /// Polyhedral faceted geometry with 20 flat facets and subtle quartz flecking (~60 vertices).
 pub fn create_lowpoly_stone_mesh(seed: u64) -> Mesh {
@@ -301,10 +285,6 @@ pub fn create_lowpoly_stone_mesh(seed: u64) -> Mesh {
     builder.add_faceted_blob(center, Vec3::new(rx, ry, rz), granite_base, 0, &mut rng, 0.18);
 
     builder.build()
-}
-
-pub fn create_voxel_stone_mesh() -> Mesh {
-    create_lowpoly_stone_mesh(1337)
 }
 
 #[cfg(test)]
@@ -396,20 +376,20 @@ mod tests {
     }
 
     #[test]
-    fn test_voxel_forwarders_compatibility() {
-        let rock = create_voxel_rock_mesh();
+    fn test_lowpoly_doodad_mesh_generation() {
+        let rock = create_lowpoly_rock_mesh(1337);
         assert!(rock.count_vertices() >= 150);
 
-        let bush = create_voxel_bush_mesh();
+        let bush = create_lowpoly_bush_mesh(1337);
         assert!(bush.count_vertices() >= 100);
 
-        let branch = create_voxel_branch_mesh();
+        let branch = create_lowpoly_branch_mesh(1337);
         assert!(branch.count_vertices() >= 24);
 
-        let flint = create_voxel_flint_mesh();
+        let flint = create_lowpoly_flint_mesh(1337);
         assert!(flint.count_vertices() >= 18);
 
-        let stone = create_voxel_stone_mesh();
+        let stone = create_lowpoly_stone_mesh(1337);
         assert!(stone.count_vertices() >= 30);
     }
 }
