@@ -174,6 +174,8 @@ pub fn is_weapon_two_handed(weapon_name: &str) -> bool {
             | "Longbow"
             | "Long Bow"
             | "2h Ranged Long Bow"
+            | "Crude Bow"
+            | "Bow"
             | "Shotgun"
             | "2h Ranged Shotgun"
             | "Sniper Rifle"
@@ -942,7 +944,7 @@ pub fn fire_bow(
     let mut inv = ctx.db.inventory().entity_id().find(session.entity_id)
         .ok_or_else(|| "Inventory not found.".to_string())?;
 
-    let has_bow = inv.slots.iter().any(|s| (s.item_type == "Crude Bow" || s.item_type == "Longbow") && s.count > 0);
+    let has_bow = inv.slots.iter().any(|s| (s.item_type == "Crude Bow" || s.item_type == "Longbow" || s.item_type == "Bow") && s.count > 0);
     if !has_bow {
         return Err("You must have a Bow equipped to fire.".to_string());
     }

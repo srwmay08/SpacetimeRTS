@@ -432,6 +432,26 @@ pub fn fps_look(
     }
 }
 
+/// Dynamically updates camera FOV for Aim-Down-Sights (ADS) zoom when drawing bows.
+pub fn update_camera_fov(
+    time: Res<Time>,
+    weapon_state: Res<crate::weapons::WeaponState>,
+    mut query: Query<&mut Projection, With<FpsCamera>>,
+) {
+    let Ok(mut projection) = query.get_single_mut() else { return; };
+    if let Projection::Perspective(ref mut persp) = *projection {
+        let base_fov = 65.0_f32.to_radians();
+        let target_fov = if weapon_state.current_weapon == crate::weapons::WeaponType::Bow && weapon_state.bow_drawing {
+            // ADS Zoom: Smoothly narrows FOV from 65° down to 50° at full draw
+            base_fov - (weapon_state.bow_charge * 15.0_f32.to_radians())
+        } else {
+            base_fov
+        };
+        let lerp_speed = if weapon_state.bow_drawing { 10.0 } else { 16.0 };
+        persp.fov += (target_fov - persp.fov) * (lerp_speed * time.delta_seconds()).min(1.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -474,5 +494,37 @@ mod tests {
         settings.free_look_pitch = 2.5;
         settings.free_look_pitch = settings.free_look_pitch.clamp(-1.4, 1.4);
         assert_eq!(settings.free_look_pitch, 1.4);
+    }
+
+    #[test]
+    fn test_camera_ads_fov_zoom() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(crate::weapons::WeaponState {
+            current_weapon: crate::weapons::WeaponType::Bow,
+            bow_charge: 1.0,
+            bow_drawing: true,
+            ..default()
+        });
+
+        let cam_id = app.world_mut().spawn((
+            FpsCamera,
+            Projection::Perspective(PerspectiveProjection {
+                fov: 65.0_f32.to_radians(),
+                ..default()
+            }),
+        )).id();
+
+        app.add_systems(Update, update_camera_fov);
+        app.update();
+        app.world_mut().resource_mut::<Time>().advance_by(std::time::Duration::from_millis(100));
+        app.update();
+
+        let proj = app.world().get::<Projection>(cam_id).unwrap();
+        if let Projection::Perspective(persp) = proj {
+            assert!(persp.fov < 65.0_f32.to_radians());
+        } else {
+            panic!("Expected Perspective projection");
+        }
     }
 }

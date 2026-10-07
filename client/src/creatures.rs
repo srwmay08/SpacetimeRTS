@@ -866,11 +866,26 @@ pub fn setup_sparring_yard(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     sparring_mode: Res<SparringMode>,
+    conn: Option<Res<crate::network::SpacetimeConnection>>,
 ) {
     if !sparring_mode.0 {
         return;
     }
     info!("🥋 Sparring Yard initialized! Spawning Martial Arts Training Dummy & Sparring Goblin Raider.");
+
+    // Provision bows, arrows, and sparring equipment directly to player's inventory
+    if let Some(conn) = conn {
+        use crate::module_bindings::admin_give_item_reducer::admin_give_item;
+        use crate::module_bindings::equip_weapon_reducer::equip_weapon;
+
+        let _ = conn.db.reducers.admin_give_item("Crude Bow".to_string(), 1);
+        let _ = conn.db.reducers.admin_give_item("Longbow".to_string(), 1);
+        let _ = conn.db.reducers.admin_give_item("Flint Arrow".to_string(), 50);
+        let _ = conn.db.reducers.admin_give_item("Wood Arrow".to_string(), 50);
+        let _ = conn.db.reducers.admin_give_item("Longsword".to_string(), 1);
+        let _ = conn.db.reducers.admin_give_item("Wooden Shield".to_string(), 1);
+        let _ = conn.db.reducers.equip_weapon("MainHand".to_string(), "Crude Bow".to_string());
+    }
 
     let spawn_x = 0.0;
     let spawn_z = 0.0;

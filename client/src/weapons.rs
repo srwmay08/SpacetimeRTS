@@ -18,6 +18,7 @@ use crate::components::*;
 use crate::core::*;
 use crate::trees::LowPolyMeshBuilder;
 
+use avian3d::prelude::LinearVelocity;
 use spacetime_rts_logic::HandSide;
 
 // ----------------------------------------------------------------------------
@@ -233,6 +234,7 @@ pub struct WeaponState {
     // Bow Mechanics
     pub bow_charge: f32, // 0.0 to 1.0
     pub bow_drawing: bool,
+    pub bow_nock_timer: Timer,
 
     // Crossbow Mechanics
     pub crossbow_loaded: bool,
@@ -268,6 +270,9 @@ pub struct WeaponState {
 
 impl Default for WeaponState {
     fn default() -> Self {
+        let mut nock_timer = Timer::from_seconds(0.32, TimerMode::Once);
+        nock_timer.set_elapsed(std::time::Duration::from_millis(350));
+
         Self {
             current_weapon: WeaponType::None,
             offhand_weapon: WeaponType::None,
@@ -275,6 +280,7 @@ impl Default for WeaponState {
             offhand_last_hand: HandSide::Left,
             bow_charge: 0.0,
             bow_drawing: false,
+            bow_nock_timer: nock_timer,
             crossbow_loaded: true,
             crossbow_reload_timer: Timer::from_seconds(1.4, TimerMode::Once),
             hand_crossbow_loaded: true,
@@ -1206,9 +1212,9 @@ pub fn animate_weapon_viewmodel(
     mut weapon_state: ResMut<WeaponState>,
     mut swing_state: ResMut<SwingState>,
     hand_side: Res<EquippedHandSide>,
-    mut root_q: Query<(&ViewModelWeaponRoot, &mut BevyTransform)>,
-    mut pump_q: Query<&mut BevyTransform, (With<ViewModelPumpSlide>, Without<ViewModelWeaponRoot>)>,
-    mut arrow_q: Query<&mut Visibility, (With<ViewModelBowArrow>, Without<ViewModelCrossbowBolt>)>,
+    mut root_q: Query<(&ViewModelWeaponRoot, &mut BevyTransform), (Without<ViewModelBowArrow>, Without<ViewModelPumpSlide>)>,
+    mut pump_q: Query<&mut BevyTransform, (With<ViewModelPumpSlide>, Without<ViewModelWeaponRoot>, Without<ViewModelBowArrow>)>,
+    mut arrow_q: Query<(&mut Visibility, &mut BevyTransform), (With<ViewModelBowArrow>, Without<ViewModelWeaponRoot>, Without<ViewModelPumpSlide>, Without<ViewModelCrossbowBolt>)>,
     mut bolt_q: Query<&mut Visibility, (With<ViewModelCrossbowBolt>, Without<ViewModelBowArrow>)>,
 ) {
     let dt = time.delta_seconds();
@@ -1309,7 +1315,7 @@ pub fn animate_weapon_viewmodel(
         }
     }
 
-    // 2. Bolt/Arrow Visibility
+    // 2. Bolt/Arrow Visibility & Dynamic Arrow Pullback
     for mut vis in bolt_q.iter_mut() {
         let is_visible = match weapon_state.current_weapon {
             WeaponType::Crossbow => weapon_state.crossbow_loaded,
@@ -1319,8 +1325,27 @@ pub fn animate_weapon_viewmodel(
         *vis = if is_visible { Visibility::Inherited } else { Visibility::Hidden };
     }
 
-    for mut vis in arrow_q.iter_mut() {
-        *vis = Visibility::Inherited;
+    if !weapon_state.bow_nock_timer.finished() {
+        weapon_state.bow_nock_timer.tick(time.delta());
+    }
+
+    for (mut vis, mut arrow_t) in arrow_q.iter_mut() {
+        if weapon_state.current_weapon == WeaponType::Bow {
+            // Hide nocked arrow immediately upon firing until nock timer finishes
+            *vis = if weapon_state.bow_nock_timer.finished() {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+
+            // Dynamic arrow pullback along bow shelf:
+            // Base rest: Vec3::new(-0.01, 0.02, -0.12).
+            // When drawn: pulled backwards (+Z) by up to 0.20m towards the archer.
+            let draw_offset = weapon_state.bow_charge * 0.20;
+            arrow_t.translation = Vec3::new(-0.01, 0.02, -0.12 + draw_offset);
+        } else {
+            *vis = Visibility::Inherited;
+        }
     }
 
     // 3. Recoil Recovery (Exponential Decay) & Dynamic Bloom Decay
@@ -1398,8 +1423,8 @@ pub fn animate_weapon_viewmodel(
             // Bow ADS & Draw Stance
             if weapon_state.current_weapon == WeaponType::Bow && weapon_state.bow_drawing {
                 let charge = weapon_state.bow_charge;
-                current_offset += Vec3::new(-0.10 * charge, 0.05 * charge, 0.12 * charge);
-                current_rot *= Quat::from_rotation_z(0.35 * charge) * Quat::from_rotation_x(0.12 * charge);
+                current_offset += Vec3::new(-0.11 * charge, 0.06 * charge, 0.14 * charge);
+                current_rot *= Quat::from_rotation_z(0.38 * charge) * Quat::from_rotation_x(0.14 * charge);
             }
 
             // Crossbow Cranking Stance
@@ -1745,24 +1770,17 @@ pub fn spawn_projectile_entity(
     parent.with_children(|builder| {
         match kind {
             ProjectileKind::Arrow => {
-                // Shaft
-                builder.spawn(PbrBundle {
-                    mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.015, 0.015, 0.52)),
-                    material: wood_mat.clone(),
+                let arrow_mesh = meshes.add(create_lowpoly_arrow_mesh());
+                let arrow_mat = materials.add(StandardMaterial {
+                    base_color: Color::WHITE,
+                    perceptual_roughness: 0.65,
+                    metallic: 0.35,
+                    cull_mode: None,
                     ..default()
                 });
-                // Flint arrowhead
                 builder.spawn(PbrBundle {
-                    mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.03, 0.01, 0.05)),
-                    material: iron_mat.clone(),
-                    transform: BevyTransform::from_xyz(0.0, 0.0, -0.27),
-                    ..default()
-                });
-                // Red fletching fins
-                builder.spawn(PbrBundle {
-                    mesh: meshes.add(bevy::math::primitives::Cuboid::new(0.008, 0.04, 0.07)),
-                    material: red_mat.clone(),
-                    transform: BevyTransform::from_xyz(0.0, 0.0, 0.22),
+                    mesh: arrow_mesh,
+                    material: arrow_mat,
                     ..default()
                 });
             }
@@ -1892,6 +1910,18 @@ pub fn spawn_projectile_entity(
             }
         }
     });
+}
+
+/// Smoothly reorients in-flight arrow projectiles along their velocity vector,
+/// creating authentic aerodynamic ballistic arc curvature as gravity pulls the arrow.
+pub fn update_arrow_projectiles(
+    mut query: Query<(&mut BevyTransform, &LinearVelocity), With<ArrowProjectile>>,
+) {
+    for (mut transform, velocity) in query.iter_mut() {
+        if velocity.0.length_squared() > 1.0 {
+            transform.look_to(velocity.0.normalize(), Vec3::Y);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2039,5 +2069,48 @@ mod tests {
 
         let slide = create_lowpoly_pumpslide_mesh();
         assert!(slide.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() > 0);
+    }
+
+    #[test]
+    fn test_bow_arrow_pullback_and_projectile_trajectory() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(WeaponState {
+            current_weapon: WeaponType::Bow,
+            bow_charge: 0.75,
+            bow_drawing: true,
+            ..default()
+        });
+        app.insert_resource(SwingState::default());
+        app.insert_resource(EquippedHandSide(HandSide::Right));
+
+        let arrow_id = app.world_mut().spawn((
+            ViewModelBowArrow,
+            Visibility::Inherited,
+            BevyTransform::from_xyz(-0.01, 0.02, -0.12),
+        )).id();
+
+        let proj_id = app.world_mut().spawn((
+            ArrowProjectile,
+            LinearVelocity(Vec3::new(30.0, -10.0, 0.0)),
+            BevyTransform::default(),
+        )).id();
+
+        app.add_systems(Update, (
+            animate_weapon_viewmodel,
+            update_arrow_projectiles,
+        ));
+
+        app.update();
+
+        // 1. Arrow should have shifted back along +Z proportional to bow_charge (0.75 * 0.20 = 0.15)
+        let arrow_trans = app.world().get::<BevyTransform>(arrow_id).unwrap();
+        assert!((arrow_trans.translation.z - (-0.12 + 0.75 * 0.20)).abs() < 1e-4);
+
+        // 2. Projectile should have aligned forward with its velocity vector
+        let proj_trans = app.world().get::<BevyTransform>(proj_id).unwrap();
+        let expected_dir = Vec3::new(30.0, -10.0, 0.0).normalize();
+        let actual_forward = proj_trans.forward().as_vec3();
+        assert!((actual_forward.dot(expected_dir) - 1.0).abs() < 0.01);
     }
 }

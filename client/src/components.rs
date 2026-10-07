@@ -356,6 +356,10 @@ pub struct Particle {
     pub timer: Timer, 
 }
 
+/// Tag for in-flight arrow projectiles requiring aerodynamic trajectory alignment.
+#[derive(Component)]
+pub struct ArrowProjectile;
+
 // ----------------------------------------------------------------------------
 // RETICLE-ADJACENT HUD & CROSSHAIR CUSTOMIZATION
 // ----------------------------------------------------------------------------

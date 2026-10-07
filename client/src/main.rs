@@ -132,15 +132,11 @@ fn main() {
         .insert_resource(CachedPlayerEntity::default())
         .insert_resource(SparringMode(is_sparring))
         .insert_resource(if is_sparring {
-            ActiveEquippedItem(Some("Longsword".to_string()))
+            ActiveEquippedItem(Some("Crude Bow".to_string()))
         } else {
             ActiveEquippedItem(None)
         })
-        .insert_resource(if is_sparring {
-            ActiveOffHandItem(Some("Wooden Shield".to_string()))
-        } else {
-            ActiveOffHandItem(None)
-        })
+        .insert_resource(ActiveOffHandItem(None))
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState::default())
         .init_resource::<MouseFlickTracker>()
@@ -255,9 +251,10 @@ fn main() {
             handle_crosshair_menu_interactions,
             tactical_ability_input_system,
             update_tactical_abilities_system,
+            update_arrow_projectiles,
         ).run_if(in_state(GameState::InGame)))    
 
-        .add_systems(Update, fps_look.run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
+        .add_systems(Update, (fps_look, update_camera_fov).run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
         .add_systems(Update, (
             rts_camera_controller,
             update_marquee_ui,

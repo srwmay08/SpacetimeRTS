@@ -263,26 +263,24 @@ pub fn hotbar_input_system(
     if let Some(l) = loadout {
         if l.main_hand != "None" && !l.main_hand.is_empty() {
             active_item.0 = Some(l.main_hand.clone());
-        } else if sparring_mode.0 {
-            active_item.0 = Some("Longsword".to_string());
-        } else {
+        } else if sparring_mode.0 && active_item.0.is_none() {
+            active_item.0 = Some("Crude Bow".to_string());
+        } else if !sparring_mode.0 {
             active_item.0 = None;
         }
 
-        if l.off_hand != "None" && !l.off_hand.is_empty() {
+        let is_two_handed = active_item.0.as_deref().map_or(false, |m| WeaponType::from_item_name(Some(m)).is_two_handed());
+
+        if !is_two_handed && l.off_hand != "None" && !l.off_hand.is_empty() {
             active_offhand.0 = Some(l.off_hand.clone());
-        } else if sparring_mode.0 {
-            active_offhand.0 = Some("Wooden Shield".to_string());
         } else {
             active_offhand.0 = None;
         }
     } else if sparring_mode.0 {
         if active_item.0.is_none() {
-            active_item.0 = Some("Longsword".to_string());
+            active_item.0 = Some("Crude Bow".to_string());
         }
-        if active_offhand.0.is_none() {
-            active_offhand.0 = Some("Wooden Shield".to_string());
-        }
+        active_offhand.0 = None;
     } else {
         active_item.0 = None;
         active_offhand.0 = None;
@@ -786,33 +784,40 @@ pub fn context_aware_action_dispatcher(
                                             let charge = weapons.weapon_state.bow_charge;
                                             weapons.weapon_state.bow_drawing = false;
                                             weapons.weapon_state.bow_charge = 0.0;
+                                            weapons.weapon_state.bow_nock_timer.reset();
 
-                                            // Draw charge scales arrow velocity: 22.0m/s (quick tap) to 55.0m/s (full draw)
+                                            // Draw charge scales arrow velocity: 22.0m/s (quick release) to 55.0m/s (full draw)
                                             let arrow_speed = 22.0 + (charge * 33.0);
-                                            let tracer_mesh = weapons.meshes.add(bevy::math::primitives::Cylinder::new(0.015, 0.8));
-                                            let tracer_mat = weapons.materials.add(StandardMaterial {
-                                                base_color: Color::srgb(0.8, 0.7, 0.5),
-                                                unlit: true,
+                                            let arrow_mesh = weapons.meshes.add(crate::weapons::create_lowpoly_arrow_mesh());
+                                            let arrow_mat = weapons.materials.add(StandardMaterial {
+                                                base_color: Color::WHITE,
+                                                perceptual_roughness: 0.65,
+                                                metallic: 0.35,
+                                                cull_mode: None,
                                                 ..default()
                                             });
 
-                                            let mut arrow_transform = BevyTransform::from_translation(origin + dir * 0.9)
-                                                .looking_at(origin + dir * 5.0, Vec3::Y);
-                                            arrow_transform.rotate_local_x(std::f32::consts::FRAC_PI_2);
+                                            let arrow_transform = BevyTransform::from_translation(origin + dir * 0.9)
+                                                .looking_to(dir, Vec3::Y);
 
                                             commands.spawn((
                                                 PbrBundle {
-                                                    mesh: tracer_mesh,
-                                                    material: tracer_mat,
+                                                    mesh: arrow_mesh,
+                                                    material: arrow_mat,
                                                     transform: arrow_transform,
                                                     ..default()
                                                 },
                                                 RigidBody::Dynamic,
                                                 LinearVelocity(dir * arrow_speed),
-                                                Particle { timer: Timer::from_seconds(1.5, TimerMode::Once) },
+                                                GravityScale(0.55),
+                                                Particle { timer: Timer::from_seconds(4.0, TimerMode::Once) },
+                                                ArrowProjectile,
                                             ));
 
-                                            weapons.weapon_state.recoil_offset += Vec3::new(0.0, 0.015, -0.04);
+                                            // Physical release recoil kick
+                                            weapons.weapon_state.recoil_offset += Vec3::new(0.012 * charge, 0.035 * charge, -0.065 * charge);
+                                            weapons.weapon_state.recoil_rot *= Quat::from_rotation_x(-0.18 * charge) * Quat::from_rotation_z(-0.10 * charge);
+                                            weapons.weapon_state.dynamic_bloom += 8.0 * charge;
 
                                             if let Err(e) = conn.db.reducers.fire_bow(
                                                 tick.0, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z
