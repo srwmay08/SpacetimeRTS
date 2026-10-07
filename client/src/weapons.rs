@@ -1235,7 +1235,6 @@ pub fn animate_weapon_viewmodel(
     mut swing_state: ResMut<SwingState>,
     hand_side: Res<EquippedHandSide>,
     mut root_q: Query<(&ViewModelWeaponRoot, &mut BevyTransform)>,
-    mut tp_root_q: Query<(&ThirdPersonWeaponRoot, &mut BevyTransform), Without<ViewModelWeaponRoot>>,
     mut pump_q: Query<&mut BevyTransform, (With<ViewModelPumpSlide>, Without<ViewModelWeaponRoot>)>,
     mut arrow_q: Query<&mut Visibility, (With<ViewModelBowArrow>, Without<ViewModelCrossbowBolt>)>,
     mut bolt_q: Query<&mut Visibility, (With<ViewModelCrossbowBolt>, Without<ViewModelBowArrow>)>,
@@ -1487,8 +1486,17 @@ pub fn animate_weapon_viewmodel(
             root_t.rotation = current_rot;
         }
     }
+}
 
-    // 5. Transform Animation on ThirdPersonWeaponRoot (visible in 3rd person / RTS camera)
+/// Animates 3rd-person held weapon models (swords and shields) attached to the character body.
+pub fn animate_third_person_weapons(
+    time: Res<Time>,
+    weapon_state: Res<WeaponState>,
+    swing_state: Res<SwingState>,
+    hand_side: Res<EquippedHandSide>,
+    mut tp_root_q: Query<(&ThirdPersonWeaponRoot, &mut BevyTransform)>,
+) {
+    let dt = time.delta_seconds();
     let is_left = hand_side.0 == HandSide::Left;
     for (tp_root, mut tp_t) in tp_root_q.iter_mut() {
         if !tp_root.is_offhand {
@@ -1967,5 +1975,38 @@ mod tests {
 
         assert!(WeaponType::WoodenShield.is_one_handed());
         assert!(!WeaponType::WoodenShield.is_two_handed());
+    }
+
+    #[test]
+    fn test_weapon_systems_ecs_disjointness_and_registration() {
+        // Architectural Guard: Verifies that weapon systems have disjoint queries and do not cause B0001 panics
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(bevy::asset::AssetPlugin::default());
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+
+        app.insert_resource(WeaponState::default());
+        app.insert_resource(SwingState::default());
+        app.insert_resource(EquippedHandSide(HandSide::Right));
+        app.insert_resource(ActiveEquippedItem(Some("Longsword".to_string())));
+        app.insert_resource(ActiveOffHandItem(Some("Wooden Shield".to_string())));
+
+        app.add_systems(Update, (
+            spawn_or_update_view_model_weapon,
+            animate_weapon_viewmodel,
+            animate_third_person_weapons,
+            sync_third_person_weapon_render_layers,
+        ));
+
+        // Spawns camera and player body
+        let cam = app.world_mut().spawn((FpsCamera, BevyTransform::default())).id();
+        let _player = app.world_mut().spawn((PlayerBody, BevyTransform::default())).id();
+
+        // Run update - this will panic with B0001 if any query parameters conflict!
+        app.update();
+
+        assert_eq!(app.world().resource::<WeaponState>().current_weapon, WeaponType::Longsword);
+        assert_eq!(app.world().resource::<WeaponState>().offhand_weapon, WeaponType::WoodenShield);
     }
 }

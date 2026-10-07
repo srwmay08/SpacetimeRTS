@@ -242,6 +242,7 @@ fn main() {
         .add_systems(Update, (
             spawn_or_update_view_model_weapon,
             animate_weapon_viewmodel,
+            animate_third_person_weapons,
             sync_third_person_weapon_render_layers,
             weapon_reload_input_system,
             update_weapon_hud,
