@@ -187,8 +187,10 @@ pub struct VisualFallHazard {
 /// Architectural Faction Styles based on early 2000s MMO aesthetics:
 /// - HighElf (The Pristine Bastion): Polished mint-green marble, lapis/obsidian roofs, gold filigree, sharp sweeping geometry.
 /// - Human (The Utilitarian Fortress): Rough-hewn grey stone blocks, red brick walls, iron-banded timber, blocky fortified geometry.
-/// - DarkElf (The Subterranean Spire): Dark indigo/black cavern stone, imposing pillars, spiked arches, glowing neon runes.
-/// - Barbarian (Bear-Claw Stronghold): Rough timber logs, animal hide, bone carvings, fortified palisades.
+/// Architectural Faction:
+/// [DEPRECATED]: Multi-race architectural mesh variations have been archived in
+/// `legacy_architectural_factions.rs`. Single Frontier Wood & Stone style is canonical.
+/// Retained for network and historical event payload compatibility.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum BuildingFaction {
     #[default]
@@ -199,12 +201,13 @@ pub enum BuildingFaction {
 }
 
 impl BuildingFaction {
+
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Human => "Human (Utilitarian Fortress)",
-            Self::HighElf => "High Elf (Pristine Bastion)",
-            Self::DarkElf => "Dark Elf (Subterranean Spire)",
-            Self::Barbarian => "Barbarian (Bear-Claw Stronghold)",
+            Self::Human => "Frontier Wood & Stone",
+            Self::HighElf => "High Elf (Archived)",
+            Self::DarkElf => "Dark Elf (Archived)",
+            Self::Barbarian => "Barbarian (Archived)",
         }
     }
 
@@ -230,7 +233,7 @@ impl BuildingFaction {
     }
 }
 
-#[allow(unused_imports)]
+#[allow(unused_imports, deprecated)]
 pub use BuildingFaction as ArchitecturalFaction;
 
 /// Event emitted whenever a building is destroyed (via health zero, collapse cascade, or DB removal).
@@ -262,9 +265,11 @@ pub struct SpawnBuildingEvent {
 /// Ephemeral collapse entity that shakes, crumbles, and fades out over duration before leaving a ruin pile.
 #[derive(Component, Debug, Clone)]
 pub struct BuildingDestructionAnimation {
+    #[allow(dead_code)]
     pub faction: BuildingFaction,
     #[allow(dead_code)]
     pub piece_type: ModularPieceType,
+
     pub elapsed: f32,
     pub duration: f32,
     pub origin: Vec3,

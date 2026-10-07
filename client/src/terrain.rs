@@ -262,8 +262,10 @@ impl Plugin for TerrainPlugin {
 // TERRAIN HEIGHT LOOKUP & DETERMINISTIC CANONICAL NOISE
 // ----------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub const VOXEL_CHUNK_SIZE: usize = 16;
 pub const VOXEL_SIZE: f32 = 0.25;
+
 
 static PERLIN: OnceLock<Perlin> = OnceLock::new();
 static DEFAULT_TERRAIN_PARAMS: OnceLock<TerrainParams> = OnceLock::new();

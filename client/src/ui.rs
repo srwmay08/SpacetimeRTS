@@ -3117,11 +3117,11 @@ pub fn update_build_ui(
                     (format!("Piece: {}", build_state.selected_piece.name()), format!("{} Wood", build_state.selected_piece.wood_cost()))
                 };
                 text.sections[0].value = format!(
-                    "BUILD MODE: ACTIVE | Faction: {} | {} (Cost: {})\n[Y] Toggle Template Mode | [R] Cycle | [T] Cycle Faction | [Q/E] Rotate | [Right-Click] Catalog | [B] Exit", 
-                    build_state.selected_faction.name(),
+                    "BUILD MODE: ACTIVE | Style: Frontier Wood & Stone | {} (Cost: {})\n[Y] Toggle Template Mode | [R] Cycle Piece | [Q/E] Rotate | [Right-Click] Catalog | [B] Exit", 
                     mode_label,
                     cost_label
                 );
+
             } else {
                 *vis = Visibility::Hidden;
             }

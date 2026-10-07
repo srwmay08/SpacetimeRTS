@@ -28,6 +28,7 @@ pub mod creatures;
 pub mod resource_nodes;
 pub mod grass;
 pub mod templates;
+pub mod legacy_architectural_factions;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
