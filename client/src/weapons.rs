@@ -309,6 +309,11 @@ pub struct ViewModelWeaponRoot {
     pub is_offhand: bool,
 }
 
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThirdPersonWeaponRoot {
+    pub is_offhand: bool,
+}
+
 #[derive(Component)]
 pub struct ViewModelPumpSlide;
 
@@ -421,7 +426,9 @@ pub fn spawn_or_update_view_model_weapon(
     mut weapon_state: ResMut<WeaponState>,
     hand_side: Res<EquippedHandSide>,
     camera_query: Query<Entity, With<FpsCamera>>,
+    player_query: Query<Entity, With<PlayerBody>>,
     existing_weapon_q: Query<Entity, With<ViewModelWeaponRoot>>,
+    existing_tp_q: Query<Entity, With<ThirdPersonWeaponRoot>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -437,8 +444,11 @@ pub fn spawn_or_update_view_model_weapon(
         return;
     }
 
-    // Despawn old weapon models
+    // Despawn old weapon models (both 1st-person viewmodels and 3rd-person body attachments)
     for entity in existing_weapon_q.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+    for entity in existing_tp_q.iter() {
         commands.entity(entity).despawn_recursive();
     }
 
@@ -511,9 +521,12 @@ pub fn spawn_or_update_view_model_weapon(
         }),
     };
 
+    let is_left = hand_side.0 == HandSide::Left;
+    let should_spawn_offhand = (desired_main == WeaponType::None && desired_off == WeaponType::None)
+        || (desired_off != WeaponType::None && (desired_main.is_one_handed() || desired_main == WeaponType::None));
+
     commands.entity(camera_entity).with_children(|parent| {
         // 1. Main Hand Viewmodel Root (or Right Fist if Unarmed)
-        let is_left = hand_side.0 == HandSide::Left;
         let main_pos = get_default_weapon_pos(desired_main, is_left);
         let main_rot = match desired_main {
             WeaponType::Longsword | WeaponType::Greatsword | WeaponType::Rapier => {
@@ -541,9 +554,6 @@ pub fn spawn_or_update_view_model_weapon(
         // Only spawn off-hand if:
         // - player is fully unarmed (both hands unarmed -> brawler stance with both fists)
         // - OR off-hand has an explicitly equipped weapon while main hand is 1-handed or None
-        let should_spawn_offhand = (desired_main == WeaponType::None && desired_off == WeaponType::None)
-            || (desired_off != WeaponType::None && (desired_main.is_one_handed() || desired_main == WeaponType::None));
-
         if should_spawn_offhand {
             let off_is_left = !is_left;
             let off_pos = get_default_weapon_pos(desired_off, off_is_left);
@@ -574,6 +584,68 @@ pub fn spawn_or_update_view_model_weapon(
             });
         }
     });
+
+    // 2. Spawn Third-Person Weapon Models on Player Body (RenderLayers::layer(2))
+    if let Ok(player_entity) = player_query.get_single() {
+        commands.entity(player_entity).with_children(|body| {
+            // Main hand on player character (peasant right hand)
+            let tp_main_pos = if is_left {
+                Vec3::new(-0.28, -0.55, 0.08)
+            } else {
+                Vec3::new(0.28, -0.55, 0.08)
+            };
+            let tp_main_rot = match desired_main {
+                WeaponType::Longsword | WeaponType::Greatsword | WeaponType::Rapier => {
+                    Quat::from_rotation_x(-0.75)
+                        * Quat::from_rotation_y(if is_left { -0.15 } else { 0.15 })
+                        * Quat::from_rotation_z(if is_left { 0.25 } else { -0.25 })
+                }
+                _ => Quat::from_rotation_x(-0.4),
+            };
+
+            body.spawn((
+                SpatialBundle {
+                    transform: BevyTransform::from_translation(tp_main_pos).with_rotation(tp_main_rot),
+                    ..default()
+                },
+                ThirdPersonWeaponRoot { is_offhand: false },
+                RenderLayers::layer(2),
+            )).with_children(|builder| {
+                spawn_weapon_voxels(builder, desired_main, &mut meshes, &palette);
+            });
+
+            // Off hand on player character (peasant left hand / shield)
+            if should_spawn_offhand {
+                let off_is_left = !is_left;
+                let tp_off_pos = if off_is_left {
+                    Vec3::new(-0.30, -0.52, 0.06)
+                } else {
+                    Vec3::new(0.30, -0.52, 0.06)
+                };
+                let tp_off_rot = match desired_off {
+                    WeaponType::WoodenShield => {
+                        if off_is_left {
+                            Quat::from_rotation_y(1.57) * Quat::from_rotation_x(0.12)
+                        } else {
+                            Quat::from_rotation_y(-1.57) * Quat::from_rotation_x(0.12)
+                        }
+                    }
+                    _ => Quat::IDENTITY,
+                };
+
+                body.spawn((
+                    SpatialBundle {
+                        transform: BevyTransform::from_translation(tp_off_pos).with_rotation(tp_off_rot),
+                        ..default()
+                    },
+                    ThirdPersonWeaponRoot { is_offhand: true },
+                    RenderLayers::layer(2),
+                )).with_children(|builder| {
+                    spawn_weapon_voxels(builder, desired_off, &mut meshes, &palette);
+                });
+            }
+        });
+    }
 }
 
 fn spawn_weapon_voxels(
@@ -860,10 +932,11 @@ fn spawn_weapon_voxels(
                     spawn_voxel_box(builder, &mut meshes, fire_orange.clone(), Vec3::new(0.025, 0.025, 0.025), Vec3::new(0.08, 0.06, -0.18));
                 }
                 WeaponType::WoodenShield => {
-                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.44, 0.44, 0.04), Vec3::new(0.0, 0.0, 0.0));
-                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.46, 0.46, 0.02), Vec3::new(0.0, 0.0, -0.01));
-                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.14, 0.14, 0.08), Vec3::new(0.0, 0.0, -0.04));
-                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.18, 0.05, 0.03), Vec3::new(0.0, 0.0, 0.03));
+                    // Compact combat buckler / targe: ~70% reduced screen obstruction
+                    spawn_voxel_box(builder, &mut meshes, wood_light.clone(), Vec3::new(0.22, 0.24, 0.025), Vec3::new(0.0, 0.0, 0.0));
+                    spawn_voxel_box(builder, &mut meshes, iron_dark.clone(), Vec3::new(0.24, 0.26, 0.015), Vec3::new(0.0, 0.0, -0.01));
+                    spawn_voxel_box(builder, &mut meshes, iron_bright.clone(), Vec3::new(0.07, 0.07, 0.04), Vec3::new(0.0, 0.0, -0.025));
+                    spawn_voxel_box(builder, &mut meshes, wood_dark.clone(), Vec3::new(0.09, 0.03, 0.02), Vec3::new(0.0, 0.0, 0.02));
                 }
                 WeaponType::None => {
                     // Authentic Clenched Brawler Fist (Unarmed Default)
@@ -1162,6 +1235,7 @@ pub fn animate_weapon_viewmodel(
     mut swing_state: ResMut<SwingState>,
     hand_side: Res<EquippedHandSide>,
     mut root_q: Query<(&ViewModelWeaponRoot, &mut BevyTransform)>,
+    mut tp_root_q: Query<(&ThirdPersonWeaponRoot, &mut BevyTransform), Without<ViewModelWeaponRoot>>,
     mut pump_q: Query<&mut BevyTransform, (With<ViewModelPumpSlide>, Without<ViewModelWeaponRoot>)>,
     mut arrow_q: Query<&mut Visibility, (With<ViewModelBowArrow>, Without<ViewModelCrossbowBolt>)>,
     mut bolt_q: Query<&mut Visibility, (With<ViewModelCrossbowBolt>, Without<ViewModelBowArrow>)>,
@@ -1396,8 +1470,8 @@ pub fn animate_weapon_viewmodel(
 
             // Shield Block Guard
             if swing_state.is_blocking && weapon_state.offhand_weapon == WeaponType::WoodenShield {
-                let block_pos = Vec3::new(-0.02, 0.0, -0.22);
-                let block_rot = Quat::from_rotation_y(-0.08) * Quat::from_rotation_x(0.06);
+                let block_pos = Vec3::new(-0.06, -0.09, -0.24);
+                let block_rot = Quat::from_rotation_y(-0.14) * Quat::from_rotation_x(0.14) * Quat::from_rotation_z(0.05);
                 current_offset = current_offset.lerp(block_pos, (dt * 18.0).min(1.0));
                 current_rot = current_rot.slerp(block_rot, (dt * 18.0).min(1.0));
             } else if swing_state.offhand_is_swinging {
@@ -1411,6 +1485,90 @@ pub fn animate_weapon_viewmodel(
 
             root_t.translation = current_offset;
             root_t.rotation = current_rot;
+        }
+    }
+
+    // 5. Transform Animation on ThirdPersonWeaponRoot (visible in 3rd person / RTS camera)
+    let is_left = hand_side.0 == HandSide::Left;
+    for (tp_root, mut tp_t) in tp_root_q.iter_mut() {
+        if !tp_root.is_offhand {
+            // Main-hand weapon (sword/mace/axe)
+            let base_pos = if is_left { Vec3::new(-0.28, -0.55, 0.08) } else { Vec3::new(0.28, -0.55, 0.08) };
+            let base_rot = match weapon_state.current_weapon {
+                WeaponType::Longsword | WeaponType::Greatsword | WeaponType::Rapier => {
+                    Quat::from_rotation_x(-0.75)
+                        * Quat::from_rotation_y(if is_left { -0.15 } else { 0.15 })
+                        * Quat::from_rotation_z(if is_left { 0.25 } else { -0.25 })
+                }
+                _ => Quat::from_rotation_x(-0.4),
+            };
+
+            if swing_state.is_swinging {
+                let t = swing_state.timer.fraction();
+                let swing_arc = (t * std::f32::consts::PI).sin() * 1.5;
+                tp_t.translation = base_pos + Vec3::new(0.0, 0.08 * swing_arc, 0.18 * swing_arc);
+                tp_t.rotation = base_rot * Quat::from_rotation_x(swing_arc);
+            } else {
+                tp_t.translation = tp_t.translation.lerp(base_pos, (dt * 12.0).min(1.0));
+                tp_t.rotation = tp_t.rotation.slerp(base_rot, (dt * 12.0).min(1.0));
+            }
+        } else {
+            // Off-hand weapon (shield)
+            let off_is_left = !is_left;
+            let idle_pos = if off_is_left { Vec3::new(-0.30, -0.52, 0.06) } else { Vec3::new(0.30, -0.52, 0.06) };
+            let idle_rot = match weapon_state.offhand_weapon {
+                WeaponType::WoodenShield => {
+                    if off_is_left {
+                        Quat::from_rotation_y(1.57) * Quat::from_rotation_x(0.12)
+                    } else {
+                        Quat::from_rotation_y(-1.57) * Quat::from_rotation_x(0.12)
+                    }
+                }
+                _ => Quat::IDENTITY,
+            };
+
+            if swing_state.is_blocking && weapon_state.offhand_weapon == WeaponType::WoodenShield {
+                // Raise shield in front of character's chest in 3rd person
+                let block_pos = Vec3::new(-0.08, -0.42, 0.26);
+                let block_rot = Quat::from_rotation_y(0.08) * Quat::from_rotation_x(0.1);
+                tp_t.translation = tp_t.translation.lerp(block_pos, (dt * 18.0).min(1.0));
+                tp_t.rotation = tp_t.rotation.slerp(block_rot, (dt * 18.0).min(1.0));
+            } else if swing_state.offhand_is_swinging {
+                let t = swing_state.offhand_timer.fraction();
+                let punch_arc = (t * std::f32::consts::PI).sin() * 0.22;
+                let punch_pos = idle_pos + Vec3::new(0.0, 0.05, punch_arc);
+                tp_t.translation = tp_t.translation.lerp(punch_pos, (dt * 20.0).min(1.0));
+                tp_t.rotation = tp_t.rotation.slerp(idle_rot * Quat::from_rotation_x(punch_arc), (dt * 20.0).min(1.0));
+            } else {
+                tp_t.translation = tp_t.translation.lerp(idle_pos, (dt * 12.0).min(1.0));
+                tp_t.rotation = tp_t.rotation.slerp(idle_rot, (dt * 12.0).min(1.0));
+            }
+        }
+    }
+}
+
+/// Traverses all descendants of `ThirdPersonWeaponRoot` and ensures their `RenderLayers`
+/// is set to Layer 2 so they render in 3rd person / RTS view and never interfere with
+/// 1st person viewmodels on Layer 1.
+pub fn sync_third_person_weapon_render_layers(
+    tp_roots: Query<&Children, With<ThirdPersonWeaponRoot>>,
+    children_q: Query<&Children>,
+    mut layers_q: Query<&mut RenderLayers>,
+    mut commands: Commands,
+) {
+    for children in tp_roots.iter() {
+        let mut stack: Vec<Entity> = children.iter().copied().collect();
+        while let Some(entity) = stack.pop() {
+            if let Ok(mut layers) = layers_q.get_mut(entity) {
+                if *layers != RenderLayers::layer(2) {
+                    *layers = RenderLayers::layer(2);
+                }
+            } else {
+                commands.entity(entity).insert(RenderLayers::layer(2));
+            }
+            if let Ok(sub_children) = children_q.get(entity) {
+                stack.extend(sub_children.iter().copied());
+            }
         }
     }
 }
