@@ -1,5 +1,6 @@
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::ecs::system::SystemParam; 
+use bevy::input::mouse::MouseMotion;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use avian3d::prelude::*;
 use tracing::{info, error};
@@ -159,6 +160,7 @@ pub struct WeaponActionParams<'w> {
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
     pub time: Res<'w, Time>,
     pub weapon_state: ResMut<'w, WeaponState>,
+    pub flick_tracker: Res<'w, MouseFlickTracker>,
 }
 
 fn resolve_node_id(entity: Entity, node_q: &Query<&ResourceNodeItem>, parent_q: &Query<&Parent>) -> Option<u64> {
@@ -287,9 +289,24 @@ pub fn input_router_system(
     mut action_events: EventWriter<ActionEvent>,
     interaction_query: Query<&Interaction>,
     node_query: Query<(&Node, &GlobalTransform, &Visibility, &Style)>,
+    mut flick_tracker: ResMut<MouseFlickTracker>,
+    mut mouse_motion: EventReader<MouseMotion>,
 ) {
     if console.is_open {
         return;
+    }
+
+    // Directional mouse flick tracking for granular melee combat (Mount & Blade / cRPG style)
+    let mut total_dx = 0.0;
+    let mut total_dy = 0.0;
+    for motion in mouse_motion.read() {
+        total_dx += motion.delta.x;
+        total_dy += motion.delta.y;
+    }
+    if total_dx.abs() > 0.01 || total_dy.abs() > 0.01 {
+        flick_tracker.update(total_dx, total_dy);
+    } else {
+        flick_tracker.decay(0.90);
     }
 
     let current_time = time.elapsed_seconds_f64();
@@ -333,6 +350,12 @@ pub fn input_router_system(
 
     if mouse.just_pressed(MouseButton::Right) {
         action_events.send(ActionEvent { action: VirtualAction::Secondary, state: ActionState::JustPressed, cursor_pos, is_over_ui });
+    }
+    if mouse.pressed(MouseButton::Right) {
+        action_events.send(ActionEvent { action: VirtualAction::Secondary, state: ActionState::Pressed, cursor_pos, is_over_ui });
+    }
+    if mouse.just_released(MouseButton::Right) {
+        action_events.send(ActionEvent { action: VirtualAction::Secondary, state: ActionState::JustReleased, cursor_pos, is_over_ui });
     }
     
     if keys.just_pressed(KeyCode::KeyE) {
@@ -416,25 +439,46 @@ pub fn context_aware_action_dispatcher(
                 let trigger_mainhand = (!is_left_primary && event.action == VirtualAction::Primary)
                     || (is_left_primary && event.action == VirtualAction::Secondary);
 
-                if trigger_offhand && event.state == ActionState::JustPressed {
-                    if weapons.weapon_state.current_weapon == WeaponType::Bow && weapons.weapon_state.bow_drawing {
-                        weapons.weapon_state.bow_drawing = false;
-                        weapons.weapon_state.bow_charge = 0.0;
-                    } else if is_holding_hammer && weapons.weapon_state.offhand_weapon == WeaponType::None && !event.is_over_ui {
-                        if let Ok(mut style) = ui_queries.build_menu.get_single_mut() {
-                            let opening = style.display == Display::None;
-                            style.display = if opening { Display::Flex } else { Display::None };
-                            if let Ok(mut window) = ui_queries.window.get_single_mut() {
-                                window.cursor.grab_mode = if opening { CursorGrabMode::None } else { CursorGrabMode::Locked };
-                                window.cursor.visible = opening;
+                if trigger_offhand {
+                    match event.state {
+                        ActionState::JustPressed => {
+                            // 1. Feint Mechanic (Mount & Blade / cRPG):
+                            // Tapping off-hand (RMB) during melee windup feints/cancels the attack immediately into guard/idle
+                            if swing_state.phase == MeleeAttackPhase::Windup {
+                                swing_state.phase = MeleeAttackPhase::Idle;
+                                swing_state.is_swinging = false;
+                                swing_state.windup_timer.reset();
+                                if weapons.weapon_state.offhand_weapon == WeaponType::WoodenShield
+                                    || (weapons.weapon_state.current_weapon.is_melee() && weapons.weapon_state.offhand_weapon == WeaponType::None) {
+                                    swing_state.is_blocking = true;
+                                }
+                                continue;
                             }
-                        }
-                    } else if !event.is_over_ui && !build_state.is_active {
-                        // Off-Hand attack execution (dual-wielding / unarmed left-jab)
-                        if let Ok(cam_transform) = queries.fps_camera.get_single() {
-                            if let Ok((player_entity, _)) = queries.player.get_single() {
-                                let origin = cam_transform.translation();
-                                let dir = cam_transform.forward().as_vec3();
+
+                            // 2. Shield / Weapon Guard Start
+                            if weapons.weapon_state.offhand_weapon == WeaponType::WoodenShield
+                                || (weapons.weapon_state.current_weapon.is_melee() && weapons.weapon_state.offhand_weapon == WeaponType::None) {
+                                swing_state.is_blocking = true;
+                            }
+
+                            if weapons.weapon_state.current_weapon == WeaponType::Bow && weapons.weapon_state.bow_drawing {
+                                weapons.weapon_state.bow_drawing = false;
+                                weapons.weapon_state.bow_charge = 0.0;
+                            } else if is_holding_hammer && weapons.weapon_state.offhand_weapon == WeaponType::None && !event.is_over_ui {
+                                if let Ok(mut style) = ui_queries.build_menu.get_single_mut() {
+                                    let opening = style.display == Display::None;
+                                    style.display = if opening { Display::Flex } else { Display::None };
+                                    if let Ok(mut window) = ui_queries.window.get_single_mut() {
+                                        window.cursor.grab_mode = if opening { CursorGrabMode::None } else { CursorGrabMode::Locked };
+                                        window.cursor.visible = opening;
+                                    }
+                                }
+                            } else if !event.is_over_ui && !build_state.is_active && !swing_state.is_blocking {
+                                // Off-Hand attack execution (dual-wielding / unarmed left-jab)
+                                if let Ok(cam_transform) = queries.fps_camera.get_single() {
+                                    if let Ok((player_entity, _)) = queries.player.get_single() {
+                                        let origin = cam_transform.translation();
+                                        let dir = cam_transform.forward().as_vec3();
 
                                 match weapons.weapon_state.offhand_weapon {
                                     WeaponType::Revolver => {
@@ -645,9 +689,23 @@ pub fn context_aware_action_dispatcher(
                         }
                     }
                 }
+                ActionState::Pressed => {
+                        if (weapons.weapon_state.offhand_weapon == WeaponType::WoodenShield
+                            || (weapons.weapon_state.current_weapon.is_melee() && weapons.weapon_state.offhand_weapon == WeaponType::None))
+                            && !event.is_over_ui && !build_state.is_active {
+                            swing_state.is_blocking = true;
+                        }
+                    }
+                    ActionState::JustReleased => {
+                        if swing_state.is_blocking {
+                            swing_state.is_blocking = false;
+                        }
+                    }
+                }
+            }
 
-                if trigger_mainhand {
-                        if event.is_over_ui || build_state.is_active { continue; }
+            if trigger_mainhand {
+                if event.is_over_ui || build_state.is_active { continue; }
 
                         let Ok(cam_transform) = queries.fps_camera.get_single() else { continue; };
                         let Ok((player_entity, _)) = queries.player.get_single() else { continue; };
@@ -991,7 +1049,21 @@ pub fn context_aware_action_dispatcher(
                                 );
                             }
                             _ if event.state == ActionState::JustPressed => {
-                                if !swing_state.is_swinging {
+                                let can_attack = swing_state.phase == MeleeAttackPhase::Idle
+                                    || swing_state.phase == MeleeAttackPhase::Recovery
+                                    || !swing_state.is_swinging;
+
+                                if can_attack {
+                                    if swing_state.is_blocking {
+                                        swing_state.is_blocking = false;
+                                    }
+
+                                    let direction = weapons.flick_tracker.classify();
+                                    swing_state.direction = direction;
+                                    swing_state.phase = MeleeAttackPhase::Windup;
+                                    swing_state.windup_timer.reset();
+                                    swing_state.release_timer.reset();
+                                    swing_state.recovery_timer.reset();
                                     swing_state.is_swinging = true;
                                     swing_state.timer.reset();
 

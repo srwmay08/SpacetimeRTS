@@ -403,16 +403,12 @@ pub fn get_default_weapon_pos(weapon: WeaponType, is_left: bool) -> Vec3 {
         WeaponType::Hammer => Vec3::new(0.20, -0.20, -0.36),
         WeaponType::Pickaxe => Vec3::new(0.22, -0.20, -0.40),
         WeaponType::Torch => Vec3::new(0.22, -0.20, -0.38),
-        WeaponType::WoodenShield => Vec3::new(-0.24, -0.18, -0.38),
+        WeaponType::WoodenShield => Vec3::new(0.24, -0.18, -0.38),
         WeaponType::None => Vec3::new(0.20, -0.20, -0.32), // Boxer guard default fist
     };
 
     if is_left {
-        if weapon == WeaponType::WoodenShield {
-            pos.x = -pos.x;
-        } else {
-            pos.x = -pos.x;
-        }
+        pos.x = -pos.x;
     }
     pos
 }
@@ -883,6 +879,142 @@ fn spawn_voxel_box(
     ));
 }
 
+/// Computes procedural position and rotation offsets for directional 4-way melee attacks
+/// (Right slash, Left backhand, Overhead cleave, Forward thrust) across Windup, Release, Recovery.
+pub fn compute_directional_melee_transform(
+    direction: MeleeSwingDirection,
+    phase: MeleeAttackPhase,
+    windup_t: f32,
+    release_t: f32,
+    recovery_t: f32,
+) -> (Vec3, Quat) {
+    match direction {
+        MeleeSwingDirection::Right => {
+            // Left-to-Right diagonal slash (mouse flick right)
+            match phase {
+                MeleeAttackPhase::Windup => {
+                    let ease = windup_t * windup_t;
+                    let pos = Vec3::new(-0.18 * ease, 0.06 * ease, 0.08 * ease);
+                    let rot = Quat::from_rotation_z(-0.35 * ease)
+                        * Quat::from_rotation_y(-0.45 * ease)
+                        * Quat::from_rotation_x(0.20 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Release => {
+                    let ease = release_t;
+                    let pos = Vec3::new(
+                        -0.18 + 0.42 * ease,
+                        0.06 - 0.22 * ease,
+                        0.08 - 0.26 * (ease * std::f32::consts::PI).sin(),
+                    );
+                    let rot = Quat::from_rotation_z(-0.35 + 0.80 * ease)
+                        * Quat::from_rotation_y(-0.45 + 0.90 * ease)
+                        * Quat::from_rotation_x(0.20 - 0.50 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Recovery => {
+                    let ease = 1.0 - recovery_t;
+                    let pos = Vec3::new(0.24 * ease, -0.16 * ease, -0.04 * ease);
+                    let rot = Quat::from_rotation_z(0.45 * ease)
+                        * Quat::from_rotation_y(0.45 * ease)
+                        * Quat::from_rotation_x(-0.30 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Idle => (Vec3::ZERO, Quat::IDENTITY),
+            }
+        }
+        MeleeSwingDirection::Left => {
+            // Right-to-Left backhand slash (mouse flick left)
+            match phase {
+                MeleeAttackPhase::Windup => {
+                    let ease = windup_t * windup_t;
+                    let pos = Vec3::new(0.18 * ease, 0.08 * ease, 0.08 * ease);
+                    let rot = Quat::from_rotation_z(0.35 * ease)
+                        * Quat::from_rotation_y(0.50 * ease)
+                        * Quat::from_rotation_x(0.20 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Release => {
+                    let ease = release_t;
+                    let pos = Vec3::new(
+                        0.18 - 0.42 * ease,
+                        0.08 - 0.22 * ease,
+                        0.08 - 0.26 * (ease * std::f32::consts::PI).sin(),
+                    );
+                    let rot = Quat::from_rotation_z(0.35 - 0.80 * ease)
+                        * Quat::from_rotation_y(0.50 - 0.95 * ease)
+                        * Quat::from_rotation_x(0.20 - 0.45 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Recovery => {
+                    let ease = 1.0 - recovery_t;
+                    let pos = Vec3::new(-0.24 * ease, -0.14 * ease, -0.04 * ease);
+                    let rot = Quat::from_rotation_z(-0.45 * ease)
+                        * Quat::from_rotation_y(-0.45 * ease)
+                        * Quat::from_rotation_x(-0.25 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Idle => (Vec3::ZERO, Quat::IDENTITY),
+            }
+        }
+        MeleeSwingDirection::Overhead => {
+            // Downward vertical cleave (mouse pull down)
+            match phase {
+                MeleeAttackPhase::Windup => {
+                    let ease = windup_t * windup_t;
+                    let pos = Vec3::new(0.02 * ease, 0.24 * ease, 0.06 * ease);
+                    let rot = Quat::from_rotation_x(0.85 * ease) * Quat::from_rotation_z(-0.12 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Release => {
+                    let ease = release_t;
+                    let pos = Vec3::new(
+                        0.02,
+                        0.24 - 0.46 * ease,
+                        0.06 - 0.24 * (ease * std::f32::consts::PI).sin(),
+                    );
+                    let rot = Quat::from_rotation_x(0.85 - 1.65 * ease) * Quat::from_rotation_z(-0.12 + 0.12 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Recovery => {
+                    let ease = 1.0 - recovery_t;
+                    let pos = Vec3::new(0.02 * ease, -0.22 * ease, -0.02 * ease);
+                    let rot = Quat::from_rotation_x(-0.80 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Idle => (Vec3::ZERO, Quat::IDENTITY),
+            }
+        }
+        MeleeSwingDirection::Thrust => {
+            // Linear forward stab (mouse push up)
+            match phase {
+                MeleeAttackPhase::Windup => {
+                    let ease = windup_t * windup_t;
+                    let pos = Vec3::new(0.02 * ease, -0.04 * ease, 0.16 * ease);
+                    let rot = Quat::from_rotation_y(0.12 * ease) * Quat::from_rotation_x(-0.08 * ease);
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Release => {
+                    let ease = release_t;
+                    let pos = Vec3::new(
+                        0.02 * (1.0 - ease),
+                        -0.04 + 0.06 * ease,
+                        0.16 - 0.42 * ease,
+                    );
+                    let rot = Quat::from_rotation_y(0.12 * (1.0 - ease)) * Quat::from_rotation_x(-0.08 * (1.0 - ease));
+                    (pos, rot)
+                }
+                MeleeAttackPhase::Recovery => {
+                    let ease = 1.0 - recovery_t;
+                    let pos = Vec3::new(0.0, 0.02 * ease, -0.26 * ease);
+                    (pos, Quat::IDENTITY)
+                }
+                MeleeAttackPhase::Idle => (Vec3::ZERO, Quat::IDENTITY),
+            }
+        }
+    }
+}
+
 // ----------------------------------------------------------------------------
 // VIEWMODEL ANIMATION, RECOIL & FPS WEAPON STATE UPDATE
 // ----------------------------------------------------------------------------
@@ -900,13 +1032,39 @@ pub fn animate_weapon_viewmodel(
     let dt = time.delta_seconds();
     weapon_state.sway_time += dt;
 
-    // Melee swing timers ticking
-    if swing_state.is_swinging {
-        swing_state.timer.tick(time.delta());
-        if swing_state.timer.just_finished() {
-            swing_state.is_swinging = false;
+    // Melee swing state machine & timers ticking
+    match swing_state.phase {
+        MeleeAttackPhase::Idle => {
+            if swing_state.is_swinging {
+                swing_state.timer.tick(time.delta());
+                if swing_state.timer.just_finished() {
+                    swing_state.is_swinging = false;
+                }
+            }
+        }
+        MeleeAttackPhase::Windup => {
+            swing_state.windup_timer.tick(time.delta());
+            if swing_state.windup_timer.just_finished() {
+                swing_state.phase = MeleeAttackPhase::Release;
+                swing_state.release_timer.reset();
+            }
+        }
+        MeleeAttackPhase::Release => {
+            swing_state.release_timer.tick(time.delta());
+            if swing_state.release_timer.just_finished() {
+                swing_state.phase = MeleeAttackPhase::Recovery;
+                swing_state.recovery_timer.reset();
+            }
+        }
+        MeleeAttackPhase::Recovery => {
+            swing_state.recovery_timer.tick(time.delta());
+            if swing_state.recovery_timer.just_finished() {
+                swing_state.phase = MeleeAttackPhase::Idle;
+                swing_state.is_swinging = false;
+            }
         }
     }
+
     if swing_state.offhand_is_swinging {
         swing_state.offhand_timer.tick(time.delta());
         if swing_state.offhand_timer.just_finished() {
@@ -1008,13 +1166,36 @@ pub fn animate_weapon_viewmodel(
                 current_rot = Quat::from_rotation_y(0.08) * Quat::from_rotation_z(0.06) * current_rot;
             }
 
-            // Main hand punch / swing lunge animation
-            if swing_state.is_swinging {
+            // Directional Melee Swing Animation (Mount & Blade / cRPG Style)
+            if weapon_state.current_weapon.is_melee() && swing_state.phase != MeleeAttackPhase::Idle {
+                let windup_t = swing_state.windup_timer.fraction();
+                let release_t = swing_state.release_timer.fraction();
+                let recovery_t = swing_state.recovery_timer.fraction();
+
+                let (melee_offset, melee_rot) = compute_directional_melee_transform(
+                    swing_state.direction,
+                    swing_state.phase,
+                    windup_t,
+                    release_t,
+                    recovery_t,
+                );
+                current_offset += melee_offset;
+                current_rot = melee_rot * current_rot;
+            } else if swing_state.is_swinging {
+                // Main hand punch / fallback swing lunge animation
                 let t = swing_state.timer.fraction();
                 let punch_forward = (t * std::f32::consts::PI).sin() * 0.16;
                 current_offset.z -= punch_forward;
                 current_offset.y += punch_forward * 0.15;
                 current_rot *= Quat::from_rotation_x(punch_forward * 0.7);
+            }
+
+            // Weapon Parry Guard (When blocking with melee weapon and no off-hand shield)
+            if swing_state.is_blocking && weapon_state.offhand_weapon == WeaponType::None && weapon_state.current_weapon.is_melee() {
+                let parry_pos = Vec3::new(-0.04, 0.04, -0.24);
+                let parry_rot = Quat::from_rotation_z(-0.85) * Quat::from_rotation_x(0.35) * Quat::from_rotation_y(0.22);
+                current_offset = current_offset.lerp(parry_pos, (dt * 18.0).min(1.0));
+                current_rot = current_rot.slerp(parry_rot, (dt * 18.0).min(1.0));
             }
 
             // Bow ADS & Draw Stance
@@ -1049,8 +1230,14 @@ pub fn animate_weapon_viewmodel(
                 current_rot = Quat::from_rotation_y(-0.08) * Quat::from_rotation_z(-0.06) * current_rot;
             }
 
-            // Off-hand punch / swing lunge animation
-            if swing_state.offhand_is_swinging {
+            // Shield Block Guard
+            if swing_state.is_blocking && weapon_state.offhand_weapon == WeaponType::WoodenShield {
+                let block_pos = Vec3::new(-0.04, 0.02, -0.26);
+                let block_rot = Quat::from_rotation_y(-0.24) * Quat::from_rotation_x(0.12) * Quat::from_rotation_z(-0.06);
+                current_offset = current_offset.lerp(block_pos, (dt * 18.0).min(1.0));
+                current_rot = current_rot.slerp(block_rot, (dt * 18.0).min(1.0));
+            } else if swing_state.offhand_is_swinging {
+                // Off-hand punch / swing lunge animation
                 let t = swing_state.offhand_timer.fraction();
                 let punch_forward = (t * std::f32::consts::PI).sin() * 0.16;
                 current_offset.z -= punch_forward;
@@ -1403,4 +1590,60 @@ pub fn spawn_projectile_entity(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_directional_melee_transforms_all_directions() {
+        let directions = [
+            MeleeSwingDirection::Right,
+            MeleeSwingDirection::Left,
+            MeleeSwingDirection::Overhead,
+            MeleeSwingDirection::Thrust,
+        ];
+        let phases = [
+            MeleeAttackPhase::Idle,
+            MeleeAttackPhase::Windup,
+            MeleeAttackPhase::Release,
+            MeleeAttackPhase::Recovery,
+        ];
+
+        for &dir in &directions {
+            for &phase in &phases {
+                let (pos, rot) = compute_directional_melee_transform(dir, phase, 0.5, 0.5, 0.5);
+                assert!(!pos.x.is_nan() && !pos.y.is_nan() && !pos.z.is_nan());
+                assert!(!rot.x.is_nan() && !rot.y.is_nan() && !rot.z.is_nan() && !rot.w.is_nan());
+                assert!(rot.is_normalized(), "Rotation must be normalized for {:?} {:?}", dir, phase);
+
+                if phase == MeleeAttackPhase::Idle {
+                    assert_eq!(pos, Vec3::ZERO);
+                    assert_eq!(rot, Quat::IDENTITY);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_wooden_shield_position_mirroring() {
+        let right_pos = get_default_weapon_pos(WeaponType::WoodenShield, false);
+        let left_pos = get_default_weapon_pos(WeaponType::WoodenShield, true);
+
+        assert_eq!(right_pos.x, 0.24);
+        assert_eq!(left_pos.x, -0.24);
+        assert_eq!(right_pos.y, left_pos.y);
+        assert_eq!(right_pos.z, left_pos.z);
+    }
+
+    #[test]
+    fn test_sword_and_board_archetype_properties() {
+        assert!(WeaponType::Longsword.is_melee());
+        assert!(WeaponType::Longsword.is_one_handed());
+        assert!(!WeaponType::Longsword.is_two_handed());
+
+        assert!(WeaponType::WoodenShield.is_one_handed());
+        assert!(!WeaponType::WoodenShield.is_two_handed());
+    }
 }

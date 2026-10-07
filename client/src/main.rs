@@ -121,6 +121,7 @@ fn main() {
         .insert_resource(ActiveOffHandItem(None))
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState::default())
+        .init_resource::<MouseFlickTracker>()
         .insert_resource(AmbientLight { color: Color::srgb(0.95, 0.98, 1.0), brightness: 550.0 })
         .insert_resource(TelemetryTracker { last_frame_time: 0.0, frame_drop_threshold: 0.1 })
         .init_resource::<WeaponState>()

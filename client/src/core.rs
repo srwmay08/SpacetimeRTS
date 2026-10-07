@@ -47,8 +47,27 @@ pub enum GameLayer {
 }
 
 // ----------------------------------------------------------------------------
-// GLOBAL RESOURCES
 // ----------------------------------------------------------------------------
+// DIRECTIONAL MELEE COMBAT TYPES (MOUNT & BLADE / cRPG STYLE)
+// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MeleeSwingDirection {
+    #[default]
+    Right,    // Left-to-Right diagonal slash (mouse flick right +X)
+    Left,     // Right-to-Left backhand slash (mouse flick left -X)
+    Overhead, // Vertical downward cleave (mouse pull down +Y)
+    Thrust,   // Linear forward stab (mouse push up -Y / neutral)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MeleeAttackPhase {
+    #[default]
+    Idle,
+    Windup,
+    Release,
+    Recovery,
+}
 
 #[derive(Resource)]
 pub struct SwingState {
@@ -56,6 +75,18 @@ pub struct SwingState {
     pub timer: Timer,
     pub offhand_is_swinging: bool,
     pub offhand_timer: Timer,
+
+    // Directional Combat
+    pub direction: MeleeSwingDirection,
+    pub phase: MeleeAttackPhase,
+    pub windup_timer: Timer,
+    pub release_timer: Timer,
+    pub recovery_timer: Timer,
+
+    // Shield Guard / Defense
+    pub is_blocking: bool,
+    #[allow(dead_code)]
+    pub block_stagger_timer: Timer,
 }
 
 impl Default for SwingState {
@@ -65,6 +96,54 @@ impl Default for SwingState {
             timer: Timer::from_seconds(0.25, TimerMode::Once),
             offhand_is_swinging: false,
             offhand_timer: Timer::from_seconds(0.25, TimerMode::Once),
+            direction: MeleeSwingDirection::Right,
+            phase: MeleeAttackPhase::Idle,
+            windup_timer: Timer::from_seconds(0.12, TimerMode::Once),
+            release_timer: Timer::from_seconds(0.26, TimerMode::Once),
+            recovery_timer: Timer::from_seconds(0.16, TimerMode::Once),
+            is_blocking: false,
+            block_stagger_timer: Timer::from_seconds(0.0, TimerMode::Once),
+        }
+    }
+}
+
+/// Tracks smoothed mouse movement vectors to classify directional attacks
+#[derive(Resource, Debug, Clone, Default)]
+pub struct MouseFlickTracker {
+    pub smoothed_dx: f32,
+    pub smoothed_dy: f32,
+}
+
+impl MouseFlickTracker {
+    pub fn update(&mut self, dx: f32, dy: f32) {
+        self.smoothed_dx = self.smoothed_dx * 0.75 + dx * 0.25;
+        self.smoothed_dy = self.smoothed_dy * 0.75 + dy * 0.25;
+    }
+
+    pub fn decay(&mut self, factor: f32) {
+        self.smoothed_dx *= factor;
+        self.smoothed_dy *= factor;
+    }
+
+    pub fn classify(&self) -> MeleeSwingDirection {
+        let abs_x = self.smoothed_dx.abs();
+        let abs_y = self.smoothed_dy.abs();
+        let threshold = 1.0;
+
+        if abs_x > abs_y && abs_x > threshold {
+            if self.smoothed_dx > 0.0 {
+                MeleeSwingDirection::Right
+            } else {
+                MeleeSwingDirection::Left
+            }
+        } else if abs_y >= abs_x && abs_y > threshold {
+            if self.smoothed_dy > 0.0 {
+                MeleeSwingDirection::Overhead
+            } else {
+                MeleeSwingDirection::Thrust
+            }
+        } else {
+            MeleeSwingDirection::Right // Default slash
         }
     }
 }
@@ -253,5 +332,54 @@ mod tests {
         app.update();
         let limiter = app.world().resource::<FpsLimiterState>();
         assert_eq!(limiter.target_fps, None);
+    }
+
+    #[test]
+    fn test_mouse_flick_directional_classification() {
+        let mut tracker = MouseFlickTracker::default();
+        // Default classification when below threshold is Right
+        assert_eq!(tracker.classify(), MeleeSwingDirection::Right);
+
+        // Right flick
+        tracker.update(10.0, 0.0);
+        assert_eq!(tracker.classify(), MeleeSwingDirection::Right);
+
+        // Left flick
+        let mut tracker = MouseFlickTracker::default();
+        tracker.update(-10.0, 0.0);
+        assert_eq!(tracker.classify(), MeleeSwingDirection::Left);
+
+        // Overhead cleave (+Y in mouse delta)
+        let mut tracker = MouseFlickTracker::default();
+        tracker.update(0.0, 10.0);
+        assert_eq!(tracker.classify(), MeleeSwingDirection::Overhead);
+
+        // Forward thrust (-Y in mouse delta)
+        let mut tracker = MouseFlickTracker::default();
+        tracker.update(0.0, -10.0);
+        assert_eq!(tracker.classify(), MeleeSwingDirection::Thrust);
+    }
+
+    #[test]
+    fn test_mouse_flick_decay() {
+        let mut tracker = MouseFlickTracker {
+            smoothed_dx: 10.0,
+            smoothed_dy: 5.0,
+        };
+        tracker.decay(0.5);
+        assert!((tracker.smoothed_dx - 5.0).abs() < 1e-4);
+        assert!((tracker.smoothed_dy - 2.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_swing_state_defaults() {
+        let swing = SwingState::default();
+        assert!(!swing.is_swinging);
+        assert!(!swing.is_blocking);
+        assert_eq!(swing.phase, MeleeAttackPhase::Idle);
+        assert_eq!(swing.direction, MeleeSwingDirection::Right);
+        assert_eq!(swing.windup_timer.duration().as_secs_f32(), 0.12);
+        assert_eq!(swing.release_timer.duration().as_secs_f32(), 0.26);
+        assert_eq!(swing.recovery_timer.duration().as_secs_f32(), 0.16);
     }
 }
