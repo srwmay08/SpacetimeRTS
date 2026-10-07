@@ -71,25 +71,27 @@ pub fn handle_inventory_drag_and_drop(
                                     break;
                                 }
                             }
-                        } else {
                             let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-                            let is_two_handed = crate::weapons::WeaponType::from_item_name(Some(&item_name)).is_two_handed();
+                            let is_two_handed = ItemKind::from_name(&item_name).map_or_else(
+                                || crate::weapons::WeaponType::from_item_name(Some(&item_name)).is_two_handed(),
+                                |k| k.is_two_handed(),
+                            );
                             let loadout = conn.db.db.equipment_loadout().entity_id().find(&player_id);
                             let main_equipped = loadout.as_ref().map(|l| l.main_hand.as_str()).unwrap_or("None");
                             let off_equipped = loadout.as_ref().map(|l| l.off_hand.as_str()).unwrap_or("None");
 
-                            let target_hand = if is_two_handed {
-                                "MainHand"
+                            let target_slot = if is_two_handed {
+                                EquipmentSlot::MainHand
                             } else if shift_held || hand_side.0 == HandSide::Left {
-                                "OffHand"
+                                EquipmentSlot::OffHand
                             } else if main_equipped != "None" && !main_equipped.is_empty() && (off_equipped == "None" || off_equipped.is_empty()) {
-                                "OffHand"
+                                EquipmentSlot::OffHand
                             } else {
-                                "MainHand"
+                                EquipmentSlot::MainHand
                             };
 
-                            info!("Quick-Equipping '{}' to {}", item_name, target_hand);
-                            let _ = conn.db.reducers.equip_weapon(target_hand.to_string(), item_name);
+                            info!("Quick-Equipping '{}' to {}", item_name, target_slot.as_str());
+                            let _ = conn.db.reducers.equip_weapon(target_slot.as_str().to_string(), item_name);
                         }
                         return;
                     }
@@ -186,13 +188,13 @@ pub fn handle_inventory_drag_and_drop(
                 }
             }
         } else if dropped_on_main {
-            info!("Paperdoll: Dragged item '{}' into MainHand", drag_drop.item_type);
-            if let Err(e) = conn.db.reducers.equip_weapon("MainHand".to_string(), drag_drop.item_type.clone()) {
+            info!("Paperdoll: Dragged item '{}' into {}", drag_drop.item_type, EquipmentSlot::MainHand.as_str());
+            if let Err(e) = conn.db.reducers.equip_weapon(EquipmentSlot::MainHand.as_str().to_string(), drag_drop.item_type.clone()) {
                 error!("Failed to equip item to MainHand: {:?}", e);
             }
         } else if dropped_on_off {
-            info!("Paperdoll: Dragged item '{}' into OffHand", drag_drop.item_type);
-            if let Err(e) = conn.db.reducers.equip_weapon("OffHand".to_string(), drag_drop.item_type.clone()) {
+            info!("Paperdoll: Dragged item '{}' into {}", drag_drop.item_type, EquipmentSlot::OffHand.as_str());
+            if let Err(e) = conn.db.reducers.equip_weapon(EquipmentSlot::OffHand.as_str().to_string(), drag_drop.item_type.clone()) {
                 error!("Failed to equip item to OffHand: {:?}", e);
             }
         } else if let Some(bag_idx) = dropped_on_bag {
@@ -242,15 +244,15 @@ pub fn handle_paperdoll_interactions(
 
     for interaction in unequip_main_q.iter() {
         if *interaction == Interaction::Pressed {
-            info!("Paperdoll: Unequipping MainHand");
-            let _ = conn.db.reducers.unequip_weapon("MainHand".to_string());
+            info!("Paperdoll: Unequipping {}", EquipmentSlot::MainHand.as_str());
+            let _ = conn.db.reducers.unequip_weapon(EquipmentSlot::MainHand.as_str().to_string());
         }
     }
 
     for interaction in unequip_off_q.iter() {
         if *interaction == Interaction::Pressed {
-            info!("Paperdoll: Unequipping OffHand");
-            let _ = conn.db.reducers.unequip_weapon("OffHand".to_string());
+            info!("Paperdoll: Unequipping {}", EquipmentSlot::OffHand.as_str());
+            let _ = conn.db.reducers.unequip_weapon(EquipmentSlot::OffHand.as_str().to_string());
         }
     }
 

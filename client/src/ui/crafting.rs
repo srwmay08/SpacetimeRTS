@@ -16,8 +16,6 @@ use crate::building::BuildModeState;
  
 use crate::module_bindings::craft_item_reducer::craft_item;
 
-use super::types::*;
-
 // ----------------------------------------------------------------------------
 // INVENTORY & WORKBENCH HUD SYSTEMS
 // ----------------------------------------------------------------------------
@@ -135,6 +133,7 @@ pub fn update_build_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::types::RequiresWorkbenchRecipe;
 
     #[test]
     fn test_field_vs_workbench_crafting_recipe_visibility() {

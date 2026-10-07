@@ -666,8 +666,8 @@ pub fn handle_console_input(
                 } else {
                     let main_w = tokens[1].to_string();
                     let off_w = tokens[2].to_string();
-                    let _ = conn.db.reducers.equip_weapon("MainHand".to_string(), main_w.clone());
-                    let _ = conn.db.reducers.equip_weapon("OffHand".to_string(), off_w.clone());
+                    let _ = conn.db.reducers.equip_weapon(EquipmentSlot::MainHand.as_str().to_string(), main_w.clone());
+                    let _ = conn.db.reducers.equip_weapon(EquipmentSlot::OffHand.as_str().to_string(), off_w.clone());
                     console.logs.push(format!("[Combat] Dual-wield loadout equipped: Main='{}', Off='{}'", main_w, off_w));
                 }
             }
@@ -676,13 +676,13 @@ pub fn handle_console_input(
                     console.logs.push("[Syntax Error] Usage: equip [main|off] <weapon_name> (defaults to main)".into());
                 } else if tokens.len() == 2 {
                     let w = tokens[1].to_string();
-                    let _ = conn.db.reducers.equip_weapon("MainHand".to_string(), w.clone());
+                    let _ = conn.db.reducers.equip_weapon(EquipmentSlot::MainHand.as_str().to_string(), w.clone());
                     console.logs.push(format!("[Combat] Equipped '{}' to Main-Hand", w));
                 } else {
-                    let slot = if tokens[1].eq_ignore_ascii_case("off") { "OffHand" } else { "MainHand" };
+                    let slot = EquipmentSlot::from_str(tokens[1]).unwrap_or(EquipmentSlot::MainHand);
                     let w = tokens[2..].join(" ");
-                    let _ = conn.db.reducers.equip_weapon(slot.to_string(), w.clone());
-                    console.logs.push(format!("[Combat] Equipped '{}' to {}", w, slot));
+                    let _ = conn.db.reducers.equip_weapon(slot.as_str().to_string(), w.clone());
+                    console.logs.push(format!("[Combat] Equipped '{}' to {}", w, slot.as_str()));
                 }
             }
             "skills" | "skill" => {

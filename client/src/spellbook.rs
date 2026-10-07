@@ -58,8 +58,114 @@ impl SpellCategory {
     }
 }
 
+/// Strongly-typed identifier for all spells and tactical abilities.
+/// Eliminates stringly-typed hotbars and enables zero-allocation slotting and matching.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SpellId {
+    EntanglingRoots,
+    Moonfire,
+    TeleportMoonglade,
+    Thorns,
+    Wrath,
+    PhaseDash,
+    SmokeVeil,
+    IntelDart,
+    GravLift,
+    Fireball,
+    MagicMissile,
+    FrostNova,
+    MinorHealing,
+    Blink,
+    ChainLightning,
+    Stoneskin,
+    Starfall,
+    SpiritFamiliar,
+    WarCry,
+    ShadowCloak,
+    SolarFlare,
+}
+
+impl SpellId {
+    pub const ALL: &'static [SpellId] = &[
+        SpellId::EntanglingRoots,
+        SpellId::Moonfire,
+        SpellId::TeleportMoonglade,
+        SpellId::Thorns,
+        SpellId::Wrath,
+        SpellId::PhaseDash,
+        SpellId::SmokeVeil,
+        SpellId::IntelDart,
+        SpellId::GravLift,
+        SpellId::Fireball,
+        SpellId::MagicMissile,
+        SpellId::FrostNova,
+        SpellId::MinorHealing,
+        SpellId::Blink,
+        SpellId::ChainLightning,
+        SpellId::Stoneskin,
+        SpellId::Starfall,
+        SpellId::SpiritFamiliar,
+        SpellId::WarCry,
+        SpellId::ShadowCloak,
+        SpellId::SolarFlare,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::EntanglingRoots => "entangling_roots",
+            Self::Moonfire => "moonfire",
+            Self::TeleportMoonglade => "teleport_moonglade",
+            Self::Thorns => "thorns",
+            Self::Wrath => "wrath",
+            Self::PhaseDash => "phase_dash",
+            Self::SmokeVeil => "smoke_veil",
+            Self::IntelDart => "intel_dart",
+            Self::GravLift => "grav_lift",
+            Self::Fireball => "fireball",
+            Self::MagicMissile => "magic_missile",
+            Self::FrostNova => "frost_nova",
+            Self::MinorHealing => "minor_healing",
+            Self::Blink => "blink",
+            Self::ChainLightning => "chain_lightning",
+            Self::Stoneskin => "stoneskin",
+            Self::Starfall => "starfall",
+            Self::SpiritFamiliar => "spirit_familiar",
+            Self::WarCry => "war_cry",
+            Self::ShadowCloak => "shadow_cloak",
+            Self::SolarFlare => "solar_flare",
+        }
+    }
+
+    pub fn from_id_or_name(id_or_name: &str) -> Option<Self> {
+        let trimmed = id_or_name.trim();
+        for &spell in Self::ALL {
+            let def = spell.def();
+            if def.id.eq_ignore_ascii_case(trimmed) || def.name.eq_ignore_ascii_case(trimmed) {
+                return Some(spell);
+            }
+        }
+        None
+    }
+
+    pub fn to_tactical_ability(&self) -> Option<TacticalAbilityKind> {
+        match self {
+            Self::PhaseDash => Some(TacticalAbilityKind::PhaseDash),
+            Self::SmokeVeil => Some(TacticalAbilityKind::SmokeVeil),
+            Self::IntelDart => Some(TacticalAbilityKind::IntelDart),
+            Self::GravLift => Some(TacticalAbilityKind::GravLift),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn def(&self) -> &'static SpellDef {
+        get_spell(*self)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SpellDef {
+    pub spell_id: SpellId,
     pub id: &'static str,
     pub name: &'static str,
     pub rank: &'static str,
@@ -72,6 +178,7 @@ pub struct SpellDef {
 
 pub const SPELL_CATALOG: &[SpellDef] = &[
     SpellDef {
+        spell_id: SpellId::EntanglingRoots,
         id: "entangling_roots",
         name: "Entangling Roots",
         rank: "Rank 1",
@@ -82,6 +189,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.4, 0.85, 0.3),
     },
     SpellDef {
+        spell_id: SpellId::Moonfire,
         id: "moonfire",
         name: "Moonfire",
         rank: "Rank 2",
@@ -92,6 +200,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.6, 0.8, 1.0),
     },
     SpellDef {
+        spell_id: SpellId::TeleportMoonglade,
         id: "teleport_moonglade",
         name: "Teleport: Moonglade",
         rank: "Rank 1",
@@ -102,6 +211,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.5, 0.9, 0.8),
     },
     SpellDef {
+        spell_id: SpellId::Thorns,
         id: "thorns",
         name: "Thorns",
         rank: "Rank 1",
@@ -112,6 +222,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.35, 0.75, 0.3),
     },
     SpellDef {
+        spell_id: SpellId::Wrath,
         id: "wrath",
         name: "Wrath",
         rank: "Rank 2",
@@ -122,6 +233,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.95, 0.85, 0.25),
     },
     SpellDef {
+        spell_id: SpellId::PhaseDash,
         id: "phase_dash",
         name: "Phase Dash",
         rank: "Rank 1",
@@ -132,6 +244,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.0, 0.9, 0.9),
     },
     SpellDef {
+        spell_id: SpellId::SmokeVeil,
         id: "smoke_veil",
         name: "Smoke Veil",
         rank: "Rank 1",
@@ -142,6 +255,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.65, 0.70, 0.75),
     },
     SpellDef {
+        spell_id: SpellId::IntelDart,
         id: "intel_dart",
         name: "Intel Dart",
         rank: "Rank 1",
@@ -152,6 +266,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(1.0, 0.85, 0.2),
     },
     SpellDef {
+        spell_id: SpellId::GravLift,
         id: "grav_lift",
         name: "Grav-Lift",
         rank: "Rank 1",
@@ -162,6 +277,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.3, 0.95, 0.45),
     },
     SpellDef {
+        spell_id: SpellId::Fireball,
         id: "fireball",
         name: "Fireball",
         rank: "Rank 3",
@@ -172,6 +288,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(1.0, 0.35, 0.1),
     },
     SpellDef {
+        spell_id: SpellId::MagicMissile,
         id: "magic_missile",
         name: "Magic Missile",
         rank: "Rank 2",
@@ -182,6 +299,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.75, 0.3, 0.95),
     },
     SpellDef {
+        spell_id: SpellId::FrostNova,
         id: "frost_nova",
         name: "Frost Nova",
         rank: "Rank 1",
@@ -192,6 +310,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.4, 0.8, 1.0),
     },
     SpellDef {
+        spell_id: SpellId::MinorHealing,
         id: "minor_healing",
         name: "Rejuvenation",
         rank: "Rank 2",
@@ -202,6 +321,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.3, 1.0, 0.5),
     },
     SpellDef {
+        spell_id: SpellId::Blink,
         id: "blink",
         name: "Blink",
         rank: "Rank 1",
@@ -212,6 +332,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.85, 0.4, 0.9),
     },
     SpellDef {
+        spell_id: SpellId::ChainLightning,
         id: "chain_lightning",
         name: "Chain Lightning",
         rank: "Rank 1",
@@ -222,6 +343,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.95, 0.9, 0.3),
     },
     SpellDef {
+        spell_id: SpellId::Stoneskin,
         id: "stoneskin",
         name: "Barkskin",
         rank: "Rank 1",
@@ -232,6 +354,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.75, 0.6, 0.4),
     },
     SpellDef {
+        spell_id: SpellId::Starfall,
         id: "starfall",
         name: "Starfall",
         rank: "Rank 1",
@@ -242,6 +365,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.95, 0.8, 1.0),
     },
     SpellDef {
+        spell_id: SpellId::SpiritFamiliar,
         id: "spirit_familiar",
         name: "Bear Form",
         rank: "Rank 1",
@@ -252,6 +376,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.4, 0.9, 0.85),
     },
     SpellDef {
+        spell_id: SpellId::WarCry,
         id: "war_cry",
         name: "Demoralizing Roar",
         rank: "Rank 1",
@@ -262,6 +387,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.9, 0.3, 0.3),
     },
     SpellDef {
+        spell_id: SpellId::ShadowCloak,
         id: "shadow_cloak",
         name: "Prowl",
         rank: "Rank 1",
@@ -272,6 +398,7 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
         color: Color::srgb(0.45, 0.4, 0.55),
     },
     SpellDef {
+        spell_id: SpellId::SolarFlare,
         id: "solar_flare",
         name: "Sunfire",
         rank: "Rank 1",
@@ -283,8 +410,12 @@ pub const SPELL_CATALOG: &[SpellDef] = &[
     },
 ];
 
+pub fn get_spell(id: SpellId) -> &'static SpellDef {
+    SPELL_CATALOG.iter().find(|s| s.spell_id == id).unwrap_or(&SPELL_CATALOG[0])
+}
+
 pub fn get_spell_by_id(id: &str) -> Option<&'static SpellDef> {
-    SPELL_CATALOG.iter().find(|s| s.id == id || s.name == id)
+    SpellId::from_id_or_name(id).map(|s| s.def())
 }
 
 // ----------------------------------------------------------------------------
@@ -383,7 +514,7 @@ impl Default for HotbarKeybinds {
 
 #[derive(Resource, Clone, Debug)]
 pub struct PreparedHotbarState {
-    pub slots: [Option<String>; 16],
+    pub slots: [Option<SpellId>; 16],
     pub cooldowns: [f32; 16],
     pub max_cooldowns: [f32; 16],
 }
@@ -391,7 +522,7 @@ pub struct PreparedHotbarState {
 impl Default for PreparedHotbarState {
     fn default() -> Self {
         Self {
-            slots: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+            slots: [None; 16],
             cooldowns: [0.0; 16],
             max_cooldowns: [1.0; 16],
         }
@@ -401,7 +532,7 @@ impl Default for PreparedHotbarState {
 #[derive(Resource)]
 pub struct SpellbookWindowState {
     pub is_open: bool,
-    pub selected_spell_for_slotting: Option<String>,
+    pub selected_spell_for_slotting: Option<SpellId>,
     pub category_filter: Option<SpellCategory>,
     pub current_page: usize,
     pub rank_filter: bool,
@@ -489,7 +620,7 @@ impl Default for TerrainRenderSettings {
 pub struct SpellDragState {
     pub is_dragging: bool,
     pub source_slot: Option<usize>,
-    pub spell_id: Option<String>,
+    pub spell_id: Option<SpellId>,
     pub current_pos: Vec2,
 }
 
@@ -589,8 +720,7 @@ pub fn setup_prepared_hotbar_ui(
                     for col in 0..8 {
                         let slot_idx = row * 8 + col;
                         let key_label = keycode_display_name(keybinds.keybinds[slot_idx]);
-                        let spell_name = hotbar.slots[slot_idx].as_deref().unwrap_or("EMPTY");
-                        let spell_def = get_spell_by_id(spell_name);
+                        let spell_def = hotbar.slots[slot_idx].map(|id| id.def());
 
                         let (icon_text, icon_color) = if let Some(def) = spell_def {
                             (def.icon, def.color)
@@ -1795,14 +1925,10 @@ pub fn update_hotbar_ui_system(
     for (n_marker, mut text) in name_text_q.iter_mut() {
         let slot = n_marker.0;
         if slot < 16 {
-            if let Some(spell_id) = &hotbar.slots[slot] {
-                if let Some(def) = get_spell_by_id(spell_id) {
-                    text.sections[0].value = def.icon.to_string();
-                    text.sections[0].style.color = def.color;
-                } else {
-                    text.sections[0].value = "---".into();
-                    text.sections[0].style.color = Color::srgb(0.5, 0.5, 0.5);
-                }
+            if let Some(spell_id) = hotbar.slots[slot] {
+                let def = spell_id.def();
+                text.sections[0].value = def.icon.to_string();
+                text.sections[0].style.color = def.color;
             } else {
                 text.sections[0].value = "---".into();
                 text.sections[0].style.color = Color::srgb(0.3, 0.3, 0.3);
@@ -1918,15 +2044,15 @@ fn cast_slot(
 ) {
     if slot >= 16 { return; }
     if hotbar.cooldowns[slot] > 0.0 { return; }
-    let Some(spell_id) = hotbar.slots[slot].clone() else { return; };
-    let Some(def) = get_spell_by_id(&spell_id) else { return; };
+    let Some(spell_id) = hotbar.slots[slot] else { return; };
+    let def = spell_id.def();
 
     let Ok((_p_entity, mut p_trans, mut lin_vel, _)) = player_q.get_single_mut() else { return; };
     let cam_forward = camera_q.get_single().map_or(p_trans.forward(), |c| c.forward());
     let cam_pos = camera_q.get_single().map_or(p_trans.translation + Vec3::new(0.0, 1.5, 0.0), |c| c.translation());
 
-    match def.id {
-        "phase_dash" => {
+    match spell_id {
+        SpellId::PhaseDash => {
             let mut dash_dir = *cam_forward;
             dash_dir.y = 0.0;
             let dir = dash_dir.normalize_or_zero();
@@ -1960,7 +2086,7 @@ fn cast_slot(
                 ));
             }
         }
-        "smoke_veil" => {
+        SpellId::SmokeVeil => {
             let target_point = cam_pos + cam_forward * 12.0;
             let smoke_mesh = meshes.add(bevy::math::primitives::Sphere::new(1.8));
             let smoke_mat = materials.add(StandardMaterial {
@@ -1980,7 +2106,7 @@ fn cast_slot(
                 ));
             }
         }
-        "grav_lift" => {
+        SpellId::GravLift => {
             lin_vel.y = 14.0; // Propel upward
             let lift_mesh = meshes.add(bevy::math::primitives::Cylinder::new(1.8, 0.2));
             let lift_mat = materials.add(StandardMaterial {
@@ -1998,7 +2124,7 @@ fn cast_slot(
                 Particle { timer: Timer::from_seconds(4.0, TimerMode::Once) },
             ));
         }
-        "fireball" => {
+        SpellId::Fireball => {
             let fb_mesh = meshes.add(bevy::math::primitives::Sphere::new(0.45));
             let fb_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(1.0, 0.4, 0.1),
@@ -2018,7 +2144,7 @@ fn cast_slot(
                 Particle { timer: Timer::from_seconds(3.0, TimerMode::Once) },
             ));
         }
-        "magic_missile" => {
+        SpellId::MagicMissile => {
             let mm_mesh = meshes.add(bevy::math::primitives::Sphere::new(0.25));
             let mm_mat = materials.add(StandardMaterial {
                 base_color: Color::srgb(0.8, 0.3, 1.0),
@@ -2038,7 +2164,7 @@ fn cast_slot(
                 Particle { timer: Timer::from_seconds(2.0, TimerMode::Once) },
             ));
         }
-        "minor_healing" => {
+        SpellId::MinorHealing => {
             let heal_mesh = meshes.add(bevy::math::primitives::Sphere::new(0.12));
             let heal_mat = materials.add(StandardMaterial {
                 base_color: Color::srgba(0.3, 1.0, 0.4, 0.9),
@@ -2059,7 +2185,7 @@ fn cast_slot(
                 ));
             }
         }
-        "blink" => {
+        SpellId::Blink => {
             let mut blink_dir = *cam_forward;
             blink_dir.y = 0.0;
             let dir = blink_dir.normalize_or_zero();
@@ -2162,7 +2288,7 @@ pub fn update_spellbook_display_system(
             let spell_idx = current_page * 12 + slot_idx;
             if spell_idx < filtered.len() {
                 let def = filtered[spell_idx];
-                let is_selected = spellbook_state.selected_spell_for_slotting.as_deref() == Some(def.id);
+                let is_selected = spellbook_state.selected_spell_for_slotting == Some(def.spell_id);
                 if is_selected {
                     *bg = Color::srgba(0.95, 0.88, 0.65, 0.85).into();
                     *border = Color::srgb(0.85, 0.60, 0.15).into();
@@ -2340,7 +2466,7 @@ pub fn handle_spellbook_interactions(
             let spell_idx = spellbook_state.current_page * 12 + slot_btn.0;
             if spell_idx < filtered.len() {
                 let def = filtered[spell_idx];
-                spellbook_state.selected_spell_for_slotting = Some(def.id.to_string());
+                spellbook_state.selected_spell_for_slotting = Some(def.spell_id);
                 if let Ok(mut text) = status_text_q.get_single_mut() {
                     text.sections[0].value = format!(
                         "SELECTED: '{}' ({}) -> Click Hotbar Slot (1-16) to prepare!",
@@ -2401,9 +2527,9 @@ pub fn handle_spell_drag_and_drop(
                         let def = filtered[spell_idx];
                         spell_drag.is_dragging = true;
                         spell_drag.source_slot = None;
-                        spell_drag.spell_id = Some(def.id.to_string());
+                        spell_drag.spell_id = Some(def.spell_id);
                         spell_drag.current_pos = cursor_pos;
-                        spellbook_state.selected_spell_for_slotting = Some(def.id.to_string());
+                        spellbook_state.selected_spell_for_slotting = Some(def.spell_id);
                         return;
                     }
                 }
@@ -2415,10 +2541,10 @@ pub fn handle_spell_drag_and_drop(
             let rect = ui_node_screen_rect(transform, node, window);
             let is_hit = rect.inflate(4.0).contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
             if is_hit {
-                if let Some(spell_id) = &hotbar.slots[slot_btn.0] {
+                if let Some(spell_id) = hotbar.slots[slot_btn.0] {
                     spell_drag.is_dragging = true;
                     spell_drag.source_slot = Some(slot_btn.0);
-                    spell_drag.spell_id = Some(spell_id.clone());
+                    spell_drag.spell_id = Some(spell_id);
                     spell_drag.current_pos = cursor_pos;
                     return;
                 }
@@ -2455,7 +2581,7 @@ pub fn handle_spell_drag_and_drop(
                 }
             } else if let Some(spell_id) = spell_drag.spell_id.take() {
                 // Dragged from spellbook into hotbar slot
-                info!("Prepared spell '{}' into Hotbar Slot {}", spell_id, target + 1);
+                info!("Prepared spell '{}' into Hotbar Slot {}", spell_id.def().name, target + 1);
                 hotbar.slots[target] = Some(spell_id);
                 hotbar.cooldowns[target] = 0.0;
                 spellbook_state.selected_spell_for_slotting = None;
@@ -2485,12 +2611,8 @@ pub fn update_spell_drag_ghost_ui(
         style.display = Display::Flex;
         style.left = Val::Px(spell_drag.current_pos.x - 25.0);
         style.top = Val::Px(spell_drag.current_pos.y - 25.0);
-        let label = if let Some(spell_id) = &spell_drag.spell_id {
-            if let Some(def) = get_spell_by_id(spell_id) {
-                def.name
-            } else {
-                spell_id.as_str()
-            }
+        let label = if let Some(spell_id) = spell_drag.spell_id {
+            spell_id.def().name
         } else {
             "Spell"
         };
@@ -2818,9 +2940,11 @@ mod tests {
             assert!(!spell.name.is_empty(), "Spell must have a name");
             assert!(!spell.description.is_empty(), "Spell must have description");
             assert!(spell.cooldown_seconds > 0.0, "Cooldown must be positive");
-            assert_eq!(spell.icon.len(), 4, "Spell icon must be 4 characters");
             assert!(ids.insert(spell.id), "Duplicate spell ID: {}", spell.id);
             assert!(get_spell_by_id(spell.id).is_some());
+            assert_eq!(SpellId::from_id_or_name(spell.id), Some(spell.spell_id));
+            assert_eq!(SpellId::from_id_or_name(spell.name), Some(spell.spell_id));
+            assert_eq!(get_spell(spell.spell_id).id, spell.id);
         }
     }
 
@@ -2856,14 +2980,14 @@ mod tests {
     fn test_prepared_hotbar_slotting_and_cooldowns() {
         let mut hotbar = PreparedHotbarState::default();
         assert_eq!(hotbar.slots.len(), 16);
-        assert_eq!(hotbar.slots[0].as_deref(), None);
-        assert_eq!(hotbar.slots[4].as_deref(), None);
+        assert_eq!(hotbar.slots[0], None);
+        assert_eq!(hotbar.slots[4], None);
 
         // Slot custom spell
-        hotbar.slots[0] = Some("phase_dash".into());
-        hotbar.slots[15] = Some("solar_flare".into());
-        assert_eq!(hotbar.slots[0].as_deref(), Some("phase_dash"));
-        assert_eq!(hotbar.slots[15].as_deref(), Some("solar_flare"));
+        hotbar.slots[0] = Some(SpellId::PhaseDash);
+        hotbar.slots[15] = Some(SpellId::SolarFlare);
+        assert_eq!(hotbar.slots[0], Some(SpellId::PhaseDash));
+        assert_eq!(hotbar.slots[15], Some(SpellId::SolarFlare));
 
         // Cooldown timer progression
         hotbar.cooldowns[0] = 5.0;
@@ -2926,29 +3050,30 @@ mod tests {
         assert_eq!(hotbar.slots[1], None);
 
         // 2. Select a spell via click-to-slot from the grimoire
-        spellbook_state.selected_spell_for_slotting = Some("fireball".to_string());
-        assert_eq!(spellbook_state.selected_spell_for_slotting.as_deref(), Some("fireball"));
+        spellbook_state.selected_spell_for_slotting = Some(SpellId::Fireball);
+        assert_eq!(spellbook_state.selected_spell_for_slotting, Some(SpellId::Fireball));
 
         // Simulate click on slot 0: slots selected spell and clears selection
         let selected = spellbook_state.selected_spell_for_slotting.take().unwrap();
         hotbar.slots[0] = Some(selected);
         hotbar.cooldowns[0] = 0.0;
-        assert_eq!(hotbar.slots[0].as_deref(), Some("fireball"));
+        assert_eq!(hotbar.slots[0], Some(SpellId::Fireball));
         assert_eq!(spellbook_state.selected_spell_for_slotting, None);
 
         // 3. Drag spell from spellbook to slot 1
         spell_drag.is_dragging = true;
-        spell_drag.spell_id = Some("frost_nova".to_string());
+        spell_drag.spell_id = Some(SpellId::FrostNova);
         let dragged = spell_drag.spell_id.take().unwrap();
         hotbar.slots[1] = Some(dragged);
         spell_drag.is_dragging = false;
-        assert_eq!(hotbar.slots[1].as_deref(), Some("frost_nova"));
+        assert!(!spell_drag.is_dragging);
+        assert_eq!(hotbar.slots[1], Some(SpellId::FrostNova));
 
         // 4. Swap slots 0 and 1
         let temp = hotbar.slots[1].take();
         hotbar.slots[1] = hotbar.slots[0].take();
         hotbar.slots[0] = temp;
-        assert_eq!(hotbar.slots[0].as_deref(), Some("frost_nova"));
-        assert_eq!(hotbar.slots[1].as_deref(), Some("fireball"));
+        assert_eq!(hotbar.slots[0], Some(SpellId::FrostNova));
+        assert_eq!(hotbar.slots[1], Some(SpellId::Fireball));
     }
 }

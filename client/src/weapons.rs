@@ -34,6 +34,30 @@ impl Default for EquippedHandSide {
     }
 }
 
+// ----------------------------------------------------------------------------
+// WEAPON ARCHETYPE & TYPE DEFINITIONS
+// ----------------------------------------------------------------------------
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WeaponArchetype {
+    Unarmed,
+    OneHandBlade,
+    TwoHandBlade,
+    OneHandAxe,
+    TwoHandAxe,
+    OneHandBludgeon,
+    TwoHandBludgeon,
+    Polearm,
+    Bow,
+    Crossbow,
+    MagicImplement,
+    Shield,
+    UtilityTool,
+    /// Archived / horizontal prototype weapon variant retained for compatibility
+    ArchivedVariant,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WeaponType {
     #[default]
@@ -74,68 +98,57 @@ pub enum WeaponType {
 }
 
 impl WeaponType {
+    /// Classifies the weapon into its high-level gameplay archetype.
+    #[allow(dead_code)]
+    pub fn archetype(&self) -> WeaponArchetype {
+        match self {
+            Self::None => WeaponArchetype::Unarmed,
+            Self::Longsword | Self::Dagger | Self::Rapier => WeaponArchetype::OneHandBlade,
+            Self::Greatsword => WeaponArchetype::TwoHandBlade,
+            Self::Handaxe => WeaponArchetype::OneHandAxe,
+            Self::TwoHandAxe => WeaponArchetype::TwoHandAxe,
+            Self::Club | Self::Warhammer => WeaponArchetype::OneHandBludgeon,
+            Self::Maul => WeaponArchetype::TwoHandBludgeon,
+            Self::Spear | Self::Halberd | Self::Trident | Self::Javelin => WeaponArchetype::Polearm,
+            Self::Bow => WeaponArchetype::Bow,
+            Self::Crossbow | Self::HandCrossbow => WeaponArchetype::Crossbow,
+            Self::Wand | Self::Runestaff | Self::Orb => WeaponArchetype::MagicImplement,
+            Self::WoodenShield => WeaponArchetype::Shield,
+            Self::Hammer | Self::Pickaxe | Self::Torch => WeaponArchetype::UtilityTool,
+            _ => WeaponArchetype::ArchivedVariant,
+        }
+    }
+
+    /// Indicates whether this weapon is part of the canonical vertical slice.
+    #[allow(dead_code)]
+    pub fn is_canonical_vertical_slice(&self) -> bool {
+        !matches!(self.archetype(), WeaponArchetype::ArchivedVariant)
+    }
+
+    /// Parses item name through strongly-typed ItemKind first, falling back to legacy aliases.
     pub fn from_item_name(item: Option<&str>) -> Self {
-        match item {
-            // Unarmed
-            Some("Unarmed") => Self::None,
-
-            // 1H Tiger Claws
-            Some("1h Tiger Claws") | Some("Tiger Claws") => Self::TigerClaws,
-
-            // 1H Black Jack
-            Some("1h Black Jack") | Some("Black Jack") | Some("Blackjack") => Self::BlackJack,
-
-            // 1H Sword
-            Some("1h Sword") | Some("Sword") | Some("Longsword") | Some("Knight's Longsword") => Self::Longsword,
-
-            // 1H Hammer
-            Some("1h Hammer") | Some("Warhammer") | Some("Flanged Warhammer") => Self::Warhammer,
-
-            // 1H Axe
-            Some("1h Axe") | Some("Handaxe") | Some("Stone Axe") | Some("Bearded Handaxe") => Self::Handaxe,
-
-            // 2H Sword
-            Some("2h Sword") | Some("Greatsword") | Some("Two-Handed Sword") | Some("Zweihander Greatsword") => Self::Greatsword,
-
-            // 2H Hammer
-            Some("2h Hammer") | Some("Maul") | Some("Two-Handed Hammer") | Some("Heavy Iron Maul") => Self::Maul,
-
-            // 2H Axe
-            Some("2h Axe") | Some("Battleaxe") | Some("Greataxe") | Some("Two-Handed Axe") => Self::TwoHandAxe,
-
-            // Polearms
-            Some("Polearm Spear") | Some("Spear") | Some("Flint Spear") | Some("Hunting Spear") => Self::Spear,
-            Some("Polearm Javelin - Thrown") | Some("Polearm Javelin") | Some("Javelin") | Some("Thrown Javelin") => Self::Javelin,
-            Some("Polearm Trident") | Some("Trident") => Self::Trident,
-            Some("Halberd") => Self::Halberd,
-
-            // 1H Ranged
-            Some("1h Ranged Hand Crossbow") | Some("Hand Crossbow") => Self::HandCrossbow,
-            Some("1h Ranged Revolver") | Some("Revolver") => Self::Revolver,
-            Some("1h Ranged Wand") | Some("Wand") | Some("Arcane Wand") => Self::Wand,
-            Some("1h Ranged Orb") | Some("Orb") | Some("Mystic Orb") => Self::Orb,
-
-            // 2H Ranged
-            Some("2h Ranged Long Bow") | Some("Long Bow") | Some("Longbow") | Some("Crude Bow") | Some("Bow") => Self::Bow,
-            Some("2h Ranged Shotgun") | Some("Shotgun") => Self::Shotgun,
-            Some("2h Ranged Sniper Rifle") | Some("Sniper Rifle") => Self::SniperRifle,
-            Some("2h Ranged Runestaff") | Some("Runestaff") => Self::Runestaff,
-            Some("Crossbow") => Self::Crossbow,
-            Some("Bouncy Bomb Launcher") => Self::BouncyBombLauncher,
-
-            // Additional Melee & Tools
-            Some("Rapier") => Self::Rapier,
-            Some("Club") => Self::Club,
-            Some("Dagger") => Self::Dagger,
-            Some("Cestus") => Self::Cestus,
-            Some("Knuckle-Duster") => Self::KnuckleDuster,
-            Some("Frying Pan") => Self::FryingPan,
-            Some("Holy Mackerel") => Self::HolyMackerel,
-            Some("Hammer") => Self::Hammer,
-            Some("Pickaxe") => Self::Pickaxe,
-            Some("Torch") => Self::Torch,
-            Some("Wooden Shield") => Self::WoodenShield,
-            _ => Self::None,
+        let Some(name) = item else { return Self::None; };
+        if let Some(kind) = crate::ui::types::ItemKind::from_name(name) {
+            kind.to_weapon_type()
+        } else {
+            match name {
+                "1h Ranged Hand Crossbow" | "Hand Crossbow" => Self::HandCrossbow,
+                "1h Ranged Revolver" | "Revolver" => Self::Revolver,
+                "2h Ranged Shotgun" | "Shotgun" => Self::Shotgun,
+                "2h Ranged Sniper Rifle" | "Sniper Rifle" => Self::SniperRifle,
+                "Bouncy Bomb Launcher" => Self::BouncyBombLauncher,
+                "1h Ranged Orb" | "Orb" => Self::Orb,
+                "Polearm Trident" | "Trident" => Self::Trident,
+                "Polearm Javelin - Thrown" | "Polearm Javelin" | "Javelin" | "Thrown Javelin" => Self::Javelin,
+                "Rapier" => Self::Rapier,
+                "1h Tiger Claws" | "Tiger Claws" => Self::TigerClaws,
+                "1h Black Jack" | "Black Jack" | "Blackjack" => Self::BlackJack,
+                "Cestus" => Self::Cestus,
+                "Knuckle-Duster" => Self::KnuckleDuster,
+                "Frying Pan" => Self::FryingPan,
+                "Holy Mackerel" => Self::HolyMackerel,
+                _ => Self::None,
+            }
         }
     }
 
@@ -2112,5 +2125,25 @@ mod tests {
         let expected_dir = Vec3::new(30.0, -10.0, 0.0).normalize();
         let actual_forward = proj_trans.forward().as_vec3();
         assert!((actual_forward.dot(expected_dir) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_weapon_archetypes_and_canonical_slice() {
+        assert_eq!(WeaponType::Longsword.archetype(), WeaponArchetype::OneHandBlade);
+        assert_eq!(WeaponType::Greatsword.archetype(), WeaponArchetype::TwoHandBlade);
+        assert_eq!(WeaponType::Handaxe.archetype(), WeaponArchetype::OneHandAxe);
+        assert_eq!(WeaponType::TwoHandAxe.archetype(), WeaponArchetype::TwoHandAxe);
+        assert_eq!(WeaponType::Warhammer.archetype(), WeaponArchetype::OneHandBludgeon);
+        assert_eq!(WeaponType::Maul.archetype(), WeaponArchetype::TwoHandBludgeon);
+        assert_eq!(WeaponType::Spear.archetype(), WeaponArchetype::Polearm);
+        assert_eq!(WeaponType::Bow.archetype(), WeaponArchetype::Bow);
+        assert_eq!(WeaponType::Crossbow.archetype(), WeaponArchetype::Crossbow);
+        assert_eq!(WeaponType::Wand.archetype(), WeaponArchetype::MagicImplement);
+        assert_eq!(WeaponType::WoodenShield.archetype(), WeaponArchetype::Shield);
+        assert_eq!(WeaponType::Hammer.archetype(), WeaponArchetype::UtilityTool);
+        assert!(WeaponType::Longsword.is_canonical_vertical_slice());
+        assert!(WeaponType::Bow.is_canonical_vertical_slice());
+        assert!(!WeaponType::Revolver.is_canonical_vertical_slice());
+        assert!(!WeaponType::Shotgun.is_canonical_vertical_slice());
     }
 }

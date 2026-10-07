@@ -98,7 +98,7 @@ pub fn context_aware_action_dispatcher(
         let _ = conn.db.reducers.spawn_peasant();
     }
 
-    let is_holding_hammer = active_item.0.as_deref() == Some("Hammer");
+    let is_holding_hammer = active_item.0.as_deref().and_then(crate::ui::types::ItemKind::from_name) == Some(crate::ui::types::ItemKind::Hammer);
 
     for event in action_events.read() {
         match camera_mode.get() {

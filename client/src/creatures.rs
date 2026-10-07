@@ -869,7 +869,7 @@ pub fn setup_sparring_yard(
         let _ = conn.db.reducers.admin_give_item("Wood Arrow".to_string(), 50);
         let _ = conn.db.reducers.admin_give_item("Longsword".to_string(), 1);
         let _ = conn.db.reducers.admin_give_item("Wooden Shield".to_string(), 1);
-        let _ = conn.db.reducers.equip_weapon("MainHand".to_string(), "Crude Bow".to_string());
+        let _ = conn.db.reducers.equip_weapon(crate::ui::types::EquipmentSlot::MainHand.as_str().to_string(), "Crude Bow".to_string());
     }
 
     let spawn_x = 0.0;

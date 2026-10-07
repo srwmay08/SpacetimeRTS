@@ -62,13 +62,13 @@ pub fn hotbar_input_system(
             if let Some(ref inventory) = inv {
                 if let Some(slot) = inventory.slots.get(slot_idx) {
                     if slot.count > 0 && !slot.item_type.is_empty() {
-                        let hand_str = if equip_to_offhand {
-                            "OffHand".to_string()
+                        let target_slot = if equip_to_offhand {
+                            crate::ui::types::EquipmentSlot::OffHand
                         } else {
-                            "MainHand".to_string()
+                            crate::ui::types::EquipmentSlot::MainHand
                         };
-                        info!("Equipping '{}' to {}", slot.item_type, hand_str);
-                        let _ = conn.db.reducers.equip_weapon(hand_str, slot.item_type.clone());
+                        info!("Equipping '{}' to {}", slot.item_type, target_slot.as_str());
+                        let _ = conn.db.reducers.equip_weapon(target_slot.as_str().to_string(), slot.item_type.clone());
                     }
                 }
             }
