@@ -145,6 +145,8 @@ pub struct ActionContextQueries<'w, 's> {
     pub rts_camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<RtsCameraChild>>,
     pub selectable: Query<'w, 's, (Entity, &'static BevyTransform), With<Selectable>>,
     pub selected: Query<'w, 's, Entity, With<Selected>>,
+    pub dummy: Query<'w, 's, &'static mut TrainingDummy>,
+    pub goblin: Query<'w, 's, (Entity, &'static mut SparringGoblin, &'static mut LinearVelocity), Without<PlayerBody>>,
 }
 
 #[derive(SystemParam)]
@@ -161,6 +163,7 @@ pub struct WeaponActionParams<'w> {
     pub time: Res<'w, Time>,
     pub weapon_state: ResMut<'w, WeaponState>,
     pub flick_tracker: Res<'w, MouseFlickTracker>,
+    pub audio_handles: Option<Res<'w, CombatAudioHandles>>,
 }
 
 fn resolve_node_id(entity: Entity, node_q: &Query<&ResourceNodeItem>, parent_q: &Query<&Parent>) -> Option<u64> {
@@ -409,7 +412,7 @@ pub fn context_aware_action_dispatcher(
     mut swing_state: ResMut<SwingState>,
     active_item: Res<ActiveEquippedItem>,
     hand_side: Res<EquippedHandSide>,
-    queries: ActionContextQueries,
+    mut queries: ActionContextQueries,
     spatial_query: SpatialQuery,
     mut selection_state: ResMut<SelectionState>,
     conn: Res<SpacetimeConnection>,
@@ -668,19 +671,54 @@ pub fn context_aware_action_dispatcher(
 
                                             if let Some(hit_data) = hit {
                                                 let hit_pt = origin + dir * hit_data.time_of_impact;
-                                                commands.spawn((
-                                                    PbrBundle {
-                                                        mesh: weapons.meshes.add(bevy::math::primitives::Sphere::new(0.06)),
-                                                        material: weapons.materials.add(StandardMaterial {
-                                                            base_color: Color::srgb(0.95, 0.3, 0.2),
-                                                            unlit: true,
+                                                let target_entity = if queries.dummy.contains(hit_data.entity) || queries.goblin.contains(hit_data.entity) {
+                                                    hit_data.entity
+                                                } else if let Ok(parent) = queries.parent_q.get(hit_data.entity) {
+                                                    parent.get()
+                                                } else {
+                                                    hit_data.entity
+                                                };
+
+                                                if let Ok(mut dummy) = queries.dummy.get_mut(target_entity) {
+                                                    dummy.wobble_timer.reset();
+                                                    dummy.wobble_angle = 0.22;
+                                                    let hit_dir = dir.normalize();
+                                                    let wobble_axis = hit_dir.cross(Vec3::Y).normalize_or_zero();
+                                                    dummy.wobble_axis = if wobble_axis.length_squared() > 0.01 { wobble_axis } else { Vec3::X };
+                                                    if let Some(ref audio) = weapons.audio_handles {
+                                                        crate::audio_feedback::play_sound(&mut commands, &audio.flesh_impact);
+                                                    }
+                                                    crate::tuner::spawn_comic_damage_floater(&mut commands, hit_pt + Vec3::Y * 0.3, "JAB -16", false);
+                                                } else if let Ok((_, mut goblin, mut goblin_vel)) = queries.goblin.get_mut(target_entity) {
+                                                    if goblin.is_blocking {
+                                                        if let Some(ref audio) = weapons.audio_handles {
+                                                            crate::audio_feedback::play_sound(&mut commands, &audio.shield_block);
+                                                        }
+                                                        crate::tuner::spawn_comic_damage_floater(&mut commands, hit_pt + Vec3::Y * 0.3, "BLOCKED!", false);
+                                                    } else {
+                                                        goblin.health = (goblin.health - 16.0).max(10.0);
+                                                        goblin.stagger_timer = Timer::from_seconds(0.4, TimerMode::Once);
+                                                        goblin_vel.0 = dir * 2.8 + Vec3::Y * 1.0;
+                                                        if let Some(ref audio) = weapons.audio_handles {
+                                                            crate::audio_feedback::play_sound(&mut commands, &audio.flesh_impact);
+                                                        }
+                                                        crate::tuner::spawn_comic_damage_floater(&mut commands, hit_pt + Vec3::Y * 0.3, "PUNCH -16", false);
+                                                    }
+                                                } else {
+                                                    commands.spawn((
+                                                        PbrBundle {
+                                                            mesh: weapons.meshes.add(bevy::math::primitives::Sphere::new(0.06)),
+                                                            material: weapons.materials.add(StandardMaterial {
+                                                                base_color: Color::srgb(0.95, 0.3, 0.2),
+                                                                unlit: true,
+                                                                ..default()
+                                                            }),
+                                                            transform: BevyTransform::from_translation(hit_pt),
                                                             ..default()
-                                                        }),
-                                                        transform: BevyTransform::from_translation(hit_pt),
-                                                        ..default()
-                                                    },
-                                                    Particle { timer: Timer::from_seconds(0.12, TimerMode::Once) },
-                                                ));
+                                                        },
+                                                        Particle { timer: Timer::from_seconds(0.12, TimerMode::Once) },
+                                                    ));
+                                                }
                                             }
                                         }
                                     }
@@ -1083,31 +1121,106 @@ pub fn context_aware_action_dispatcher(
                                         // Dynamic bloom feedback on swing/punch
                                         weapons.weapon_state.dynamic_bloom = (weapons.weapon_state.dynamic_bloom + 2.5).min(20.0);
 
-                                        // Immediate visual feedback if hitting a surface/entity within melee reach (4.5m)
+                                        // Immediate visual & sensory feedback if hitting a surface/entity within melee reach (4.5m)
                                         if let Some(hit_data) = hit.filter(|h| h.time_of_impact <= 4.5) {
                                             let hit_pt = origin + dir * hit_data.time_of_impact;
-                                            let is_node = queries.node.contains(hit_data.entity);
-                                            let impact_color = if is_node {
-                                                Color::srgb(0.85, 0.75, 0.45)
-                                            } else if queries.structure.contains(hit_data.entity) {
-                                                Color::srgb(0.7, 0.65, 0.55)
+                                            let target_entity = if queries.dummy.contains(hit_data.entity) || queries.goblin.contains(hit_data.entity) {
+                                                hit_data.entity
+                                            } else if let Ok(parent) = queries.parent_q.get(hit_data.entity) {
+                                                parent.get()
                                             } else {
-                                                Color::srgb(0.95, 0.2, 0.2)
+                                                hit_data.entity
                                             };
 
-                                            commands.spawn((
-                                                PbrBundle {
-                                                    mesh: weapons.meshes.add(bevy::math::primitives::Sphere::new(0.06)),
-                                                    material: weapons.materials.add(StandardMaterial {
-                                                        base_color: impact_color,
-                                                        unlit: true,
-                                                        ..default()
-                                                    }),
-                                                    transform: BevyTransform::from_translation(hit_pt),
+                                            if let Ok(mut dummy) = queries.dummy.get_mut(target_entity) {
+                                                dummy.wobble_timer.reset();
+                                                dummy.wobble_angle = 0.38;
+                                                let hit_dir = dir.normalize();
+                                                let wobble_axis = hit_dir.cross(Vec3::Y).normalize_or_zero();
+                                                dummy.wobble_axis = if wobble_axis.length_squared() > 0.01 { wobble_axis } else { Vec3::X };
+
+                                                if let Some(ref audio) = weapons.audio_handles {
+                                                    crate::audio_feedback::play_sound(&mut commands, &audio.sword_clang);
+                                                }
+
+                                                let (label, is_crit) = match swing_state.direction {
+                                                    MeleeSwingDirection::Overhead => ("CLEAVE -52!", true),
+                                                    MeleeSwingDirection::Thrust => ("THRUST -44", false),
+                                                    MeleeSwingDirection::Left => ("SLASH -38", false),
+                                                    MeleeSwingDirection::Right => ("SLASH -38", false),
+                                                };
+                                                crate::tuner::spawn_comic_damage_floater(&mut commands, hit_pt + Vec3::Y * 0.4, label, is_crit);
+
+                                                // Burst of brilliant combat sparks
+                                                let spark_mesh = weapons.meshes.add(bevy::math::primitives::Sphere::new(0.04));
+                                                let spark_mat = weapons.materials.add(StandardMaterial {
+                                                    base_color: Color::srgb(1.0, 0.85, 0.25),
+                                                    emissive: Color::srgb(2.5, 1.8, 0.5).into(),
+                                                    unlit: true,
                                                     ..default()
-                                                },
-                                                Particle { timer: Timer::from_seconds(0.12, TimerMode::Once) },
-                                            ));
+                                                });
+                                                for i in 0..7 {
+                                                    let angle = (i as f32) * (std::f32::consts::TAU / 7.0);
+                                                    let spark_vel = Vec3::new(angle.cos() * 4.2, 2.5 + (i as f32 * 0.25), angle.sin() * 4.2);
+                                                    commands.spawn((
+                                                        PbrBundle {
+                                                            mesh: spark_mesh.clone(),
+                                                            material: spark_mat.clone(),
+                                                            transform: BevyTransform::from_translation(hit_pt),
+                                                            ..default()
+                                                        },
+                                                        RigidBody::Dynamic,
+                                                        LinearVelocity(spark_vel),
+                                                        Particle { timer: Timer::from_seconds(0.2, TimerMode::Once) },
+                                                    ));
+                                                }
+                                            } else if let Ok((_, mut goblin, mut goblin_vel)) = queries.goblin.get_mut(target_entity) {
+                                                if goblin.is_blocking {
+                                                    if let Some(ref audio) = weapons.audio_handles {
+                                                        crate::audio_feedback::play_sound(&mut commands, &audio.shield_block);
+                                                    }
+                                                    crate::tuner::spawn_comic_damage_floater(&mut commands, hit_pt + Vec3::Y * 0.3, "BLOCKED! CLANG", false);
+                                                } else {
+                                                    goblin.health = (goblin.health - 38.0).max(10.0);
+                                                    goblin.stagger_timer = Timer::from_seconds(0.65, TimerMode::Once);
+                                                    goblin_vel.0 = dir * 4.2 + Vec3::Y * 1.5;
+
+                                                    if let Some(ref audio) = weapons.audio_handles {
+                                                        crate::audio_feedback::play_sound(&mut commands, &audio.flesh_impact);
+                                                    }
+
+                                                    let (label, is_crit) = match swing_state.direction {
+                                                        MeleeSwingDirection::Overhead => ("CLEAVE -58!", true),
+                                                        MeleeSwingDirection::Thrust => ("THRUST -42", false),
+                                                        MeleeSwingDirection::Left => ("SLASH -36", false),
+                                                        MeleeSwingDirection::Right => ("SLASH -36", false),
+                                                    };
+                                                    crate::tuner::spawn_comic_damage_floater(&mut commands, hit_pt + Vec3::Y * 0.3, label, is_crit);
+                                                }
+                                            } else {
+                                                let is_node = queries.node.contains(hit_data.entity);
+                                                let impact_color = if is_node {
+                                                    Color::srgb(0.85, 0.75, 0.45)
+                                                } else if queries.structure.contains(hit_data.entity) {
+                                                    Color::srgb(0.7, 0.65, 0.55)
+                                                } else {
+                                                    Color::srgb(0.95, 0.2, 0.2)
+                                                };
+
+                                                commands.spawn((
+                                                    PbrBundle {
+                                                        mesh: weapons.meshes.add(bevy::math::primitives::Sphere::new(0.06)),
+                                                        material: weapons.materials.add(StandardMaterial {
+                                                            base_color: impact_color,
+                                                            unlit: true,
+                                                            ..default()
+                                                        }),
+                                                        transform: BevyTransform::from_translation(hit_pt),
+                                                        ..default()
+                                                    },
+                                                    Particle { timer: Timer::from_seconds(0.12, TimerMode::Once) },
+                                                ));
+                                            }
                                         }
                                     } else {
                                         // Generic ranged weapon fallback

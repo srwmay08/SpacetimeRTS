@@ -531,6 +531,29 @@ impl Default for HitMarkerState {
     }
 }
 
+// ----------------------------------------------------------------------------
+// SPARRING YARD & PRACTICE ENTITY COMPONENTS
+// ----------------------------------------------------------------------------
+
+#[derive(Component, Debug, Clone)]
+pub struct TrainingDummy {
+    pub wobble_timer: Timer,
+    pub wobble_angle: f32,
+    pub wobble_axis: Vec3,
+    pub base_rotation: Quat,
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct SparringGoblin {
+    pub health: f32,
+    pub max_health: f32,
+    pub is_blocking: bool,
+    pub block_timer: Timer,
+    pub stagger_timer: Timer,
+    pub attack_cooldown: Timer,
+    pub home_pos: Vec3,
+}
+
 #[derive(Resource, Clone, Default)]
 pub struct CombatAudioHandles {
     pub dink: Handle<AudioSource>,
@@ -539,4 +562,7 @@ pub struct CombatAudioHandles {
     pub dash_whoosh: Handle<AudioSource>,
     pub sonar_ping: Handle<AudioSource>,
     pub smoke_hiss: Handle<AudioSource>,
+    pub sword_clang: Handle<AudioSource>,
+    pub shield_block: Handle<AudioSource>,
+    pub flesh_impact: Handle<AudioSource>,
 }

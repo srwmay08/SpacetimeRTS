@@ -15,8 +15,13 @@
 // providing cohesive visual style across the fantasy RTS world.
 // ----------------------------------------------------------------------------
 
-use bevy::prelude::*;
+use bevy::prelude::{Transform as BevyTransform, *};
+use avian3d::prelude::*;
 use crate::trees::LowPolyMeshBuilder;
+use crate::components::*;
+use crate::core::*;
+use crate::audio_feedback::*;
+use crate::tuner::spawn_comic_damage_floater;
 
 // ----------------------------------------------------------------------------
 // PROCEDURAL MESH BUILDER EXTENSION FOR CREATURE PRIMITIVES
@@ -432,6 +437,81 @@ pub fn create_lowpoly_goblin_mesh() -> Mesh {
 pub use create_lowpoly_goblin_mesh as create_voxel_goblin_mesh;
 
 // ----------------------------------------------------------------------------
+// 3b. PROCEDURAL LOW-POLY TRAINING DUMMY (STRAW & TIMBER)
+// ----------------------------------------------------------------------------
+
+pub fn create_lowpoly_dummy_mesh() -> Mesh {
+    let mut builder = LowPolyMeshBuilder::new();
+
+    let wood_dark = [0.32, 0.20, 0.12, 1.0];
+    let wood_light = [0.48, 0.32, 0.18, 1.0];
+    let straw = [0.82, 0.72, 0.38, 1.0];
+    let straw_dark = [0.68, 0.56, 0.28, 1.0];
+    let rope = [0.38, 0.26, 0.16, 1.0];
+    let target_red = [0.90, 0.18, 0.15, 1.0];
+    let target_white = [0.95, 0.94, 0.90, 1.0];
+    let iron_helmet = [0.30, 0.32, 0.36, 1.0];
+
+    // Heavy cross-timber ground base
+    builder.add_faceted_box(Vec3::new(-0.55, 0.0, -0.10), Vec3::new(0.55, 0.08, 0.10), wood_dark);
+    builder.add_faceted_box(Vec3::new(-0.10, 0.0, -0.55), Vec3::new(0.10, 0.08, 0.55), wood_dark);
+
+    // Thick vertical wooden mounting post (Y: 0.0 to 1.85)
+    builder.add_tapered_prism(Vec3::new(0.0, 0.08, 0.0), Vec3::new(0.0, 1.85, 0.0), 0.11, 0.08, 6, wood_light, false, true);
+
+    // Burlap straw-stuffed torso (Y: 0.55 to 1.42)
+    builder.add_tapered_box(
+        Vec2::new(-0.24, -0.16), Vec2::new(0.24, 0.16), 0.55,
+        Vec2::new(-0.28, -0.18), Vec2::new(0.28, 0.18), 1.05,
+        straw,
+    );
+    builder.add_tapered_box(
+        Vec2::new(-0.28, -0.18), Vec2::new(0.28, 0.18), 1.05,
+        Vec2::new(-0.22, -0.15), Vec2::new(0.22, 0.15), 1.42,
+        straw,
+    );
+
+    // Thick rope bindings around waist and chest
+    builder.add_faceted_box(Vec3::new(-0.29, 0.72, -0.19), Vec3::new(0.29, 0.78, 0.19), rope);
+    builder.add_faceted_box(Vec3::new(-0.29, 1.15, -0.19), Vec3::new(0.29, 1.21, 0.19), rope);
+
+    // Target bullseye on front of torso (+Z)
+    // Outer red square
+    builder.add_faceted_box(Vec3::new(-0.14, 0.88, 0.181), Vec3::new(0.14, 1.16, 0.186), target_red);
+    // Middle white square
+    builder.add_faceted_box(Vec3::new(-0.09, 0.93, 0.186), Vec3::new(0.09, 1.11, 0.191), target_white);
+    // Center red bullseye
+    builder.add_faceted_box(Vec3::new(-0.045, 0.975, 0.191), Vec3::new(0.045, 1.065, 0.196), target_red);
+
+    // Horizontal crossbar sparring arms (through shoulders Y: 1.28)
+    builder.add_faceted_box(Vec3::new(-0.75, 1.26, -0.06), Vec3::new(0.75, 1.34, 0.06), wood_light);
+    // Straw padding bundles wrapped on ends of arms
+    builder.add_tapered_prism(Vec3::new(-0.45, 1.30, 0.0), Vec3::new(-0.75, 1.30, 0.0), 0.08, 0.09, 6, straw_dark, true, true);
+    builder.add_tapered_prism(Vec3::new(0.45, 1.30, 0.0), Vec3::new(0.75, 1.30, 0.0), 0.08, 0.09, 6, straw_dark, true, true);
+    // Arm rope bands
+    builder.add_faceted_box(Vec3::new(-0.62, 1.22, -0.09), Vec3::new(-0.58, 1.38, 0.09), rope);
+    builder.add_faceted_box(Vec3::new(0.58, 1.22, -0.09), Vec3::new(0.62, 1.38, 0.09), rope);
+
+    // Dummy Head (Straw sphere-like polyhedron, Y: 1.48 to 1.82)
+    builder.add_tapered_box(
+        Vec2::new(-0.14, -0.14), Vec2::new(0.14, 0.14), 1.48,
+        Vec2::new(-0.16, -0.16), Vec2::new(0.16, 0.16), 1.68,
+        straw,
+    );
+    builder.add_tapered_box(
+        Vec2::new(-0.16, -0.16), Vec2::new(0.16, 0.16), 1.68,
+        Vec2::new(-0.12, -0.12), Vec2::new(0.12, 0.12), 1.82,
+        straw,
+    );
+
+    // Iron pot helmet on dummy head (Y: 1.74 to 1.88)
+    builder.add_faceted_box(Vec3::new(-0.18, 1.74, -0.18), Vec3::new(0.18, 1.82, 0.18), iron_helmet);
+    builder.add_faceted_box(Vec3::new(-0.14, 1.82, -0.14), Vec3::new(0.14, 1.88, 0.14), iron_helmet);
+
+    builder.build()
+}
+
+// ----------------------------------------------------------------------------
 // 4. PROCEDURAL LOW-POLY PEASANT (WORKER / VILLAGER)
 // ----------------------------------------------------------------------------
 
@@ -582,7 +662,6 @@ pub use create_lowpoly_pet_mesh as create_voxel_pet_mesh;
 // CREATURE ENTITY CREATION & MESH CACHING
 // ----------------------------------------------------------------------------
 
-use avian3d::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy::pbr::NotShadowCaster;
 use crate::components::{NetworkEntity, LogicalPosition, LogicalRotation, Selectable, PeasantUnit, SelectionRing, RTSProxy};
@@ -595,6 +674,7 @@ pub struct CachedCreatureMeshes {
     pub goblin: Handle<Mesh>,
     pub peasant: Handle<Mesh>,
     pub pet: Handle<Mesh>,
+    pub dummy: Handle<Mesh>,
 }
 
 impl CachedCreatureMeshes {
@@ -605,6 +685,7 @@ impl CachedCreatureMeshes {
             goblin: meshes.add(create_lowpoly_goblin_mesh()),
             peasant: meshes.add(create_lowpoly_peasant_mesh()),
             pet: meshes.add(create_lowpoly_pet_mesh()),
+            dummy: meshes.add(create_lowpoly_dummy_mesh()),
         }
     }
 }
@@ -719,6 +800,248 @@ pub fn spawn_creature_visual_entity(
     entity_cmds.id()
 }
 
+// ----------------------------------------------------------------------------
+// 6. SPARRING YARD ARENA (SANDBOX PRACTICE COMBAT SYSTEMS)
+// ----------------------------------------------------------------------------
+
+pub fn setup_sparring_yard(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let spawn_x = 0.0;
+    let spawn_z = 0.0;
+    let terrain_y = crate::terrain::get_terrain_height(spawn_x, spawn_z);
+
+    // 1. Spawning the Martial Arts Training Dummy (3.2m directly in front of spawn)
+    let dummy_pos = Vec3::new(spawn_x, terrain_y, spawn_z - 3.2);
+    let dummy_mesh = meshes.add(create_lowpoly_dummy_mesh());
+    let dummy_mat = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+
+    commands.spawn((
+        Name::new("SparringYard_TrainingDummy"),
+        StateScoped(GameState::InGame),
+        PbrBundle {
+            mesh: dummy_mesh,
+            material: dummy_mat,
+            transform: BevyTransform::from_translation(dummy_pos),
+            ..default()
+        },
+        TrainingDummy {
+            wobble_timer: Timer::from_seconds(0.85, TimerMode::Once),
+            wobble_angle: 0.0,
+            wobble_axis: Vec3::X,
+            base_rotation: Quat::IDENTITY,
+        },
+        RigidBody::Kinematic,
+        Collider::capsule(0.35, 1.6),
+        CollisionLayers::new(
+            [GameLayer::Unit],
+            [GameLayer::Default, GameLayer::Environment, GameLayer::Terrain],
+        ),
+    ));
+
+    // 2. Spawning the Sparring Goblin Raider (3.0m forward-right, facing player)
+    let goblin_pos = Vec3::new(spawn_x + 2.8, terrain_y, spawn_z - 2.6);
+    let goblin_mesh = meshes.add(create_lowpoly_goblin_mesh());
+    let goblin_mat = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.85,
+        ..default()
+    });
+
+    let to_player = Vec3::new(spawn_x - goblin_pos.x, 0.0, spawn_z - goblin_pos.z).normalize_or_zero();
+    let goblin_rot = Quat::from_rotation_arc(Vec3::NEG_Z, to_player);
+
+    commands.spawn((
+        Name::new("SparringYard_GoblinRaider"),
+        StateScoped(GameState::InGame),
+        PbrBundle {
+            mesh: goblin_mesh,
+            material: goblin_mat,
+            transform: BevyTransform::from_translation(goblin_pos).with_rotation(goblin_rot),
+            ..default()
+        },
+        SparringGoblin {
+            health: 120.0,
+            max_health: 120.0,
+            is_blocking: false,
+            block_timer: Timer::from_seconds(0.0, TimerMode::Once),
+            stagger_timer: Timer::from_seconds(0.0, TimerMode::Once),
+            attack_cooldown: Timer::from_seconds(3.5, TimerMode::Repeating),
+            home_pos: goblin_pos,
+        },
+        RigidBody::Dynamic,
+        Collider::capsule(0.35, 1.2),
+        LockedAxes::ROTATION_LOCKED,
+        LinearVelocity::ZERO,
+        CollisionLayers::new(
+            [GameLayer::Unit],
+            [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment],
+        ),
+    ));
+
+    // 3. Sparring Yard Training Torches / Ring Markers
+    let ring_offsets = [
+        Vec3::new(-2.8, 0.0, -5.2),
+        Vec3::new(4.2, 0.0, -5.2),
+        Vec3::new(-2.8, 0.0, 1.2),
+        Vec3::new(4.2, 0.0, 1.2),
+    ];
+
+    let post_mesh = meshes.add(bevy::math::primitives::Cylinder::new(0.08, 1.4));
+    let post_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.35, 0.22, 0.12),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+
+    let flame_mesh = meshes.add(bevy::math::primitives::Sphere::new(0.12));
+    let flame_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.65, 0.20),
+        emissive: Color::srgb(2.5, 1.2, 0.3).into(),
+        unlit: true,
+        ..default()
+    });
+
+    for offset in ring_offsets {
+        let post_y = crate::terrain::get_terrain_height(offset.x, offset.z);
+        commands.spawn((
+            PbrBundle {
+                mesh: post_mesh.clone(),
+                material: post_mat.clone(),
+                transform: BevyTransform::from_xyz(offset.x, post_y + 0.7, offset.z),
+                ..default()
+            },
+        )).with_children(|builder| {
+            builder.spawn(PbrBundle {
+                mesh: flame_mesh.clone(),
+                material: flame_mat.clone(),
+                transform: BevyTransform::from_xyz(0.0, 0.75, 0.0),
+                ..default()
+            });
+            builder.spawn(PointLightBundle {
+                point_light: PointLight {
+                    color: Color::srgb(1.0, 0.75, 0.4),
+                    intensity: 3500.0,
+                    range: 8.0,
+                    shadows_enabled: false,
+                    ..default()
+                },
+                transform: BevyTransform::from_xyz(0.0, 0.85, 0.0),
+                ..default()
+            });
+        });
+    }
+}
+
+pub fn update_training_dummy_wobble(
+    time: Res<Time>,
+    mut dummy_q: Query<(&mut TrainingDummy, &mut BevyTransform)>,
+) {
+    for (mut dummy, mut transform) in dummy_q.iter_mut() {
+        if !dummy.wobble_timer.finished() {
+            dummy.wobble_timer.tick(time.delta());
+            let t = dummy.wobble_timer.fraction();
+            // Damped harmonic oscillation: decaying sine wave
+            let decay = (-t * 4.5).exp();
+            let wave = (t * 18.0).sin();
+            let angle = dummy.wobble_angle * decay * wave;
+
+            let wobble_rot = Quat::from_axis_angle(dummy.wobble_axis, angle);
+            transform.rotation = dummy.base_rotation * wobble_rot;
+        } else {
+            transform.rotation = dummy.base_rotation;
+        }
+    }
+}
+
+pub fn update_sparring_goblin_ai(
+    time: Res<Time>,
+    mut commands: Commands,
+    player_q: Query<(Entity, &BevyTransform, &LinearVelocity), (With<PlayerBody>, Without<SparringGoblin>)>,
+    mut goblin_q: Query<(Entity, &mut SparringGoblin, &mut BevyTransform, &mut LinearVelocity), Without<PlayerBody>>,
+    audio_handles: Option<Res<CombatAudioHandles>>,
+    swing_state: Res<SwingState>,
+) {
+    let Ok((_, player_transform, _)) = player_q.get_single() else { return; };
+    let player_pos = player_transform.translation;
+
+    for (_, mut goblin, mut goblin_transform, mut goblin_vel) in goblin_q.iter_mut() {
+        goblin.stagger_timer.tick(time.delta());
+        goblin.block_timer.tick(time.delta());
+        goblin.attack_cooldown.tick(time.delta());
+
+        let to_player = player_pos - goblin_transform.translation;
+        let dist = to_player.length();
+
+        // Always face player if within 12m
+        if dist < 12.0 && dist > 0.1 {
+            let look_target = Vec3::new(player_pos.x, goblin_transform.translation.y, player_pos.z);
+            goblin_transform.look_at(look_target, Vec3::Y);
+        }
+
+        // If staggered from a heavy blow, slow down and wait
+        if !goblin.stagger_timer.finished() {
+            goblin_vel.x *= 0.85;
+            goblin_vel.z *= 0.85;
+            continue;
+        }
+
+        // Reactive Block AI:
+        // If player is winding up a melee attack within reach (dist <= 3.8m), raise block guard!
+        if swing_state.phase == MeleeAttackPhase::Windup && dist <= 3.8 {
+            goblin.is_blocking = true;
+            goblin.block_timer.set_duration(std::time::Duration::from_secs_f32(0.45));
+            goblin.block_timer.reset();
+        } else if goblin.block_timer.finished() {
+            goblin.is_blocking = false;
+        }
+
+        // Sparring attack cadence:
+        // When within 2.5m, goblin attempts a telegraphed sparring strike every ~3.5s
+        if dist <= 2.6 && goblin.attack_cooldown.just_finished() && !goblin.is_blocking {
+            let strike_pos = goblin_transform.translation + goblin_transform.forward().as_vec3() * 1.2 + Vec3::Y * 1.0;
+
+            if swing_state.is_blocking {
+                // PLAYER SUCCESSFULLY BLOCKED WITH SHIELD / WEAPON!
+                if let Some(ref handles) = audio_handles {
+                    play_sound(&mut commands, &handles.shield_block);
+                }
+                // Stagger goblin back from the solid shield block
+                goblin.stagger_timer = Timer::from_seconds(0.55, TimerMode::Once);
+                goblin_vel.x = -to_player.x.signum() * 3.5;
+                goblin_vel.z = -to_player.z.signum() * 3.5;
+                spawn_comic_damage_floater(&mut commands, strike_pos, "PARRIED! CLANG", true);
+            } else {
+                // Goblin hits player (sparring tap)
+                if let Some(ref handles) = audio_handles {
+                    play_sound(&mut commands, &handles.flesh_impact);
+                }
+                spawn_comic_damage_floater(&mut commands, strike_pos, "BLOCKED BY NONE -14", false);
+            }
+        }
+
+        // Maintain sparring distance (around 2.2m - 3.0m)
+        if dist > 3.2 && dist < 12.0 {
+            let forward = goblin_transform.forward().as_vec3();
+            goblin_vel.x = forward.x * 2.2;
+            goblin_vel.z = forward.z * 2.2;
+        } else if dist < 1.8 {
+            let back = -goblin_transform.forward().as_vec3();
+            goblin_vel.x = back.x * 1.5;
+            goblin_vel.z = back.z * 1.5;
+        } else {
+            goblin_vel.x *= 0.85;
+            goblin_vel.z *= 0.85;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -737,6 +1060,7 @@ mod tests {
         assert!(meshes.get(&cache.goblin).is_some());
         assert!(meshes.get(&cache.peasant).is_some());
         assert!(meshes.get(&cache.pet).is_some());
+        assert!(meshes.get(&cache.dummy).is_some());
 
         // Verify low-poly vertex budgets (each creature between 40 and 1200 vertices / <400 triangles, ~95% fewer than micro-voxels)
         let deer_mesh = meshes.get(&cache.deer).unwrap();
@@ -753,5 +1077,8 @@ mod tests {
 
         let pet_mesh = meshes.get(&cache.pet).unwrap();
         assert!(pet_mesh.count_vertices() > 40 && pet_mesh.count_vertices() < 800, "Pet verts: {}", pet_mesh.count_vertices());
+
+        let dummy_mesh = meshes.get(&cache.dummy).unwrap();
+        assert!(dummy_mesh.count_vertices() > 40 && dummy_mesh.count_vertices() < 1200, "Dummy verts: {}", dummy_mesh.count_vertices());
     }
 }

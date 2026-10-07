@@ -183,6 +183,81 @@ pub fn generate_smoke_hiss_wav() -> Vec<u8> {
     create_pcm_wav(sample_rate, &samples)
 }
 
+/// Synthesizes a resonant metallic sword clang with harmonic overtones (1350 Hz, 2700 Hz, 4050 Hz).
+pub fn generate_sword_clang_wav() -> Vec<u8> {
+    let sample_rate = 44100;
+    let duration = 0.16; // 160 ms
+    let total_samples = (sample_rate as f32 * duration) as usize;
+    let mut samples = Vec::with_capacity(total_samples);
+
+    for i in 0..total_samples {
+        let t = i as f32 / sample_rate as f32;
+        let progress = t / duration;
+        let env = (-progress * 9.5).exp();
+
+        let f1 = (2.0 * PI * 1350.0 * t).sin();
+        let f2 = 0.55 * (2.0 * PI * 2700.0 * t).sin();
+        let f3 = 0.28 * (2.0 * PI * 4050.0 * t).sin();
+        let f4 = 0.15 * (2.0 * PI * 5400.0 * t).sin();
+        let sample = (f1 + f2 + f3 + f4) * env * 0.70;
+        samples.push(sample);
+    }
+    create_pcm_wav(sample_rate, &samples)
+}
+
+/// Synthesizes a heavy, solid wood and iron shield block thud (240 Hz low thump + high transient clatter).
+pub fn generate_shield_block_wav() -> Vec<u8> {
+    let sample_rate = 44100;
+    let duration = 0.14; // 140 ms
+    let total_samples = (sample_rate as f32 * duration) as usize;
+    let mut samples = Vec::with_capacity(total_samples);
+    let mut lfsr: u32 = 0x5EED;
+
+    for i in 0..total_samples {
+        let t = i as f32 / sample_rate as f32;
+        let progress = t / duration;
+        let env = (-progress * 12.0).exp();
+
+        // Low heavy wooden thump
+        let thump = (2.0 * PI * (240.0 - 120.0 * progress) * t).sin();
+        // High iron rim chime
+        let chime = 0.35 * (2.0 * PI * 1650.0 * t).sin();
+
+        // Wood grain crackle noise
+        lfsr = (lfsr >> 1) ^ (-( (lfsr & 1) as i32 ) as u32 & 0xB400);
+        let crackle = ((lfsr & 0xFFFF) as f32 / 32768.0) - 1.0;
+
+        let sample = (thump * 0.65 + chime * 0.25 + crackle * 0.10) * env * 0.85;
+        samples.push(sample);
+    }
+    create_pcm_wav(sample_rate, &samples)
+}
+
+/// Synthesizes a meaty, visceral blade slash / punch flesh impact.
+pub fn generate_flesh_impact_wav() -> Vec<u8> {
+    let sample_rate = 44100;
+    let duration = 0.09; // 90 ms
+    let total_samples = (sample_rate as f32 * duration) as usize;
+    let mut samples = Vec::with_capacity(total_samples);
+    let mut lfsr: u32 = 0x1337;
+
+    for i in 0..total_samples {
+        let t = i as f32 / sample_rate as f32;
+        let progress = t / duration;
+        let env = (-progress * 14.0).exp();
+
+        let pitch = 380.0 - 240.0 * progress;
+        let body = (2.0 * PI * pitch * t).sin();
+
+        lfsr = (lfsr >> 1) ^ (-( (lfsr & 1) as i32 ) as u32 & 0xB400);
+        let squelch = ((lfsr & 0xFFFF) as f32 / 32768.0) - 1.0;
+
+        let sample = (body * 0.50 + squelch * 0.50) * env * 0.75;
+        samples.push(sample);
+    }
+    create_pcm_wav(sample_rate, &samples)
+}
+
 /// Startup system initializing all procedural combat sound effects.
 pub fn setup_procedural_combat_audio(
     mut commands: Commands,
@@ -194,6 +269,9 @@ pub fn setup_procedural_combat_audio(
     let dash_whoosh = audio_assets.add(AudioSource { bytes: generate_dash_whoosh_wav().into() });
     let sonar_ping = audio_assets.add(AudioSource { bytes: generate_sonar_ping_wav().into() });
     let smoke_hiss = audio_assets.add(AudioSource { bytes: generate_smoke_hiss_wav().into() });
+    let sword_clang = audio_assets.add(AudioSource { bytes: generate_sword_clang_wav().into() });
+    let shield_block = audio_assets.add(AudioSource { bytes: generate_shield_block_wav().into() });
+    let flesh_impact = audio_assets.add(AudioSource { bytes: generate_flesh_impact_wav().into() });
 
     commands.insert_resource(CombatAudioHandles {
         dink,
@@ -202,6 +280,9 @@ pub fn setup_procedural_combat_audio(
         dash_whoosh,
         sonar_ping,
         smoke_hiss,
+        sword_clang,
+        shield_block,
+        flesh_impact,
     });
 }
 

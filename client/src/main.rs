@@ -46,6 +46,7 @@ use crate::audio_feedback::*;
 use crate::tactical_abilities::*;
 use crate::tree_colors::*;
 use crate::resource_nodes::*;
+use crate::creatures::{setup_sparring_yard, update_training_dummy_wobble, update_sparring_goblin_ai};
 
 // P2 Fix: SystemSets for explicit ordering and predictable behavior
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -117,8 +118,8 @@ fn main() {
         .insert_resource(DragDropState::default())
         .insert_resource(ActiveItemSlot(0))
         .insert_resource(CachedPlayerEntity::default())
-        .insert_resource(ActiveEquippedItem(None))
-        .insert_resource(ActiveOffHandItem(None))
+        .insert_resource(ActiveEquippedItem(Some("Longsword".to_string())))
+        .insert_resource(ActiveOffHandItem(Some("Wooden Shield".to_string())))
         .insert_resource(NetworkTickTimer(Timer::from_seconds(0.05, TimerMode::Repeating)))
         .insert_resource(SwingState::default())
         .init_resource::<MouseFlickTracker>()
@@ -142,7 +143,7 @@ fn main() {
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))
 
-        .add_systems(OnEnter(GameState::InGame), (spawn_initial_world, setup_ui, setup_tuner_ui, setup_procedural_combat_audio))
+        .add_systems(OnEnter(GameState::InGame), (spawn_initial_world, setup_ui, setup_tuner_ui, setup_procedural_combat_audio, setup_sparring_yard))
         .add_systems(OnEnter(CameraMode::FPS), enable_fps_perspective)
         .add_systems(OnEnter(CameraMode::RTS), enable_rts_perspective)
 
@@ -163,6 +164,8 @@ fn main() {
             update_tuner_ui_display,
             update_comic_damage_floaters,
             toggle_weapon_hand_system,
+            update_training_dummy_wobble,
+            update_sparring_goblin_ai,
         ).run_if(in_state(GameState::InGame)))
 
         .add_systems(Update, (
