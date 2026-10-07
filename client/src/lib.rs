@@ -22,7 +22,6 @@ pub mod binary_sky;
 pub mod tree_colors;
 pub mod zone_editor;
 pub mod spellbook;
-pub use ui::skills as skills_ui;
 pub mod voxel_mesh;
 pub mod prng;
 pub mod trees;
