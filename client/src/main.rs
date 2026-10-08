@@ -47,22 +47,7 @@ use crate::tree_colors::*;
 use crate::resource_nodes::*;
 use crate::creatures::{setup_sparring_yard, update_training_dummy_wobble, update_sparring_goblin_ai};
 
-// P2 Fix: SystemSets for explicit ordering and predictable behavior
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum UpdateSet {
-    /// Input handling (keyboard, mouse, gamepad, UI modal toggles)
-    Input,
-    /// Network synchronization (SpacetimeDB replication and spatial subscriptions)
-    Network,
-    /// Game logic (AI, combat, building placement, spatial simulation)
-    Logic,
-    /// Physics and movement (locomotion, navmesh pathing)
-    Physics,
-    /// Procedural animations, viewmodel bobbing, camera orientation
-    Animation,
-    /// Visual/UI updates, HUD elements, reticles, overlays
-    Rendering,
-}
+pub use crate::core::UpdateSet;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -204,6 +189,7 @@ fn main() {
         // ==========================================
         .add_systems(Update, (
             sync_transforms,
+            crate::prediction::reconcile_server_state,
             update_spatial_subscriptions,
             sync_logical_components,
             sync_resource_nodes,
@@ -249,6 +235,7 @@ fn main() {
         .add_systems(Update, (
             player_movement_system,
             rts_navmesh_movement_system,
+            crate::prediction::buffer_and_send_movement,
         ).in_set(UpdateSet::Physics))
 
         // ==========================================
@@ -397,6 +384,7 @@ mod tests {
         check_system!(action_bar_interaction);
         check_system!(toggle_action_bar_visibility);
         check_system!(sync_transforms);
+        check_system!(crate::prediction::reconcile_server_state);
         check_system!(update_spatial_subscriptions);
         check_system!(sync_logical_components);
         check_system!(sync_resource_nodes);
@@ -425,6 +413,7 @@ mod tests {
         check_system!(update_rune_light_decay);
         check_system!(player_movement_system);
         check_system!(rts_navmesh_movement_system);
+        check_system!(crate::prediction::buffer_and_send_movement);
         check_system!(update_camera_transition);
         check_system!(animate_doors);
         check_system!(animate_weapon_viewmodel);

@@ -31,6 +31,26 @@ pub enum CameraMode {
 }
 
 // ----------------------------------------------------------------------------
+// SYSTEM SETS PIPELINE
+// ----------------------------------------------------------------------------
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum UpdateSet {
+    /// Input handling (keyboard, mouse, gamepad, UI modal toggles)
+    Input,
+    /// Network synchronization (SpacetimeDB replication and spatial subscriptions)
+    Network,
+    /// Game logic (AI, combat, building placement, spatial simulation)
+    Logic,
+    /// Physics and movement (locomotion, navmesh pathing)
+    Physics,
+    /// Procedural animations, viewmodel bobbing, camera orientation
+    Animation,
+    /// Visual/UI updates, HUD elements, reticles, overlays
+    Rendering,
+}
+
+// ----------------------------------------------------------------------------
 // PHYSICS LAYERS & COLLISION GROUPS
 // ----------------------------------------------------------------------------
 

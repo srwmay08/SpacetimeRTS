@@ -47,11 +47,7 @@ pub struct PredictionPlugin;
 
 impl Plugin for PredictionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ClientTick>()
-           .add_systems(Update, (
-               buffer_and_send_movement,
-               reconcile_server_state
-           ).chain());
+        app.init_resource::<ClientTick>();
     }
 }
 
@@ -59,7 +55,7 @@ impl Plugin for PredictionPlugin {
 // CLIENT-SIDE PREDICTION & SERVER RECONCILIATION
 // ----------------------------------------------------------------------------
 
-fn buffer_and_send_movement(
+pub fn buffer_and_send_movement(
     mut tick: ResMut<ClientTick>,
     mut timer: ResMut<NetworkTickTimer>,
     time: Res<Time>,
@@ -92,7 +88,7 @@ fn buffer_and_send_movement(
     }
 }
 
-fn reconcile_server_state(
+pub fn reconcile_server_state(
     mut query: Query<(
         &mut Transform,
         Option<&mut PhysicsPosition>,
@@ -105,9 +101,9 @@ fn reconcile_server_state(
     mut transition_state: Option<ResMut<CameraTransitionState>>,
     mut rts_rig_query: Query<&mut Transform, (With<RtsCameraRig>, Without<AuthoritativeState>)>,
 ) {
-    // Architectural Note: 0.25m threshold (0.0625m^2) absorbs natural slope elevation
-    // clamping while catching true authoritative desyncs.
-    const TOLERANCE_SQ: f32 = 0.25 * 0.25;
+    // Architectural Note: 0.35m threshold (0.1225m^2) absorbs natural slope elevation
+    // clamping and network packet timing jitter without false rollback loops.
+    const TOLERANCE_SQ: f32 = 0.35 * 0.35;
     // Hard teleport / death respawn threshold: 12.0m (144.0m^2).
     // Prevents false positives during high-speed sprints or intra-tick prediction buffers.
     const TELEPORT_THRESHOLD_SQ: f32 = 12.0 * 12.0;
@@ -173,14 +169,22 @@ fn reconcile_server_state(
         }
 
         if divergence_sq > TOLERANCE_SQ {
-            transform.translation = expected_live_pos;
+            // Smoothly reconcile minor discrepancies (< 1.0m) to eliminate visual stuttering / popping,
+            // while snapping moderate-to-large discrepancies immediately.
+            let correction = if divergence_sq > 1.0 {
+                expected_live_pos
+            } else {
+                transform.translation.lerp(expected_live_pos, 0.45)
+            };
+
+            transform.translation = correction;
             if let Some(mut phys_pos) = maybe_physics_pos {
                 // Synchronize Avian3D PhysicsPosition so physics engine does not revert transform
-                phys_pos.0 = expected_live_pos;
+                phys_pos.0 = correction;
             }
-            tracker.last_position = expected_live_pos;
+            tracker.last_position = correction;
 
-            tracing::info!(
+            tracing::debug!(
                 "Reconciliation Rollback triggered! Corrected divergence of {:.4} units.",
                 divergence_sq.sqrt()
             );

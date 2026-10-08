@@ -97,7 +97,7 @@ pub fn process_movement(
     // without clamping legitimate inputs and causing false rollback loops.
     let elapsed_ticks = (tick_id - transform.last_processed_tick).min(20) as f32;
     let max_speed_mps = 22.0_f32;
-    let max_dist_per_tick = max_speed_mps * (elapsed_ticks * 0.05).max(0.05);
+    let max_dist_per_tick = max_speed_mps * (elapsed_ticks * 0.05).max(0.05) + 0.75;
     let max_dist_sq = max_dist_per_tick * max_dist_per_tick;
     let magnitude_sq = (delta_x * delta_x) + (delta_y * delta_y) + (delta_z * delta_z);
 

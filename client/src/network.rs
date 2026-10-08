@@ -320,17 +320,31 @@ pub fn update_spatial_subscriptions(
 
 pub fn sync_logical_components(
     time: Res<Time>,
-    mut query: Query<(&LogicalPosition, &LogicalRotation, &mut BevyTransform), (Without<PlayerBody>, With<NetworkEntity>)>
+    mut query: Query<(
+        &LogicalPosition,
+        &LogicalRotation,
+        &mut BevyTransform,
+        Option<&mut avian3d::prelude::Position>,
+        Option<&mut avian3d::prelude::Rotation>,
+    ), (Without<PlayerBody>, With<NetworkEntity>)>,
 ) {
-    let decay_factor = 1.0 - (-15.0_f32 * time.delta_seconds()).exp(); 
+    let decay_factor = 1.0 - (-18.0_f32 * time.delta_seconds()).exp(); 
     
-    for (log_pos, log_rot, mut transform) in query.iter_mut() {
-        if transform.translation.distance(log_pos.0) > 5.0 { 
+    for (log_pos, log_rot, mut transform, maybe_phys_pos, maybe_phys_rot) in query.iter_mut() {
+        if transform.translation.distance_squared(log_pos.0) > 36.0 { 
             transform.translation = log_pos.0; 
         } else { 
             transform.translation = transform.translation.lerp(log_pos.0, decay_factor); 
         }
         transform.rotation = transform.rotation.slerp(log_rot.0, decay_factor);
+
+        // Crucial: Synchronize Avian3D kinematic position so physics engine does not fight transform
+        if let Some(mut phys_pos) = maybe_phys_pos {
+            phys_pos.0 = transform.translation;
+        }
+        if let Some(mut phys_rot) = maybe_phys_rot {
+            phys_rot.0 = transform.rotation;
+        }
     }
 }
 
