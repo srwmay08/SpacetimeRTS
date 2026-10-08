@@ -49,6 +49,7 @@ impl Plugin for InputPlugin {
             .add_event::<CelestialTimeScaleStepEvent>()
             .add_event::<CelestialCycleDayNightEvent>()
             .add_event::<CelestialCycleWeatherEvent>()
+            .add_event::<ToggleNoClipEvent>()
             .add_systems(
                 Update,
                 hotkey_dispatch_system.run_if(in_state(crate::core::GameState::InGame)),

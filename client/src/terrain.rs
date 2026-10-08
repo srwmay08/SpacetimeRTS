@@ -627,17 +627,20 @@ pub fn mesh_low_poly_terrain_chunk(
             let avg_y = (y00 + y10 + y01 + y11) * 0.25;
             let min_y = y00.min(y10).min(y01).min(y11);
             let sub_surface_vy = (min_y - 0.25).floor() as i32;
-            let sub_surface_cy = sub_surface_vy.div_euclid(16);
-            let sub_surface_ly = sub_surface_vy.rem_euclid(16) as usize;
 
             // Check if surface block is genuinely excavated (mined to air below natural terrain)
             let mut surface_excavated = false;
             if !column_chunks.is_empty() {
-                if let Some(chunk) = column_chunks.iter().find(|c| c.chunk_y == sub_surface_cy) {
-                    let idx = qx + (sub_surface_ly * 16) + (qz * 256);
-                    if let Some(&mat) = chunk.voxels.get(idx) {
-                        if mat == 0 {
-                            surface_excavated = true;
+                for check_vy in [sub_surface_vy, sub_surface_vy - 1] {
+                    let check_cy = check_vy.div_euclid(16);
+                    let check_ly = check_vy.rem_euclid(16) as usize;
+                    if let Some(chunk) = column_chunks.iter().find(|c| c.chunk_y == check_cy) {
+                        let idx = qx + (check_ly * 16) + (qz * 256);
+                        if let Some(&mat) = chunk.voxels.get(idx) {
+                            if mat == 0 {
+                                surface_excavated = true;
+                                break;
+                            }
                         }
                     }
                 }

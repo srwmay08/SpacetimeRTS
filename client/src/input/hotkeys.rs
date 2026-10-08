@@ -94,6 +94,9 @@ pub struct CelestialCycleDayNightEvent;
 #[derive(Event, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CelestialCycleWeatherEvent;
 
+#[derive(Event, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToggleNoClipEvent;
+
 // ----------------------------------------------------------------------------
 // SYSTEM PARAMETER BUNDLE (Groups all event writers within Bevy's 16-param limit)
 // ----------------------------------------------------------------------------
@@ -122,6 +125,7 @@ pub struct ModalHotkeyWriters<'w> {
     pub cel_scale: EventWriter<'w, CelestialTimeScaleStepEvent>,
     pub cel_day_night: EventWriter<'w, CelestialCycleDayNightEvent>,
     pub cel_weather: EventWriter<'w, CelestialCycleWeatherEvent>,
+    pub noclip: EventWriter<'w, ToggleNoClipEvent>,
 }
 
 // ----------------------------------------------------------------------------
@@ -151,6 +155,7 @@ pub fn hotkey_dispatch_system(
     if keys.just_pressed(KeyCode::Tab) || keys.just_pressed(KeyCode::KeyI) { writers.inv.send(ToggleInventoryEvent); }
     if keys.just_pressed(KeyCode::KeyV) { writers.persp.send(TogglePerspectiveEvent); }
     if keys.just_pressed(KeyCode::KeyH) { writers.weapon_hand.send(ToggleWeaponHandEvent); }
+    if keys.just_pressed(KeyCode::F2) || keys.just_pressed(KeyCode::KeyN) { writers.noclip.send(ToggleNoClipEvent); }
 
     // Contextual 'R' key: In build mode -> cycle piece; in combat/exploration -> reload
     if keys.just_pressed(KeyCode::KeyR) {

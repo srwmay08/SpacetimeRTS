@@ -263,6 +263,31 @@ pub struct DragDropState {
 }
 
 // ----------------------------------------------------------------------------
+// GOD MODE FLYING NO-CLIP STATE
+// ----------------------------------------------------------------------------
+
+/// Resource controlling Developer God Mode Flying No-Clip locomotion.
+/// Enables unconstrained 3D flight through terrain, subterranean caves, and bedrock.
+#[derive(Resource, Reflect, Clone, Debug)]
+pub struct NoClipState {
+    pub is_active: bool,
+    /// Normal flight speed in meters per second (default: 20.0 m/s).
+    pub fly_speed: f32,
+    /// Velocity multiplier applied when holding Left/Right Shift (default: 3.0x -> 60.0 m/s).
+    pub fast_multiplier: f32,
+}
+
+impl Default for NoClipState {
+    fn default() -> Self {
+        Self {
+            is_active: false,
+            fly_speed: 20.0,
+            fast_multiplier: 3.0,
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
 // FRAMERATE LIMITER STATE & PACING SYSTEM
 // ----------------------------------------------------------------------------
 
@@ -401,5 +426,13 @@ mod tests {
         assert_eq!(swing.windup_timer.duration().as_secs_f32(), 0.12);
         assert_eq!(swing.release_timer.duration().as_secs_f32(), 0.26);
         assert_eq!(swing.recovery_timer.duration().as_secs_f32(), 0.16);
+    }
+
+    #[test]
+    fn test_noclip_state_defaults() {
+        let noclip = NoClipState::default();
+        assert!(!noclip.is_active);
+        assert_eq!(noclip.fly_speed, 20.0);
+        assert_eq!(noclip.fast_multiplier, 3.0);
     }
 }

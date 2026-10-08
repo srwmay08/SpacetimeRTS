@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use avian3d::prelude::{Position as PhysicsPosition, LinearVelocity};
 use std::collections::VecDeque;
 use crate::network::SpacetimeConnection;
-use crate::core::NetworkTickTimer;
+use crate::core::{NetworkTickTimer, NoClipState};
 use crate::components::RtsCameraRig;
 use crate::camera::{CharacterCameraSettings, CameraTransitionState};
 
@@ -61,8 +61,17 @@ pub fn buffer_and_send_movement(
     time: Res<Time>,
     mut query: Query<(&Transform, &mut InputBuffer, &mut LocalMovementTracker, &AuthoritativeState), With<AuthoritativeState>>,
     conn: Res<SpacetimeConnection>,
+    noclip: Option<Res<NoClipState>>,
 ) {
     if !timer.0.tick(time.delta()).just_finished() {
+        return;
+    }
+
+    if noclip.as_ref().map_or(false, |nc| nc.is_active) {
+        for (transform, mut buffer, mut tracker, _) in query.iter_mut() {
+            tracker.last_position = transform.translation;
+            buffer.queue.clear();
+        }
         return;
     }
 
@@ -100,7 +109,15 @@ pub fn reconcile_server_state(
     mut cam_settings: Option<ResMut<CharacterCameraSettings>>,
     mut transition_state: Option<ResMut<CameraTransitionState>>,
     mut rts_rig_query: Query<&mut Transform, (With<RtsCameraRig>, Without<AuthoritativeState>)>,
+    noclip: Option<Res<NoClipState>>,
 ) {
+    if noclip.as_ref().map_or(false, |nc| nc.is_active) {
+        for (transform, _, _, mut buffer, _, mut tracker) in query.iter_mut() {
+            buffer.queue.clear();
+            tracker.last_position = transform.translation;
+        }
+        return;
+    }
     // Architectural Note: 0.35m threshold (0.1225m^2) absorbs natural slope elevation
     // clamping and network packet timing jitter without false rollback loops.
     const TOLERANCE_SQ: f32 = 0.35 * 0.35;

@@ -282,6 +282,7 @@ pub fn fps_look(
     mut cam_settings: ResMut<CharacterCameraSettings>,
     time: Res<Time>,
     spatial_query: SpatialQuery,
+    noclip: Option<Res<NoClipState>>,
 ) {
     let Ok(mut window) = window_query.get_single_mut() else { return; };
     let Ok((player_entity, mut body_transform)) = body_query.get_single_mut() else { return; };
@@ -386,7 +387,8 @@ pub fn fps_look(
             let cast_vec = desired_cam_world - head_world;
             let cast_dist = cast_vec.length();
 
-            let final_cam_world = if cast_dist > 0.05 {
+            let is_noclip = noclip.as_ref().map_or(false, |nc| nc.is_active);
+            let final_cam_world = if !is_noclip && cast_dist > 0.05 {
                 let cast_dir = cast_vec / cast_dist;
                 let filter = SpatialQueryFilter::from_excluded_entities([player_entity]);
                 if let Ok(dir3) = Dir3::new(cast_dir) {
@@ -400,7 +402,7 @@ pub fn fps_look(
                     desired_cam_world
                 }
             } else {
-                head_world
+                desired_cam_world
             };
 
             head_transform.translation = body_transform.compute_matrix().inverse().transform_point3(final_cam_world);

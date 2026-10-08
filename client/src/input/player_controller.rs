@@ -10,7 +10,35 @@ use bevy::prelude::{Transform as BevyTransform, *};
 
 use crate::components::*;
 use crate::core::*;
+use crate::camera::CharacterCameraSettings;
 use super::action_buffer::{ActionBuffer, LocomotionSettings, VirtualAction};
+use super::hotkeys::ToggleNoClipEvent;
+
+pub fn toggle_noclip_system(
+    mut evts: EventReader<ToggleNoClipEvent>,
+    mut noclip: ResMut<NoClipState>,
+    mut player_q: Query<(&mut CollisionLayers, &mut LinearVelocity, &mut GravityScale, &mut Kcc), With<PlayerBody>>,
+) {
+    for _ in evts.read() {
+        noclip.is_active = !noclip.is_active;
+        if let Ok((mut layers, mut lin_vel, mut gravity, mut kcc)) = player_q.get_single_mut() {
+            if noclip.is_active {
+                *layers = CollisionLayers::NONE;
+                lin_vel.0 = Vec3::ZERO;
+                gravity.0 = 0.0;
+                kcc.is_grounded = false;
+                tracing::info!("God Mode Flying No-Clip: ENABLED. Speed: {:.0} m/s", noclip.fly_speed);
+            } else {
+                *layers = CollisionLayers::new(
+                    [GameLayer::Unit],
+                    [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment, GameLayer::Glass],
+                );
+                gravity.0 = 8.0;
+                tracing::info!("God Mode Flying No-Clip: DISABLED. Normal physics restored.");
+            }
+        }
+    }
+}
 
 pub fn rts_navmesh_movement_system(
     mut commands: Commands,
@@ -50,9 +78,56 @@ pub fn player_movement_system(
         Option<&mut LocomotionState>,
     ), With<PlayerBody>>,
     spatial_query: SpatialQuery, 
+    noclip: Option<Res<NoClipState>>,
+    cam_settings: Option<Res<CharacterCameraSettings>>,
 ) {
     let Ok((entity, mut transform, mut lin_vel, mut gravity, mut kcc, mut loco_opt)) = query.get_single_mut() else { return; };
 
+    // ------------------------------------------------------------------------
+    // 1. GOD MODE FLYING NO-CLIP LOCOMOTION
+    // ------------------------------------------------------------------------
+    if let Some(ref nc) = noclip {
+        if nc.is_active {
+            let pitch = cam_settings.as_ref().map_or(0.0, |s| s.current_pitch);
+            let pitch_rot = Quat::from_rotation_x(pitch);
+            let look_dir = transform.rotation * pitch_rot * Vec3::NEG_Z;
+            let right_dir = transform.rotation * Vec3::X;
+            let up_dir = Vec3::Y;
+
+            let mut fly_dir = Vec3::ZERO;
+            if *camera_mode.get() == CameraMode::FPS && !console.is_open {
+                if keys.pressed(KeyCode::KeyW) { fly_dir += look_dir; }
+                if keys.pressed(KeyCode::KeyS) { fly_dir -= look_dir; }
+                if keys.pressed(KeyCode::KeyD) { fly_dir += right_dir; }
+                if keys.pressed(KeyCode::KeyA) { fly_dir -= right_dir; }
+                if keys.pressed(KeyCode::Space) { fly_dir += up_dir; }
+                if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) || keys.pressed(KeyCode::KeyC) {
+                    fly_dir -= up_dir;
+                }
+            }
+
+            let speed = if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
+                nc.fly_speed * nc.fast_multiplier
+            } else {
+                nc.fly_speed
+            };
+
+            let dt = time.delta_seconds();
+            if fly_dir != Vec3::ZERO {
+                fly_dir = fly_dir.normalize();
+                transform.translation += fly_dir * speed * dt;
+            }
+
+            lin_vel.0 = Vec3::ZERO;
+            gravity.0 = 0.0;
+            kcc.is_grounded = false;
+            return;
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // 2. STANDARD GROUND LOCOMOTION & COLLISION
+    // ------------------------------------------------------------------------
     let ray_start = transform.translation; 
     let hit = spatial_query.cast_ray(
         ray_start, 
@@ -163,17 +238,9 @@ pub fn player_movement_system(
 
     // Bedrock & void safety net: permits 3D subterranean exploration down to BEDROCK_ELEVATION (-120.0m)
     // while catching players falling through unloaded chunks into the abyss.
-    let ground_y = crate::terrain::get_terrain_height(transform.translation.x, transform.translation.z);
     let bedrock_safe_y = -120.0_f32 + 1.05;
     if transform.translation.y < bedrock_safe_y {
         transform.translation.y = bedrock_safe_y;
-        if lin_vel.y < 0.0 { 
-            lin_vel.y = 0.0; 
-        }
-        kcc.is_grounded = true;
-    } else if hit.is_none() && transform.translation.y < ground_y - 1.0 && transform.translation.y > ground_y - 4.0 {
-        // Surface missing-collider grace window: catches players when overworld terrain collider has not yet loaded
-        transform.translation.y = ground_y + 1.0;
         if lin_vel.y < 0.0 { 
             lin_vel.y = 0.0; 
         }
@@ -221,5 +288,53 @@ mod tests {
         assert_eq!(lin_vel.y, 10.0);
         assert_eq!(gravity.0, 8.0);
         assert_eq!(kcc.is_grounded, false);
+    }
+
+    #[test]
+    fn test_toggle_noclip_system_lifecycle() {
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin::default());
+        app.init_resource::<NoClipState>();
+        app.add_event::<ToggleNoClipEvent>();
+
+        let player = app.world_mut().spawn((
+            PlayerBody,
+            CollisionLayers::new(
+                [GameLayer::Unit],
+                [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment, GameLayer::Glass],
+            ),
+            LinearVelocity(Vec3::new(10.0, -5.0, 10.0)),
+            GravityScale(8.0),
+            Kcc { is_grounded: true },
+        )).id();
+
+        app.add_systems(Update, toggle_noclip_system);
+
+        // Send ToggleNoClipEvent -> activate NoClip
+        app.world_mut().resource_mut::<Events<ToggleNoClipEvent>>().send(ToggleNoClipEvent);
+        app.update();
+
+        assert!(app.world().resource::<NoClipState>().is_active);
+        let layers = app.world().get::<CollisionLayers>(player).unwrap();
+        assert_eq!(*layers, CollisionLayers::NONE);
+        let lin_vel = app.world().get::<LinearVelocity>(player).unwrap();
+        assert_eq!(lin_vel.0, Vec3::ZERO);
+        let gravity = app.world().get::<GravityScale>(player).unwrap();
+        assert_eq!(gravity.0, 0.0);
+        let kcc = app.world().get::<Kcc>(player).unwrap();
+        assert_eq!(kcc.is_grounded, false);
+
+        // Send ToggleNoClipEvent again -> deactivate NoClip, restore physics
+        app.world_mut().resource_mut::<Events<ToggleNoClipEvent>>().send(ToggleNoClipEvent);
+        app.update();
+
+        assert!(!app.world().resource::<NoClipState>().is_active);
+        let layers = app.world().get::<CollisionLayers>(player).unwrap();
+        assert_eq!(*layers, CollisionLayers::new(
+            [GameLayer::Unit],
+            [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment, GameLayer::Glass],
+        ));
+        let gravity = app.world().get::<GravityScale>(player).unwrap();
+        assert_eq!(gravity.0, 8.0);
     }
 }

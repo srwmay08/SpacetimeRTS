@@ -28,6 +28,7 @@ use crate::module_bindings::admin_spawn_building_reducer::admin_spawn_building;
 use crate::module_bindings::equip_weapon_reducer::equip_weapon;
 
 use super::types::*;
+use crate::input::ToggleNoClipEvent;
 
 pub const CONSOLE_COMMANDS: &[&str] = &[
     "giveitem",
@@ -96,6 +97,9 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "csm",
     "foliage",
     "tree",
+    "noclip",
+    "fly",
+    "flyspeed",
 ];
 
 
@@ -142,6 +146,8 @@ pub fn handle_console_input(
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mut fps_limiter: ResMut<FpsLimiterState>,
     mut foliage_config: Option<ResMut<crate::tree_colors::TreeFoliageConfig>>,
+    mut noclip_toggle: EventWriter<ToggleNoClipEvent>,
+    mut noclip_state: Option<ResMut<NoClipState>>,
 ) {
     if !console.is_open {
         return;
@@ -320,7 +326,34 @@ pub fn handle_console_input(
                 if let Err(e) = conn.db.reducers.admin_god_mode() {
                     console.logs.push(format!("[Server Error] God mode failed: {:?}", e));
                 } else {
-                    console.logs.push("[Admin] Invulnerability / God mode enabled (99999 HP).".into());
+                    let is_active = noclip_state.as_ref().map_or(false, |nc| nc.is_active);
+                    if !is_active {
+                        noclip_toggle.send(ToggleNoClipEvent);
+                    }
+                    console.logs.push("[Admin] Invulnerability & God Mode Flying No-Clip: ENABLED (99999 HP + 3D Flight through terrain, caves, and bedrock). Press [F2] or [N] or type 'noclip' to toggle flight.".into());
+                }
+            }
+            "noclip" | "fly" => {
+                noclip_toggle.send(ToggleNoClipEvent);
+                let will_be_active = noclip_state.as_ref().map_or(true, |nc| !nc.is_active);
+                if will_be_active {
+                    let speed = noclip_state.as_ref().map_or(20.0, |nc| nc.fly_speed);
+                    console.logs.push(format!(
+                        "[Admin] God Mode Flying No-Clip: ACTIVATED (Speed: {:.0} m/s). WASD fly, Space ascend, Ctrl/C descend, Shift 3x boost ({:.0} m/s). Explore caves and bedrock!",
+                        speed, speed * 3.0
+                    ));
+                } else {
+                    console.logs.push("[Admin] God Mode Flying No-Clip: DEACTIVATED. Normal collision and gravity restored.".into());
+                }
+            }
+            "flyspeed" => {
+                if let Some(s) = tokens.get(1).and_then(|s| s.parse::<f32>().ok()) {
+                    if let Some(ref mut nc) = noclip_state {
+                        nc.fly_speed = s.clamp(2.0, 200.0);
+                        console.logs.push(format!("[Admin] Flying No-Clip speed set to {:.1} m/s (Sprint boost: {:.1} m/s)", nc.fly_speed, nc.fly_speed * nc.fast_multiplier));
+                    }
+                } else {
+                    console.logs.push("[Syntax Error] Usage: flyspeed <speed_mps> (e.g. flyspeed 35)".into());
                 }
             }
             "day" | "noon" => {
@@ -1346,5 +1379,10 @@ mod tests {
         assert_eq!(style.display, Display::None);
     }
 
-
+    #[test]
+    fn test_console_commands_contains_noclip() {
+        assert!(CONSOLE_COMMANDS.contains(&"noclip"), "CONSOLE_COMMANDS must contain 'noclip'");
+        assert!(CONSOLE_COMMANDS.contains(&"fly"), "CONSOLE_COMMANDS must contain 'fly'");
+        assert!(CONSOLE_COMMANDS.contains(&"flyspeed"), "CONSOLE_COMMANDS must contain 'flyspeed'");
+    }
 }

@@ -144,6 +144,7 @@ fn main() {
         .init_resource::<TreeMaterialHandles>()
         .init_resource::<FpsLimiterState>()
         .init_resource::<BuildingAssetManifest>()
+        .init_resource::<NoClipState>()
         
         .add_systems(OnEnter(GameState::Connecting), init_network_connection)
         .add_systems(Update, wait_for_connection.run_if(in_state(GameState::Connecting)))
@@ -170,6 +171,7 @@ fn main() {
             tactical_ability_input_system,
             toggle_crosshair_menu,
             handle_crosshair_menu_interactions,
+            toggle_noclip_system,
         ).in_set(UpdateSet::Input))
 
         .add_systems(Update, (
@@ -295,6 +297,7 @@ fn update_diagnostic_overlay(
     mut diag_evts: EventReader<crate::input::ToggleDiagnosticOverlayEvent>,
     mut root_q: Query<&mut Style, With<DiagnosticOverlayRoot>>,
     mut text_q: Query<&mut Text, With<DiagnosticOverlayText>>,
+    noclip: Option<Res<NoClipState>>,
 ) {
     for _ in diag_evts.read() {
         if let Ok(mut style) = root_q.get_single_mut() {
@@ -327,6 +330,16 @@ fn update_diagnostic_overlay(
     if let Some(entities) = diagnostics.get(&bevy::diagnostic::EntityCountDiagnosticsPlugin::ENTITY_COUNT) {
         if let Some(value) = entities.value() {
             output.push_str(&format!("Entities: {:.0}", value));
+        }
+    }
+
+    if let Some(ref nc) = noclip {
+        if nc.is_active {
+            output.push_str(&format!(
+                "\n\n[FLY NOCLIP ACTIVE]\nSpeed: {:.0} m/s (Shift: {:.0} m/s)\nSpace: Up | Ctrl/C: Down",
+                nc.fly_speed,
+                nc.fly_speed * nc.fast_multiplier
+            ));
         }
     }
 
@@ -375,6 +388,7 @@ mod tests {
         check_system!(tactical_ability_input_system);
         check_system!(toggle_crosshair_menu);
         check_system!(handle_crosshair_menu_interactions);
+        check_system!(toggle_noclip_system);
         check_system!(handle_inventory_drag_and_drop);
         check_system!(handle_paperdoll_interactions);
         check_system!(handle_build_menu_selection);
