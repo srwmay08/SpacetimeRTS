@@ -498,12 +498,6 @@ pub fn mesh_low_poly_surface_chunk(
                     }
                 }
             }
-
-            let quad_center_x = chunk_base_x + (qx as f32 + 0.5) * LOW_POLY_QUAD_SIZE;
-            let quad_center_z = chunk_base_z + (qz as f32 + 0.5) * LOW_POLY_QUAD_SIZE;
-            if is_cave_air_at(quad_center_x, min_y - 0.25, quad_center_z, min_y) {
-                excavated[qz][qx] = true;
-            }
         }
     }
 
@@ -666,9 +660,6 @@ pub fn mesh_low_poly_terrain_chunk(
 ) -> Option<Mesh> {
     let mut surface_mesh = mesh_low_poly_surface_chunk(db_chunks, cx, cz)?;
 
-    let chunk_base_x = cx as f32 * LOW_POLY_CHUNK_SPAN;
-    let chunk_base_z = cz as f32 * LOW_POLY_CHUNK_SPAN;
-
     let mut positions = match surface_mesh.remove_attribute(Mesh::ATTRIBUTE_POSITION)? {
         bevy::render::mesh::VertexAttributeValues::Float32x3(v) => v,
         _ => return Some(surface_mesh),
@@ -689,52 +680,9 @@ pub fn mesh_low_poly_terrain_chunk(
         Indices::U32(ind) => ind.clone(),
         _ => return None,
     };
-    let mut curr_idx = positions.len() as u32;
 
-    // 2. Indestructible Bedrock Floor (-120.0m)
-    for bz in 0..16 {
-        for bx in 0..16 {
-            let x0 = bx as f32 * LOW_POLY_QUAD_SIZE;
-            let x1 = (bx + 1) as f32 * LOW_POLY_QUAD_SIZE;
-            let z0 = bz as f32 * LOW_POLY_QUAD_SIZE;
-            let z1 = (bz + 1) as f32 * LOW_POLY_QUAD_SIZE;
-            let by = BEDROCK_ELEVATION;
-
-            let world_bx = (cx * 16 + bx as i32) as f32 + 0.5;
-            let world_bz = (cz * 16 + bz as i32) as f32 + 0.5;
-            let magma_seed = ((world_bx * 0.28).sin() * (world_bz * 0.28).cos()).abs();
-            let col = if magma_seed > 0.65 {
-                [2.2, 0.45, 0.08, 1.0]
-            } else {
-                [0.10, 0.10, 0.13, 1.0]
-            };
-
-            let v0 = Vec3::new(x0, by, z0);
-            let v1 = Vec3::new(x0, by, z1);
-            let v2 = Vec3::new(x1, by, z1);
-            let v3 = Vec3::new(x1, by, z0);
-            push_unshared_face(
-                &mut positions,
-                &mut normals,
-                &mut colors,
-                &mut uvs,
-                &mut indices,
-                &mut curr_idx,
-                v0,
-                v1,
-                v2,
-                v3,
-                [0.0, 1.0, 0.0],
-                col,
-                chunk_base_x,
-                chunk_base_z,
-            );
-        }
-    }
-
-    // 3. Append subterranean smashed-cuboid Voronoi cavity if active
-    let center_y = get_terrain_height(chunk_base_x + 8.0, chunk_base_z + 8.0);
-    if let Some(sub_mesh) = mesh_subterrain_chunk(db_chunks, cx, cz, center_y) {
+    // 2. Append subterranean strata (bedrock floor, natural caves, and Voronoi excavations)
+    if let Some(sub_mesh) = mesh_subterrain_chunk(db_chunks, cx, cz) {
         if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(sub_pos)) = sub_mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
             if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(sub_norm)) = sub_mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
                 if let Some(bevy::render::mesh::VertexAttributeValues::Float32x4(sub_col)) = sub_mesh.attribute(Mesh::ATTRIBUTE_COLOR) {
@@ -891,7 +839,7 @@ pub fn update_infinite_voxel_terrain(
             .unwrap_or(0);
 
         if server_mod_tick > last_tick {
-            if let Some(new_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz, p_pos.y) {
+            if let Some(new_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz) {
                 let mesh_handle = meshes.add(new_mesh.clone());
                 let mut entity_cmds = commands.entity(existing_entity);
                 entity_cmds.insert(mesh_handle);
@@ -903,9 +851,6 @@ pub fn update_infinite_voxel_terrain(
                 if let Ok((_, mut marker, _, _)) = sub_chunk_query.get_mut(existing_entity) {
                     marker.last_modified_tick = server_mod_tick;
                 }
-            } else {
-                // Cavity no longer within active window, despawn
-                commands.entity(existing_entity).despawn_recursive();
             }
         }
 
@@ -947,7 +892,7 @@ pub fn update_infinite_voxel_terrain(
             }
 
             let key = pack_chunk_key(cx, 0, cz);
-            if !loaded_entities.contains_key(&key) {
+            if !loaded_entities.contains_key(&key) || !loaded_sub_entities.contains_key(&key) {
                 candidates.push((cx, cz, dist_sq, key));
             }
         }
@@ -971,41 +916,43 @@ pub fn update_infinite_voxel_terrain(
         let needs_collider = dist_world_sq <= LOW_POLY_NEAR_COLLIDER_DIST_SQ;
 
         // A. Spawn Surface Chunk Entity
-        if let Some(surface_mesh) = mesh_low_poly_surface_chunk(&db_chunks, cx, cz) {
-            let collider = if needs_collider {
-                Collider::trimesh_from_mesh(&surface_mesh)
-            } else {
-                None
-            };
+        if !loaded_entities.contains_key(&key) {
+            if let Some(surface_mesh) = mesh_low_poly_surface_chunk(&db_chunks, cx, cz) {
+                let collider = if needs_collider {
+                    Collider::trimesh_from_mesh(&surface_mesh)
+                } else {
+                    None
+                };
 
-            let mesh_handle = meshes.add(surface_mesh);
-            let mut entity_cmds = commands.spawn((
-                PbrBundle {
-                    mesh: mesh_handle,
-                    material: mat_handle.clone(),
-                    transform: BevyTransform::from_xyz(chunk_world_x, 0.0, chunk_world_z),
-                    ..default()
-                },
-                RigidBody::Static,
-                CollisionLayers::new([GameLayer::Terrain], [GameLayer::Default, GameLayer::Unit, GameLayer::Environment]),
-                VoxelChunkMarker {
-                    chunk_key: key,
-                    chunk_x: cx,
-                    chunk_y: 0,
-                    chunk_z: cz,
-                    last_modified_tick: db_mod_tick,
-                },
-                TerrainChunkVisual,
-            ));
+                let mesh_handle = meshes.add(surface_mesh);
+                let mut entity_cmds = commands.spawn((
+                    PbrBundle {
+                        mesh: mesh_handle,
+                        material: mat_handle.clone(),
+                        transform: BevyTransform::from_xyz(chunk_world_x, 0.0, chunk_world_z),
+                        ..default()
+                    },
+                    RigidBody::Static,
+                    CollisionLayers::new([GameLayer::Terrain], [GameLayer::Default, GameLayer::Unit, GameLayer::Environment]),
+                    VoxelChunkMarker {
+                        chunk_key: key,
+                        chunk_x: cx,
+                        chunk_y: 0,
+                        chunk_z: cz,
+                        last_modified_tick: db_mod_tick,
+                    },
+                    TerrainChunkVisual,
+                ));
 
-            if let Some(col) = collider {
-                entity_cmds.insert((col, TerrainChunkHasCollider));
+                if let Some(col) = collider {
+                    entity_cmds.insert((col, TerrainChunkHasCollider));
+                }
             }
         }
 
-        // B. Spawn Subterrain Chunk Entity on-demand if cave or excavated tunnel exists within active vertical window
+        // B. Spawn Subterrain Chunk Entity (bedrock floor, natural caves, and Voronoi strata)
         if !loaded_sub_entities.contains_key(&key) {
-            if let Some(sub_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz, p_pos.y) {
+            if let Some(sub_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz) {
                 let sub_collider = if needs_collider {
                     Collider::trimesh_from_mesh(&sub_mesh)
                 } else {
@@ -1027,7 +974,7 @@ pub fn update_infinite_voxel_terrain(
                         chunk_x: cx,
                         chunk_z: cz,
                         last_modified_tick: db_mod_tick,
-                        center_window_y: p_pos.y.floor() as i32,
+                        center_window_y: 0,
                     },
                     SubterrainChunkVisual,
                 ));

@@ -110,8 +110,8 @@ pub fn is_dungeon_cavity_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> b
     let dx = (wx - center_x).abs();
     let dz = (wz - center_z).abs();
 
-    // 1. Vertical entrance shaft descending from surface to subterranean chamber
-    if dx < 2.0 && dz < 2.0 && wy <= terrain_height + 0.5 && wy >= -24.0 {
+    // 1. Vertical entrance shaft descending below crust to subterranean chamber
+    if dx < 2.0 && dz < 2.0 && wy <= terrain_height - 4.0 && wy >= -24.0 {
         return true;
     }
 
@@ -144,19 +144,26 @@ pub fn get_cave_perlin() -> &'static Perlin {
 }
 
 /// Evaluates if 3D procedural coordinates carve out a natural subterranean cavity:
-/// 1. Hillside cave mouths and 3D cavern chambers
+/// 1. 3D cavern chambers
 /// 2. Large ravines / chasm fissures
 /// 3. Designated crypt / tomb dungeon shafts and chambers
+/// Invariant: All natural cavities are strictly subterranean beneath a solid 3.9m surface crust.
 #[inline]
 pub fn is_cave_air_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
     if wy <= BEDROCK_ELEVATION + 1.0 {
         return false;
     }
 
-    // 1. Ravine / Chasm Fissures: deep jagged trenches cutting from surface down to -65m
+    // Crust Preservation Invariant: Surface ground (top 3.9m) is always solid rock/earth.
+    // Natural subterranean cavities, ravines, and chasms only exist underneath the crust.
+    if wy >= terrain_height - 3.9 {
+        return false;
+    }
+
+    // 1. Ravine / Chasm Fissures: deep jagged trenches cutting below crust down to -65m
     let ravine_noise = get_ravine_perlin();
     let r_sample = ravine_noise.get([wx as f64 * 0.007, wz as f64 * 0.007]);
-    if r_sample.abs() < 0.024 && wy <= terrain_height + 0.5 && wy >= -65.0 {
+    if r_sample.abs() < 0.024 && wy >= -65.0 {
         return true;
     }
 
@@ -165,23 +172,14 @@ pub fn is_cave_air_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
         return true;
     }
 
-    // 3. 3D Subterranean Caverns & Hillside Cave Mouths
+    // 3. 3D Subterranean Caverns
     let cave_noise = get_cave_perlin();
     let freq = 0.035;
     let sample = cave_noise.get([wx as f64 * freq, wy as f64 * freq, wz as f64 * freq]);
 
     // Standard deep cave
-    if wy < terrain_height - 3.5 && wy > -118.0 && sample > 0.38 {
+    if wy > -118.0 && sample > 0.38 {
         return true;
-    }
-
-    // Hillside Cave Mouth: breaches the surface on steep hillsides/slopes when cave noise is intense
-    if wy >= terrain_height - 3.5 && wy <= terrain_height + 0.5 && sample > 0.44 {
-        let slope = (crate::get_terrain_height(wx + 1.5, wz) - crate::get_terrain_height(wx - 1.5, wz)).abs()
-            + (crate::get_terrain_height(wx, wz + 1.5) - crate::get_terrain_height(wx, wz - 1.5)).abs();
-        if slope > 0.40 {
-            return true;
-        }
     }
 
     false
