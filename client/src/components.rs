@@ -452,7 +452,7 @@ pub enum CrosshairArmDir {
 #[derive(Component)] pub struct ReticleHudRoot;
 #[derive(Component)] pub struct ReticleCrosshairArm(pub CrosshairArmDir);
 #[derive(Component)] pub struct ReticleCrosshairDot;
-#[allow(dead_code)]
+#[allow(dead_code, deprecated)]
 #[deprecated(note = "Archived to docs/archive/legacy_firearms.rs. Disabled in favor of fantasy genre & Bevy Taffy HUD.")]
 #[derive(Component)] pub struct ReticleAmmoText;
 #[derive(Component)] pub struct ReticleBowChargeBar;

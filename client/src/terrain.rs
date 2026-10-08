@@ -624,7 +624,6 @@ pub fn mesh_low_poly_terrain_chunk(
             let y01 = get_terrain_height(chunk_base_x + x0, chunk_base_z + z1);
             let y11 = get_terrain_height(chunk_base_x + x1, chunk_base_z + z1);
 
-            let avg_y = (y00 + y10 + y01 + y11) * 0.25;
             let min_y = y00.min(y10).min(y01).min(y11);
             let sub_surface_vy = (min_y - 0.25).floor() as i32;
 
