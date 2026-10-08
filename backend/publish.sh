@@ -8,12 +8,11 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 echo "Compiling and publishing SpacetimeDB backend module..."
 
-# Ensure we are logged into the local spacetime instance (if required)
-spacetime server add local http://localhost:3000 --default || true
-
-# Publish the database module
-spacetime publish --project-path . hybrid-backend
+# Publish the database module to the local SpacetimeDB server
+spacetime publish -s local -p "$SCRIPT_DIR/spacetimedb" -y hybrid-backend
 
 echo "Deployment complete. Backend is active."
