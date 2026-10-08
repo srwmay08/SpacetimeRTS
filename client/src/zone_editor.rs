@@ -609,6 +609,7 @@ pub fn handle_editor_brush_painting(
                             },
                             RigidBody::Dynamic,
                             Collider::cylinder(0.9, 0.35),
+                            ColliderDensity(1.0),
                             StampedUnit,
                         ));
                     }
@@ -622,6 +623,7 @@ pub fn handle_editor_brush_painting(
                             },
                             RigidBody::Dynamic,
                             Collider::cylinder(0.9, 0.35),
+                            ColliderDensity(1.0),
                             StampedUnit,
                         ));
                     }
@@ -635,6 +637,7 @@ pub fn handle_editor_brush_painting(
                             },
                             RigidBody::Dynamic,
                             Collider::cylinder(0.9, 0.5),
+                            ColliderDensity(1.0),
                             StampedUnit,
                         ));
                     }
@@ -648,6 +651,7 @@ pub fn handle_editor_brush_painting(
                             },
                             RigidBody::Dynamic,
                             Collider::cylinder(0.8, 0.45),
+                            ColliderDensity(1.0),
                             StampedUnit,
                         ));
                     }

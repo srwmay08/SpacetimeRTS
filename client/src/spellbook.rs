@@ -2154,7 +2154,6 @@ fn cast_slot(
                     transform: BevyTransform::from_translation(cam_pos + cam_forward * 1.5),
                     ..default()
                 },
-                RigidBody::Dynamic,
                 LinearVelocity(*cam_forward * 18.0),
                 Particle { timer: Timer::from_seconds(3.0, TimerMode::Once) },
             ));
@@ -2174,7 +2173,6 @@ fn cast_slot(
                     transform: BevyTransform::from_translation(cam_pos + cam_forward * 1.2),
                     ..default()
                 },
-                RigidBody::Dynamic,
                 LinearVelocity(*cam_forward * 55.0),
                 Particle { timer: Timer::from_seconds(2.0, TimerMode::Once) },
             ));

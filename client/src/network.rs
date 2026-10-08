@@ -156,7 +156,7 @@ pub fn init_network_connection(
 
     let spawn_x = 0.0;
     let spawn_z = 0.0;
-    let spawn_y = crate::terrain::get_terrain_height(spawn_x, spawn_z) + 1.05;
+    let spawn_y = crate::terrain::get_terrain_height(spawn_x, spawn_z) + 1.12;
 
     let mut player_entity_commands = commands.spawn((
         SpatialBundle::from_transform(BevyTransform::from_xyz(spawn_x, spawn_y, spawn_z)),

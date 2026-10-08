@@ -218,7 +218,6 @@ pub fn context_aware_action_dispatcher(
                                                     transform: dart_transform,
                                                     ..default()
                                                 },
-                                                RigidBody::Dynamic,
                                                 LinearVelocity(dir * dart_speed),
                                                 Particle { timer: Timer::from_seconds(1.0, TimerMode::Once) },
                                             ));
@@ -276,7 +275,6 @@ pub fn context_aware_action_dispatcher(
                                                 transform: BevyTransform::from_translation(origin + dir * 0.8),
                                                 ..default()
                                             },
-                                            RigidBody::Dynamic,
                                             LinearVelocity(dir * 42.0),
                                             Particle { timer: Timer::from_seconds(1.0, TimerMode::Once) },
                                         ));
@@ -308,7 +306,6 @@ pub fn context_aware_action_dispatcher(
                                                 transform: javelin_transform,
                                                 ..default()
                                             },
-                                            RigidBody::Dynamic,
                                             LinearVelocity(dir * javelin_speed),
                                             Particle { timer: Timer::from_seconds(1.5, TimerMode::Once) },
                                         ));
@@ -463,7 +460,6 @@ pub fn context_aware_action_dispatcher(
                                                     transform: arrow_transform,
                                                     ..default()
                                                 },
-                                                RigidBody::Dynamic,
                                                 LinearVelocity(dir * arrow_speed),
                                                 GravityScale(0.55),
                                                 Particle { timer: Timer::from_seconds(4.0, TimerMode::Once) },
@@ -513,7 +509,6 @@ pub fn context_aware_action_dispatcher(
                                             transform: bolt_transform,
                                             ..default()
                                         },
-                                        RigidBody::Dynamic,
                                         LinearVelocity(dir * bolt_speed),
                                         Particle { timer: Timer::from_seconds(1.2, TimerMode::Once) },
                                     ));
@@ -550,7 +545,6 @@ pub fn context_aware_action_dispatcher(
                                             transform: dart_transform,
                                             ..default()
                                         },
-                                        RigidBody::Dynamic,
                                         LinearVelocity(dir * dart_speed),
                                         Particle { timer: Timer::from_seconds(1.0, TimerMode::Once) },
                                     ));
@@ -730,7 +724,6 @@ pub fn context_aware_action_dispatcher(
                                         transform: BevyTransform::from_translation(origin + dir * 0.8),
                                         ..default()
                                     },
-                                    RigidBody::Dynamic,
                                     LinearVelocity(dir * 42.0),
                                     Particle { timer: Timer::from_seconds(1.0, TimerMode::Once) },
                                 ));
@@ -762,7 +755,6 @@ pub fn context_aware_action_dispatcher(
                                         transform: javelin_transform,
                                         ..default()
                                     },
-                                    RigidBody::Dynamic,
                                     LinearVelocity(dir * javelin_speed),
                                     Particle { timer: Timer::from_seconds(1.5, TimerMode::Once) },
                                 ));
@@ -865,7 +857,6 @@ pub fn context_aware_action_dispatcher(
                                                             transform: BevyTransform::from_translation(hit_pt),
                                                             ..default()
                                                         },
-                                                        RigidBody::Dynamic,
                                                         LinearVelocity(spark_vel),
                                                         Particle { timer: Timer::from_seconds(0.2, TimerMode::Once) },
                                                     ));

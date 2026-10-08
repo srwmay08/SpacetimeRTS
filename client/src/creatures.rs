@@ -901,15 +901,19 @@ pub fn setup_sparring_yard(
             base_rotation: Quat::IDENTITY,
         },
         RigidBody::Kinematic,
-        Collider::capsule(0.35, 1.6),
-        CollisionLayers::new(
-            [GameLayer::Unit],
-            [GameLayer::Default, GameLayer::Environment, GameLayer::Terrain],
-        ),
-    ));
+    )).with_children(|parent| {
+        parent.spawn((
+            SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 1.15, 0.0)),
+            Collider::capsule(0.35, 1.6),
+            CollisionLayers::new(
+                [GameLayer::Unit],
+                [GameLayer::Default, GameLayer::Environment, GameLayer::Terrain],
+            ),
+        ));
+    });
 
     // 2. Spawning the Sparring Goblin Raider (3.0m forward-right, facing player)
-    let goblin_pos = Vec3::new(spawn_x + 2.8, terrain_y, spawn_z - 2.6);
+    let goblin_pos = Vec3::new(spawn_x + 2.8, terrain_y + 1.08, spawn_z - 2.6);
     let goblin_mesh = meshes.add(create_lowpoly_goblin_mesh());
     let goblin_mat = materials.add(StandardMaterial {
         base_color: Color::WHITE,
@@ -923,12 +927,7 @@ pub fn setup_sparring_yard(
     commands.spawn((
         Name::new("SparringYard_GoblinRaider"),
         StateScoped(GameState::InGame),
-        PbrBundle {
-            mesh: goblin_mesh,
-            material: goblin_mat,
-            transform: BevyTransform::from_translation(goblin_pos).with_rotation(goblin_rot),
-            ..default()
-        },
+        SpatialBundle::from_transform(BevyTransform::from_translation(goblin_pos).with_rotation(goblin_rot)),
         SparringGoblin {
             health: 120.0,
             max_health: 120.0,
@@ -940,13 +939,21 @@ pub fn setup_sparring_yard(
         },
         RigidBody::Dynamic,
         Collider::capsule(0.35, 1.2),
+        ColliderDensity(1.0),
         LockedAxes::ROTATION_LOCKED,
         LinearVelocity::ZERO,
         CollisionLayers::new(
             [GameLayer::Unit],
             [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment],
         ),
-    ));
+    )).with_children(|parent| {
+        parent.spawn(PbrBundle {
+            mesh: goblin_mesh,
+            material: goblin_mat,
+            transform: BevyTransform::from_xyz(0.0, -1.08, 0.0),
+            ..default()
+        });
+    });
 
     // 3. Sparring Yard Training Torches / Ring Markers
     let ring_offsets = [

@@ -1122,6 +1122,7 @@ pub fn spawn_initial_world(
         },
         RigidBody::Dynamic, 
         Collider::cuboid(0.5, 0.8, 0.9), 
+        ColliderDensity(1.0),
         LockedAxes::ROTATION_LOCKED, 
         GravityScale(4.5),
         LinearVelocity::ZERO,

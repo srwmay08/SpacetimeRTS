@@ -156,14 +156,31 @@ pub fn visualize_selection(
 }
 
 
+use avian3d::prelude::{GravityScale, LinearVelocity};
+
 pub fn tick_particles(
     mut commands: Commands,
     time: Res<Time>,
-    mut query: Query<(Entity, &mut Particle)>,
+    mut query: Query<(
+        Entity,
+        &mut Particle,
+        &mut Transform,
+        Option<&mut LinearVelocity>,
+        Option<&GravityScale>,
+    )>,
 ) {
-    for (entity, mut particle) in query.iter_mut() {
+    let dt = time.delta_seconds();
+    for (entity, mut particle, mut transform, mut vel_opt, grav_opt) in query.iter_mut() {
         if particle.timer.tick(time.delta()).just_finished() {
             commands.entity(entity).despawn_recursive();
+            continue;
+        }
+
+        if let Some(ref mut vel) = vel_opt {
+            if let Some(grav) = grav_opt {
+                vel.0.y -= 9.81 * grav.0 * dt;
+            }
+            transform.translation += vel.0 * dt;
         }
     }
 }
