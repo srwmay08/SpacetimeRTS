@@ -51,15 +51,17 @@ use crate::creatures::{setup_sparring_yard, update_training_dummy_wobble, update
 // P2 Fix: SystemSets for explicit ordering and predictable behavior
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UpdateSet {
-    /// Input handling (keyboard, mouse, gamepad)
+    /// Input handling (keyboard, mouse, gamepad, UI modal toggles)
     Input,
-    /// Network synchronization (SpacetimeDB)
+    /// Network synchronization (SpacetimeDB replication and spatial subscriptions)
     Network,
-    /// Game logic (AI, combat, building)
+    /// Game logic (AI, combat, building placement, spatial simulation)
     Logic,
-    /// Physics and movement
+    /// Physics and movement (locomotion, navmesh pathing)
     Physics,
-    /// Visual/UI updates
+    /// Procedural animations, viewmodel bobbing, camera orientation
+    Animation,
+    /// Visual/UI updates, HUD elements, reticles, overlays
     Rendering,
 }
 
@@ -109,14 +111,16 @@ fn main() {
         .add_event::<BuildingDestructionEvent>()
         .add_event::<SpawnBuildingEvent>()
         
-        // P2 Fix: Configure SystemSets for explicit ordering
+        // Strict deterministic execution order for InGame update systems:
+        // Input -> Network -> Logic -> Physics -> Animation -> Rendering
         .configure_sets(Update, (
             UpdateSet::Input,
             UpdateSet::Network,
             UpdateSet::Logic,
             UpdateSet::Physics,
+            UpdateSet::Animation,
             UpdateSet::Rendering,
-        ).chain())
+        ).chain().run_if(in_state(GameState::InGame)))
         
         .insert_resource(EventTracker::default()) 
         .insert_resource(GeneratedChunks::default())
@@ -164,102 +168,137 @@ fn main() {
         .add_systems(OnEnter(CameraMode::FPS), enable_fps_perspective)
         .add_systems(OnEnter(CameraMode::RTS), enable_rts_perspective)
 
+        // ==========================================
+        // 1. INPUT PHASE
+        // Keyboard, mouse, UI toggles, and modal clicks
+        // ==========================================
         .add_systems(Update, (
-            track_telemetry_metrics,
             toggle_console,
             handle_console_input,
             toggle_celestial_hud_hotkey,
-            update_console_ui,
             toggle_perspective,
-            update_camera_transition,
             hotbar_input_system,
-            input_router_system, 
-            rts_navmesh_movement_system, 
-            player_movement_system,
+            input_router_system,
             toggle_tuner_ui,
             handle_tuner_interactions,
-            update_tuner_ui_display,
-            update_comic_damage_floaters,
             toggle_weapon_hand_system,
-            update_training_dummy_wobble,
-            update_sparring_goblin_ai,
-        ).run_if(in_state(GameState::InGame)))
+            weapon_reload_input_system,
+            tactical_ability_input_system,
+            toggle_crosshair_menu,
+            handle_crosshair_menu_interactions,
+        ).in_set(UpdateSet::Input))
 
         .add_systems(Update, (
             handle_inventory_drag_and_drop,
             handle_paperdoll_interactions,
-            update_drag_ghost_ui,
-            context_aware_action_dispatcher,
             handle_build_menu_selection,
             handle_crafting_interaction,
+            toggle_build_mode,
+            toggle_inventory_ui,
+            action_bar_interaction,
+            toggle_action_bar_visibility,
+        ).in_set(UpdateSet::Input))
+
+        // ==========================================
+        // 2. NETWORK PHASE
+        // SpacetimeDB table sync and subscription streams
+        // ==========================================
+        .add_systems(Update, (
+            sync_transforms,
+            update_spatial_subscriptions,
+            sync_logical_components,
+            sync_resource_nodes,
+            sync_structures,
+            sync_door_states,
+            sync_fall_hazards,
+            sync_active_projectiles,
+            sync_third_person_weapon_render_layers,
+        ).in_set(UpdateSet::Network))
+
+        // ==========================================
+        // 3. LOGIC PHASE
+        // Simulation, combat, actions, and procedural terrain
+        // ==========================================
+        .add_systems(Update, (
+            context_aware_action_dispatcher,
+            process_combat_events,
+            update_tactical_abilities_system,
+            update_arrow_projectiles,
             interior_occlusion_culling_system,
             update_infinite_voxel_terrain,
-        ).run_if(in_state(GameState::InGame)))
+            spawn_modular_building_system,
+            handle_building_destruction,
+            spawn_or_update_view_model_weapon,
+        ).in_set(UpdateSet::Logic))
 
         .add_systems(Update, (
-            sync_transforms, 
-            update_spatial_subscriptions, 
-            sync_logical_components,
-            sync_resource_nodes, 
+            update_sparring_goblin_ai,
+            update_training_dummy_wobble,
             update_falling_trees,
             update_tree_colors,
-            update_berry_visuals, 
-            sync_structures, 
-            spawn_modular_building_system,
-            update_building_destruction_visuals,
-            handle_building_destruction,
-            update_building_destruction_animations,
-            update_rune_light_decay,
-            sync_door_states,
-            animate_doors,
-            sync_fall_hazards,
+            update_berry_visuals,
             update_fall_hazards,
-            sync_active_projectiles,
             tick_voxel_gibs,
-        ).run_if(in_state(GameState::InGame)))
+            tick_particles,
+            update_rune_light_decay,
+        ).in_set(UpdateSet::Logic))
+
+        // ==========================================
+        // 4. PHYSICS PHASE
+        // Locomotion and navmesh movement
+        // ==========================================
+        .add_systems(Update, (
+            player_movement_system,
+            rts_navmesh_movement_system,
+        ).in_set(UpdateSet::Physics))
+
+        // ==========================================
+        // 5. ANIMATION & CAMERA ORIENTATION PHASE
+        // Camera look, viewmodel bob, and procedural animation
+        // (Runs strictly after Physics to eliminate 1-frame camera jitter)
+        // ==========================================
+        .add_systems(Update, (
+            update_camera_transition,
+            animate_doors,
+            animate_weapon_viewmodel,
+            animate_third_person_weapons,
+            update_building_destruction_animations,
+            fps_look.run_if(in_state(CameraMode::FPS)),
+            update_camera_fov.run_if(in_state(CameraMode::FPS)),
+            rts_camera_controller.run_if(in_state(CameraMode::RTS)),
+        ).in_set(UpdateSet::Animation))
+
+        // ==========================================
+        // 6. RENDERING & UI PHASE
+        // Reticles, HUD, damage numbers, and diagnostics
+        // ==========================================
+        .add_systems(Update, (
+            update_build_hologram,
+            update_build_ui,
+            update_comic_damage_floaters,
+            update_building_destruction_visuals,
+            visualize_selection,
+            update_floating_health_bars,
+            update_drag_ghost_ui,
+            update_marquee_ui.run_if(in_state(CameraMode::RTS)),
+        ).in_set(UpdateSet::Rendering))
 
         .add_systems(Update, (
-            toggle_build_mode, 
-            update_build_hologram, 
-            update_build_ui, 
+            update_console_ui,
+            update_tuner_ui_display,
             update_hotbar_ui,
             update_hud_health_bar,
             update_celestial_hud_ui,
             update_interaction_prompt,
-            update_inventory_ui, 
-            toggle_inventory_ui,
-            process_combat_events, 
-            tick_particles,
-            visualize_selection,
-            action_bar_interaction,       
-            toggle_action_bar_visibility,
-            update_floating_health_bars,
-        ).run_if(in_state(GameState::InGame)))
-
-        .add_systems(Update, (
-            spawn_or_update_view_model_weapon,
-            animate_weapon_viewmodel,
-            animate_third_person_weapons,
-            sync_third_person_weapon_render_layers,
-            weapon_reload_input_system,
+            update_inventory_ui,
             update_weapon_hud,
             update_reticle_crosshair_ui,
             update_reticle_adjacent_hud,
             update_reticle_abilities_and_hitmarker,
-            toggle_crosshair_menu,
-            handle_crosshair_menu_interactions,
-            tactical_ability_input_system,
-            update_tactical_abilities_system,
-            update_arrow_projectiles,
-        ).run_if(in_state(GameState::InGame)))    
+            update_diagnostic_overlay,
+            track_telemetry_metrics,
+        ).in_set(UpdateSet::Rendering))
 
-        .add_systems(Update, (fps_look, update_camera_fov).run_if(in_state(CameraMode::FPS).and_then(in_state(GameState::InGame))))
-        .add_systems(Update, (
-            rts_camera_controller,
-            update_marquee_ui,
-        ).run_if(in_state(CameraMode::RTS).and_then(in_state(GameState::InGame))))
-        
-        .add_systems(Update, update_diagnostic_overlay.run_if(in_state(GameState::InGame)))
         .add_systems(Last, enforce_fps_limit)
         
         .run();
@@ -320,4 +359,102 @@ fn update_diagnostic_overlay(
 
 fn track_telemetry_metrics(time: Res<Time>, mut telemetry: ResMut<TelemetryTracker>) {
     telemetry.last_frame_time = time.elapsed_seconds_f64();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_all_registered_systems_query_disjointness() {
+        let mut world = World::new();
+
+        macro_rules! check_system {
+            ($sys:expr) => {
+                let mut system = IntoSystem::into_system($sys);
+                system.initialize(&mut world);
+            };
+        }
+
+        check_system!(toggle_console);
+        check_system!(handle_console_input);
+        check_system!(toggle_celestial_hud_hotkey);
+        check_system!(toggle_perspective);
+        check_system!(hotbar_input_system);
+        check_system!(input_router_system);
+        check_system!(toggle_tuner_ui);
+        check_system!(handle_tuner_interactions);
+        check_system!(toggle_weapon_hand_system);
+        check_system!(weapon_reload_input_system);
+        check_system!(tactical_ability_input_system);
+        check_system!(toggle_crosshair_menu);
+        check_system!(handle_crosshair_menu_interactions);
+        check_system!(handle_inventory_drag_and_drop);
+        check_system!(handle_paperdoll_interactions);
+        check_system!(handle_build_menu_selection);
+        check_system!(handle_crafting_interaction);
+        check_system!(toggle_build_mode);
+        check_system!(toggle_inventory_ui);
+        check_system!(action_bar_interaction);
+        check_system!(toggle_action_bar_visibility);
+        check_system!(sync_transforms);
+        check_system!(update_spatial_subscriptions);
+        check_system!(sync_logical_components);
+        check_system!(sync_resource_nodes);
+        check_system!(sync_structures);
+        check_system!(sync_door_states);
+        check_system!(sync_fall_hazards);
+        check_system!(sync_active_projectiles);
+        check_system!(sync_third_person_weapon_render_layers);
+        check_system!(context_aware_action_dispatcher);
+        check_system!(process_combat_events);
+        check_system!(update_tactical_abilities_system);
+        check_system!(update_arrow_projectiles);
+        check_system!(interior_occlusion_culling_system);
+        check_system!(update_infinite_voxel_terrain);
+        check_system!(spawn_modular_building_system);
+        check_system!(handle_building_destruction);
+        check_system!(spawn_or_update_view_model_weapon);
+        check_system!(update_sparring_goblin_ai);
+        check_system!(update_training_dummy_wobble);
+        check_system!(update_falling_trees);
+        check_system!(update_tree_colors);
+        check_system!(update_berry_visuals);
+        check_system!(update_fall_hazards);
+        check_system!(tick_voxel_gibs);
+        check_system!(tick_particles);
+        check_system!(update_rune_light_decay);
+        check_system!(player_movement_system);
+        check_system!(rts_navmesh_movement_system);
+        check_system!(update_camera_transition);
+        check_system!(animate_doors);
+        check_system!(animate_weapon_viewmodel);
+        check_system!(animate_third_person_weapons);
+        check_system!(update_building_destruction_animations);
+        check_system!(fps_look);
+        check_system!(update_camera_fov);
+        check_system!(rts_camera_controller);
+        check_system!(update_build_hologram);
+        check_system!(update_build_ui);
+        check_system!(update_comic_damage_floaters);
+        check_system!(update_building_destruction_visuals);
+        check_system!(visualize_selection);
+        check_system!(update_floating_health_bars);
+        check_system!(update_drag_ghost_ui);
+        check_system!(update_marquee_ui);
+        check_system!(update_console_ui);
+        check_system!(update_tuner_ui_display);
+        check_system!(update_hotbar_ui);
+        check_system!(update_hud_health_bar);
+        check_system!(update_celestial_hud_ui);
+        check_system!(update_interaction_prompt);
+        check_system!(update_inventory_ui);
+        check_system!(update_weapon_hud);
+        check_system!(update_reticle_crosshair_ui);
+        check_system!(update_reticle_adjacent_hud);
+        check_system!(update_reticle_abilities_and_hitmarker);
+        check_system!(update_diagnostic_overlay);
+        check_system!(track_telemetry_metrics);
+        check_system!(enforce_fps_limit);
+    }
 }

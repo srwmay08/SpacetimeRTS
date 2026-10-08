@@ -326,7 +326,7 @@ pub fn update_inventory_ui(
     player_query: Query<&Transform, With<PlayerBody>>,
     hand_side: Res<EquippedHandSide>,
     equipped_bags: Res<ClientEquippedBags>,
-    inventory_root_q: Query<&Style, With<InventoryUiRoot>>,
+    inventory_root_q: Query<&Style, (With<InventoryUiRoot>, Without<RequiresWorkbenchRecipe>)>,
     mut header_q: Query<&mut Text, (With<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
     mut name_q: Query<(&mut Text, &InventorySlotName), Without<InventorySlotCount>>,
     mut count_q: Query<(&mut Text, &InventorySlotCount), Without<InventorySlotName>>,
@@ -336,7 +336,7 @@ pub fn update_inventory_ui(
     mut bag_text_q: Query<(&mut Text, &PaperdollBagText), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagTooltip>)>,
     mut bag_tooltip_q: Query<(&mut Text, &PaperdollBagTooltip), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>)>,
     mut capacity_header_q: Query<&mut Text, (With<InventoryCapacityHeader>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
-    mut workbench_recipe_styles: Query<&mut Style, With<RequiresWorkbenchRecipe>>,
+    mut workbench_recipe_styles: Query<&mut Style, (With<RequiresWorkbenchRecipe>, Without<InventoryUiRoot>)>,
 ) {
     // 1. Performance Guard: Zero overhead when the Inventory modal is closed
     if let Ok(root_style) = inventory_root_q.get_single() {
@@ -496,6 +496,18 @@ pub fn update_inventory_ui(
         if style.display != desired_display {
             style.display = desired_display;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_update_inventory_ui_system_disjointness() {
+        let mut world = World::new();
+        let mut system = IntoSystem::into_system(update_inventory_ui);
+        system.initialize(&mut world);
     }
 }
 

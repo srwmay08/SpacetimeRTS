@@ -8,6 +8,9 @@ use noise::{NoiseFn, Perlin};
 pub mod templates;
 pub use templates::*;
 
+pub mod items;
+pub use items::*;
+
 // ----------------------------------------------------------------------------
 // INVENTORY & ITEM DISCOVERY
 // ----------------------------------------------------------------------------
