@@ -48,6 +48,104 @@ pub const LOW_POLY_FAR_COLLIDER_UNLOAD_SQ: f32 = 56.0 * 56.0; // 56m radius hyst
 pub const MAT_GRASS: u8 = 0;
 pub const MAT_DIRT: u8 = 1;
 pub const MAT_STONE: u8 = 2;
+pub const MAT_SAND: u8 = 3;
+pub const MAT_WOOD: u8 = 4;
+pub const MAT_REINFORCED_STONE: u8 = 5;
+pub const MAT_BEDROCK: u8 = 6;
+pub const MAT_IRON_ORE: u8 = 7;
+pub const MAT_RUBY: u8 = 8;
+pub const MAT_COLLAPSED_RUBBLE: u8 = 9;
+
+pub const BEDROCK_ELEVATION: f32 = -120.0;
+
+/// Evaluates procedural rock strata to embed Iron ore veins and deep Ruby crystal pockets
+/// via deterministic 3D integer coordinate hashing.
+#[inline]
+pub fn procedural_stone_or_ore(vx: i32, vy: i32, vz: i32, wy: f32) -> u8 {
+    let hash = ((vx.wrapping_mul(73856093) ^ vy.wrapping_mul(19349663) ^ vz.wrapping_mul(83492791)) as u32) % 10000;
+    if wy <= -50.0 && wy >= -115.0 && hash < 120 {
+        MAT_RUBY
+    } else if wy <= -5.0 && wy >= -75.0 && hash < 450 {
+        MAT_IRON_ORE
+    } else {
+        MAT_STONE
+    }
+}
+
+/// Evaluates if 3D procedural coordinates carve out an ancient crypt / tomb dungeon chamber or entrance shaft.
+#[inline]
+pub fn is_dungeon_cavity_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
+    let cell_size = 144.0;
+    let cell_x = (wx / cell_size).floor() as i32;
+    let cell_z = (wz / cell_size).floor() as i32;
+
+    let center_x = cell_x as f32 * cell_size + 72.0;
+    let center_z = cell_z as f32 * cell_size + 72.0;
+
+    let dx = (wx - center_x).abs();
+    let dz = (wz - center_z).abs();
+
+    // 1. Vertical entrance shaft descending from surface to subterranean chamber
+    if dx < 2.0 && dz < 2.0 && wy <= terrain_height + 0.5 && wy >= -24.0 {
+        return true;
+    }
+
+    // 2. Vaulted Crypt Chamber (12m x 6m x 12m) at elevation -26m to -20m
+    if dx < 6.0 && dz < 6.0 && wy >= -26.0 && wy <= -20.0 {
+        return true;
+    }
+
+    // 3. Subterranean tomb archway connecting to surrounding cave network
+    if dx < 1.5 && dz >= 6.0 && dz < 9.0 && wy >= -26.0 && wy <= -22.0 {
+        return true;
+    }
+
+    false
+}
+
+/// Evaluates if 3D procedural coordinates carve out a natural subterranean cavity:
+/// 1. Hillside cave mouths and 3D cavern chambers
+/// 2. Large ravines / chasm fissures
+/// 3. Designated crypt / tomb dungeon shafts and chambers
+#[inline]
+pub fn is_cave_air_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
+    if wy <= BEDROCK_ELEVATION + 1.0 {
+        return false;
+    }
+
+    // 1. Ravine / Chasm Fissures: deep jagged trenches cutting from surface down to -65m
+    let ravine_noise = Perlin::new(1339);
+    let r_sample = ravine_noise.get([wx as f64 * 0.007, wz as f64 * 0.007]);
+    if r_sample.abs() < 0.024 && wy <= terrain_height + 0.5 && wy >= -65.0 {
+        return true;
+    }
+
+    // 2. Designated Crypt / Tomb Dungeons: ancient stone entrance shaft & burial chamber
+    if is_dungeon_cavity_at(wx, wy, wz, terrain_height) {
+        return true;
+    }
+
+    // 3. 3D Subterranean Caverns & Hillside Cave Mouths
+    let cave_noise = Perlin::new(1338);
+    let freq = 0.035;
+    let sample = cave_noise.get([wx as f64 * freq, wy as f64 * freq, wz as f64 * freq]);
+
+    // Standard deep cave
+    if wy < terrain_height - 3.5 && wy > -118.0 && sample > 0.38 {
+        return true;
+    }
+
+    // Hillside Cave Mouth: breaches the surface on steep hillsides/slopes when cave noise is intense
+    if wy >= terrain_height - 3.5 && wy <= terrain_height + 0.5 && sample > 0.44 {
+        let slope = (compute_canonical_terrain_height(wx + 1.5, wz) - compute_canonical_terrain_height(wx - 1.5, wz)).abs()
+            + (compute_canonical_terrain_height(wx, wz + 1.5) - compute_canonical_terrain_height(wx, wz - 1.5)).abs();
+        if slope > 0.40 {
+            return true;
+        }
+    }
+
+    false
+}
 
 // ----------------------------------------------------------------------------
 // PROCEDURAL TERRAIN CONFIGURATION & SAMPLER
@@ -389,6 +487,7 @@ pub fn unpack_chunk_key(key: u64) -> (i32, i32, i32) {
 /// producing a distinctive, crisp low-poly aesthetic rather than smooth curves or Minecraft blocks.
 /// Helper checking if a neighbor voxel is solid.
 /// Checks the local chunk, adjacent loaded db_chunks, or falls back to procedural terrain and cave noise.
+#[allow(dead_code)]
 fn is_solid_voxel_neighbor(
     db_chunks: &BTreeMap<u64, VoxelChunk>,
     cx: i32,
@@ -445,20 +544,15 @@ fn is_solid_voxel_neighbor(
     let wy = (n_cy * 16 + n_ly) as f32 * VOXEL_SIZE;
     let wz = (n_cz * 16 + n_lz) as f32 * VOXEL_SIZE;
 
-    if wy <= -120.0 {
+    if wy <= BEDROCK_ELEVATION {
         return true;
     }
     let h = compute_canonical_terrain_height(wx, wz);
     if wy > h {
         return false;
     }
-    if wy < h - 4.0 && wy > -118.0 {
-        let cave_noise = Perlin::new(1338);
-        let freq = 0.035;
-        let sample = cave_noise.get([wx as f64 * freq, wy as f64 * freq, wz as f64 * freq]);
-        if sample > 0.38 {
-            return false;
-        }
+    if is_cave_air_at(wx, wy, wz, h) {
+        return false;
     }
     true
 }
@@ -503,7 +597,17 @@ fn get_voxel_face_color(mat: u8, is_top: bool, wy: f32, vx: i32, vy: i32, vz: i3
                 let b = (0.40 + facet_variation).clamp(0.30, 0.50);
                 [r, g, b, 1.0]
             }
-            6 => [0.18, 0.18, 0.20, 1.0], // Bedrock
+            6 => {
+                // Bedrock: Dark basalt/obsidian with glowing magma cracks
+                let wx = vx as f32;
+                let wz = vz as f32;
+                let magma_seed = ((wx * 0.28).sin() * (wz * 0.28).cos()).abs();
+                if magma_seed > 0.65 {
+                    [2.2, 0.45, 0.08, 1.0] // Glowing magma crack (HDR emissive bloom)
+                } else {
+                    [0.10, 0.10, 0.13, 1.0] // Dark basalt / obsidian
+                }
+            }
             7 => {
                 // IronOre: Rich oxidized metallic flecks
                 let r = (0.64 + facet_variation * 1.2).clamp(0.46, 0.80);
@@ -512,10 +616,10 @@ fn get_voxel_face_color(mat: u8, is_top: bool, wy: f32, vx: i32, vy: i32, vz: i3
                 [r, g, b, 1.0]
             }
             8 => {
-                // Ruby: Vivid crystalline facet
-                let r = (0.88 + facet_variation * 0.8).clamp(0.72, 1.0);
-                let g = (0.15 + facet_variation * 0.4).clamp(0.08, 0.25);
-                let b = (0.35 + facet_variation * 0.6).clamp(0.22, 0.48);
+                // Ruby: Vivid crystalline facet (HDR emissive bloom)
+                let r = (2.2 + facet_variation * 0.8).clamp(1.8, 2.6);
+                let g = (0.20 + facet_variation * 0.4).clamp(0.10, 0.35);
+                let b = (0.45 + facet_variation * 0.6).clamp(0.30, 0.60);
                 [r, g, b, 1.0]
             }
             9 => {
@@ -645,6 +749,13 @@ pub fn mesh_low_poly_terrain_chunk(
                 }
             }
 
+            // Natural cave mouths, chasms, and dungeon entrance shafts carve through surface quads
+            let quad_center_x = chunk_base_x + (qx as f32 + 0.5) * LOW_POLY_QUAD_SIZE;
+            let quad_center_z = chunk_base_z + (qz as f32 + 0.5) * LOW_POLY_QUAD_SIZE;
+            if is_cave_air_at(quad_center_x, min_y - 0.25, quad_center_z, min_y) {
+                surface_excavated = true;
+            }
+
             if !surface_excavated {
                 let v00 = Vec3::new(x0, y00, z0);
                 let v10 = Vec3::new(x1, y10, z0);
@@ -728,132 +839,237 @@ pub fn mesh_low_poly_terrain_chunk(
         }
     }
 
-    // 2. Excavated / Volumetric Blocks (Face-Culled 3D Voxel Mesher):
-    // For every solid voxel in column_chunks, emit faces exposed to air.
-    for chunk in column_chunks {
-        let base_vx = chunk.chunk_x * 16;
-        let base_vy = chunk.chunk_y * 16;
-        let base_vz = chunk.chunk_z * 16;
+    // 2. Indestructible Bedrock Floor (-120.0m):
+    // Renders a low-poly faceted basalt/obsidian floor with glowing subterranean magma cracks
+    // across the entire chunk footprint.
+    for bz in 0..16 {
+        for bx in 0..16 {
+            let x0 = bx as f32 * LOW_POLY_QUAD_SIZE;
+            let x1 = (bx + 1) as f32 * LOW_POLY_QUAD_SIZE;
+            let z0 = bz as f32 * LOW_POLY_QUAD_SIZE;
+            let z1 = (bz + 1) as f32 * LOW_POLY_QUAD_SIZE;
+            let by = BEDROCK_ELEVATION;
 
-        for lz in 0..16 {
-            for lx in 0..16 {
-                let quad_avg_y = get_terrain_height(chunk_base_x + lx as f32 + 0.5, chunk_base_z + lz as f32 + 0.5);
-                let surface_vy = (quad_avg_y / VOXEL_SIZE).floor() as i32;
+            let world_bx = (cx * 16 + bx as i32) as f32 + 0.5;
+            let world_bz = (cz * 16 + bz as i32) as f32 + 0.5;
+            let magma_seed = ((world_bx * 0.28).sin() * (world_bz * 0.28).cos()).abs();
+            let col = if magma_seed > 0.65 {
+                [2.2, 0.45, 0.08, 1.0] // Glowing magma crack (HDR emissive bloom)
+            } else {
+                [0.10, 0.10, 0.13, 1.0] // Dark basalt / obsidian
+            };
 
-                for ly in 0..16 {
-                    let idx = lx + (ly * 16) + (lz * 256);
-                    let mat = chunk.voxels[idx];
-                    if mat == 0 {
+            let v0 = Vec3::new(x0, by, z0);
+            let v1 = Vec3::new(x0, by, z1);
+            let v2 = Vec3::new(x1, by, z1);
+            let v3 = Vec3::new(x1, by, z0);
+            push_unshared_face(
+                &mut positions,
+                &mut normals,
+                &mut colors,
+                &mut uvs,
+                &mut indices,
+                &mut curr_idx,
+                v0,
+                v1,
+                v2,
+                v3,
+                [0.0, 1.0, 0.0],
+                col,
+                chunk_base_x,
+                chunk_base_z,
+            );
+        }
+    }
+
+    // 3. Subterranean Cave Chambers, Chasms & Excavated Volumes:
+    // Fast 18x18 bounded neighborhood grid evaluating natural caves and SpacetimeDB mining deltas.
+    let base_vy = BEDROCK_ELEVATION as i32; // -120
+    let mut chunk_max_h = BEDROCK_ELEVATION;
+    for pz in 0..=16 {
+        for px in 0..=16 {
+            chunk_max_h = chunk_max_h.max(get_terrain_height(chunk_base_x + px as f32, chunk_base_z + pz as f32));
+        }
+    }
+    let chunk_max_vy = (chunk_max_h + 1.0).ceil() as i32;
+    let y_span = (chunk_max_vy - base_vy + 2).max(1) as usize;
+
+    let grid_w = 18usize;
+    let grid_d = 18usize;
+    let mut grid = vec![0u8; grid_w * grid_d * y_span];
+
+    for pz in -1..=16i32 {
+        for px in -1..=16i32 {
+            let wx = chunk_base_x + px as f32 + 0.5;
+            let wz = chunk_base_z + pz as f32 + 0.5;
+            let terrain_h = get_terrain_height(wx, wz);
+            let surface_vy = terrain_h.floor() as i32;
+
+            let gx = (px + 1) as usize;
+            let gz = (pz + 1) as usize;
+
+            for vy in base_vy..=surface_vy {
+                let gy = (vy - base_vy) as usize;
+                let idx = gx + gz * grid_w + gy * (grid_w * grid_d);
+
+                if vy <= base_vy {
+                    grid[idx] = MAT_BEDROCK;
+                    continue;
+                }
+
+                // Check db_chunks first
+                let vx = cx * 16 + px;
+                let vz = cz * 16 + pz;
+                let cx_v = vx.div_euclid(16);
+                let cy_v = vy.div_euclid(16);
+                let cz_v = vz.div_euclid(16);
+                let key = pack_chunk_key(cx_v, cy_v, cz_v);
+
+                if let Some(chunk) = db_chunks.get(&key) {
+                    let lx = vx.rem_euclid(16) as usize;
+                    let ly = vy.rem_euclid(16) as usize;
+                    let lz = vz.rem_euclid(16) as usize;
+                    let c_idx = lx + ly * 16 + lz * 256;
+                    if let Some(&mat) = chunk.voxels.get(c_idx) {
+                        grid[idx] = mat;
                         continue;
                     }
+                }
 
-                    let vx = base_vx + lx as i32;
-                    let vy = base_vy + ly as i32;
-                    let vz = base_vz + lz as i32;
+                // Unmined procedural terrain
+                let wy = vy as f32 + 0.5;
+                if is_cave_air_at(wx, wy, wz, terrain_h) {
+                    grid[idx] = 0; // Air
+                } else if wy > terrain_h - 3.0 {
+                    grid[idx] = MAT_DIRT;
+                } else {
+                    grid[idx] = procedural_stone_or_ore(vx, vy, vz, wy);
+                }
+            }
+        }
+    }
 
-                    let wx = vx as f32 * VOXEL_SIZE;
-                    let wy = vy as f32 * VOXEL_SIZE;
-                    let wz = vz as f32 * VOXEL_SIZE;
+    for lz in 0..16usize {
+        for lx in 0..16usize {
+            let gx = lx + 1;
+            let gz = lz + 1;
+            let quad_h = get_terrain_height(chunk_base_x + lx as f32 + 0.5, chunk_base_z + lz as f32 + 0.5);
+            let surface_vy = quad_h.floor() as i32;
 
-                    let x0 = wx - chunk_base_x;
-                    let x1 = x0 + VOXEL_SIZE;
-                    let y0 = wy;
-                    let y1 = y0 + VOXEL_SIZE;
-                    let z0 = wz - chunk_base_z;
-                    let z1 = z0 + VOXEL_SIZE;
-
-                    // Subtle depth jitter for imperfect cuboid quarry faces
-                    let facet_seed = (vx.wrapping_mul(73856093) ^ vy.wrapping_mul(19349663) ^ vz.wrapping_mul(83492791)) as u32;
-                    let jitter_x = ((facet_seed % 101) as f32 / 100.0 - 0.5) * 0.035;
-                    let jitter_z = (((facet_seed >> 8) % 101) as f32 / 100.0 - 0.5) * 0.035;
-                    let jitter_ceil = (((facet_seed >> 16) % 101) as f32 / 100.0 - 0.5) * 0.025;
-
-                    // +Y (Top Face - walkable horizontal floor at 0°)
-                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32 + 1, lz as i32) {
-                        let is_surface_solid = vy >= surface_vy;
-                        let surface_cy = surface_vy.div_euclid(16);
-                        let surface_ly = surface_vy.rem_euclid(16) as usize;
-                        let surface_intact = if is_surface_solid {
-                            if chunk.chunk_y == surface_cy {
-                                let s_idx = lx + (surface_ly * 16) + (lz * 256);
-                                chunk.voxels.get(s_idx).copied().unwrap_or(0) != 0
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
-
-                        if !surface_intact {
-                            let norm = [0.0, 1.0, 0.0];
-                            let col = get_voxel_face_color(mat, true, y1, vx, vy, vz);
-                            let v0 = Vec3::new(x0, y1, z0);
-                            let v1 = Vec3::new(x0, y1, z1);
-                            let v2 = Vec3::new(x1, y1, z1);
-                            let v3 = Vec3::new(x1, y1, z0);
-                            push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                        }
+            let quad_center_x = chunk_base_x + lx as f32 + 0.5;
+            let quad_center_z = chunk_base_z + lz as f32 + 0.5;
+            let surface_open = is_cave_air_at(quad_center_x, quad_h - 0.25, quad_center_z, quad_h)
+                || {
+                    let check_cy = surface_vy.div_euclid(16);
+                    let check_ly = surface_vy.rem_euclid(16) as usize;
+                    if let Some(c) = column_chunks.iter().find(|c| c.chunk_y == check_cy) {
+                        c.voxels.get(lx + check_ly * 16 + lz * 256).copied().unwrap_or(1) == 0
+                    } else {
+                        false
                     }
+                };
 
-                    // -Y (Bottom Face - horizontal ceiling)
-                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32 - 1, lz as i32) {
-                        let norm = [0.0, -1.0, 0.0];
-                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                        let cy = y0 + jitter_ceil;
-                        let v0 = Vec3::new(x0, cy, z0);
-                        let v1 = Vec3::new(x1, cy, z0);
-                        let v2 = Vec3::new(x1, cy, z1);
-                        let v3 = Vec3::new(x0, cy, z1);
+            for vy in (base_vy + 1)..=surface_vy {
+                let gy = (vy - base_vy) as usize;
+                let idx = gx + gz * grid_w + gy * (grid_w * grid_d);
+                let mat = grid[idx];
+                if mat == 0 {
+                    continue;
+                }
+
+                let vx = cx * 16 + lx as i32;
+                let vz = cz * 16 + lz as i32;
+                let wy = vy as f32;
+
+                let x0 = lx as f32 * LOW_POLY_QUAD_SIZE;
+                let x1 = x0 + LOW_POLY_QUAD_SIZE;
+                let y0 = wy;
+                let y1 = y0 + LOW_POLY_QUAD_SIZE;
+                let z0 = lz as f32 * LOW_POLY_QUAD_SIZE;
+                let z1 = z0 + LOW_POLY_QUAD_SIZE;
+
+                let facet_seed = (vx.wrapping_mul(73856093) ^ vy.wrapping_mul(19349663) ^ vz.wrapping_mul(83492791)) as u32;
+                let jitter_x = ((facet_seed % 101) as f32 / 100.0 - 0.5) * 0.035;
+                let jitter_z = (((facet_seed >> 8) % 101) as f32 / 100.0 - 0.5) * 0.035;
+                let jitter_ceil = (((facet_seed >> 16) % 101) as f32 / 100.0 - 0.5) * 0.025;
+
+                // 1. +Y Face (Top - Walkable cave floor)
+                let neighbor_yp = if gy + 1 < y_span { grid[gx + gz * grid_w + (gy + 1) * (grid_w * grid_d)] } else { 0 };
+                if neighbor_yp == 0 {
+                    if vy < surface_vy || surface_open {
+                        let norm = [0.0, 1.0, 0.0];
+                        let col = get_voxel_face_color(mat, true, y1, vx, vy, vz);
+                        let v0 = Vec3::new(x0, y1, z0);
+                        let v1 = Vec3::new(x0, y1, z1);
+                        let v2 = Vec3::new(x1, y1, z1);
+                        let v3 = Vec3::new(x1, y1, z0);
                         push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
                     }
+                }
 
-                    // +X (East Wall)
-                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32 + 1, ly as i32, lz as i32) {
-                        let norm = [1.0, 0.0, 0.0];
-                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                        let cx1 = x1 + jitter_x;
-                        let v0 = Vec3::new(cx1, y0, z0);
-                        let v1 = Vec3::new(cx1, y1, z0);
-                        let v2 = Vec3::new(cx1, y1, z1);
-                        let v3 = Vec3::new(cx1, y0, z1);
-                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                    }
+                // 2. -Y Face (Bottom - Cave ceiling)
+                let neighbor_ym = if gy > 0 { grid[gx + gz * grid_w + (gy - 1) * (grid_w * grid_d)] } else { MAT_BEDROCK };
+                if neighbor_ym == 0 {
+                    let norm = [0.0, -1.0, 0.0];
+                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                    let cy = y0 + jitter_ceil;
+                    let v0 = Vec3::new(x0, cy, z0);
+                    let v1 = Vec3::new(x1, cy, z0);
+                    let v2 = Vec3::new(x1, cy, z1);
+                    let v3 = Vec3::new(x0, cy, z1);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
+                }
 
-                    // -X (West Wall)
-                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32 - 1, ly as i32, lz as i32) {
-                        let norm = [-1.0, 0.0, 0.0];
-                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                        let cx0 = x0 + jitter_x;
-                        let v0 = Vec3::new(cx0, y0, z1);
-                        let v1 = Vec3::new(cx0, y1, z1);
-                        let v2 = Vec3::new(cx0, y1, z0);
-                        let v3 = Vec3::new(cx0, y0, z0);
-                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                    }
+                // 3. +X Face (East Wall)
+                let neighbor_xp = grid[(gx + 1) + gz * grid_w + gy * (grid_w * grid_d)];
+                if neighbor_xp == 0 {
+                    let norm = [1.0, 0.0, 0.0];
+                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                    let cx1 = x1 + jitter_x;
+                    let v0 = Vec3::new(cx1, y0, z0);
+                    let v1 = Vec3::new(cx1, y1, z0);
+                    let v2 = Vec3::new(cx1, y1, z1);
+                    let v3 = Vec3::new(cx1, y0, z1);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
+                }
 
-                    // +Z (South Wall)
-                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32, lz as i32 + 1) {
-                        let norm = [0.0, 0.0, 1.0];
-                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                        let cz1 = z1 + jitter_z;
-                        let v0 = Vec3::new(x1, y0, cz1);
-                        let v1 = Vec3::new(x1, y1, cz1);
-                        let v2 = Vec3::new(x0, y1, cz1);
-                        let v3 = Vec3::new(x0, y0, cz1);
-                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                    }
+                // 4. -X Face (West Wall)
+                let neighbor_xm = grid[(gx - 1) + gz * grid_w + gy * (grid_w * grid_d)];
+                if neighbor_xm == 0 {
+                    let norm = [-1.0, 0.0, 0.0];
+                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                    let cx0 = x0 + jitter_x;
+                    let v0 = Vec3::new(cx0, y0, z1);
+                    let v1 = Vec3::new(cx0, y1, z1);
+                    let v2 = Vec3::new(cx0, y1, z0);
+                    let v3 = Vec3::new(cx0, y0, z0);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
+                }
 
-                    // -Z (North Wall)
-                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32, lz as i32 - 1) {
-                        let norm = [0.0, 0.0, -1.0];
-                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                        let cz0 = z0 + jitter_z;
-                        let v0 = Vec3::new(x0, y0, cz0);
-                        let v1 = Vec3::new(x0, y1, cz0);
-                        let v2 = Vec3::new(x1, y1, cz0);
-                        let v3 = Vec3::new(x1, y0, cz0);
-                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                    }
+                // 5. +Z Face (South Wall)
+                let neighbor_zp = grid[gx + (gz + 1) * grid_w + gy * (grid_w * grid_d)];
+                if neighbor_zp == 0 {
+                    let norm = [0.0, 0.0, 1.0];
+                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                    let cz1 = z1 + jitter_z;
+                    let v0 = Vec3::new(x1, y0, cz1);
+                    let v1 = Vec3::new(x1, y1, cz1);
+                    let v2 = Vec3::new(x0, y1, cz1);
+                    let v3 = Vec3::new(x0, y0, cz1);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
+                }
+
+                // 6. -Z Face (North Wall)
+                let neighbor_zm = grid[gx + (gz - 1) * grid_w + gy * (grid_w * grid_d)];
+                if neighbor_zm == 0 {
+                    let norm = [0.0, 0.0, -1.0];
+                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                    let cz0 = z0 + jitter_z;
+                    let v0 = Vec3::new(x0, y0, cz0);
+                    let v1 = Vec3::new(x0, y1, cz0);
+                    let v2 = Vec3::new(x1, y1, cz0);
+                    let v3 = Vec3::new(x1, y0, cz0);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
                 }
             }
         }
@@ -1387,13 +1603,43 @@ mod tests {
 
         // 16x16 quads = 256 quads = 512 triangles = 1536 unshared vertices
         let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).expect("positions must exist");
-        assert_eq!(positions.len(), 1536, "low-poly mesh must have 1536 vertices for 512 unshared triangles");
+        assert!(positions.len() >= 1536, "low-poly mesh must contain surface and bedrock vertices");
 
         let normals = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).expect("normals must exist");
-        assert_eq!(normals.len(), 1536, "flat face normals must exist for every vertex");
+        assert_eq!(normals.len(), positions.len(), "flat face normals must exist for every vertex");
 
         let colors = mesh.attribute(Mesh::ATTRIBUTE_COLOR).expect("colors must exist");
-        assert_eq!(colors.len(), 1536, "stylized vertex colors must exist for low-poly rendering");
+        assert_eq!(colors.len(), positions.len(), "stylized vertex colors must exist for low-poly rendering");
+    }
+
+    #[test]
+    fn test_bedrock_and_subterranean_cave_generation() {
+        let db_chunks = BTreeMap::new();
+        let mesh = mesh_low_poly_terrain_chunk(&db_chunks, 0, 0).expect("mesh must generate");
+        let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).expect("positions must exist");
+        let colors = mesh.attribute(Mesh::ATTRIBUTE_COLOR).expect("colors must exist");
+
+        let mut bedrock_found = false;
+        let mut magma_found = false;
+        if let bevy::render::mesh::VertexAttributeValues::Float32x3(pos_vec) = positions {
+            for pos in pos_vec {
+                if (pos[1] - BEDROCK_ELEVATION).abs() < 1e-3 {
+                    bedrock_found = true;
+                    break;
+                }
+            }
+        }
+        assert!(bedrock_found, "Chunk mesh must generate Bedrock floor at y = -120.0m");
+
+        if let bevy::render::mesh::VertexAttributeValues::Float32x4(col_vec) = colors {
+            for col in col_vec {
+                if col[0] > 1.5 {
+                    magma_found = true;
+                    break;
+                }
+            }
+        }
+        assert!(magma_found, "Bedrock floor must contain glowing HDR emissive magma cracks");
     }
 
     #[test]

@@ -96,18 +96,80 @@ pub fn procedural_stone_or_ore(vx: i32, vy: i32, vz: i32, wy: f32) -> VoxelMater
     }
 }
 
-/// Evaluates if 3D procedural coordinates carve out a natural subterranean cavern / hollow chamber.
-/// Preserves a 4.0m solid surface crust and stops above bedrock.
+/// Evaluates if 3D procedural coordinates carve out an ancient crypt / tomb dungeon chamber or entrance shaft.
+#[inline]
+pub fn is_dungeon_cavity_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
+    let cell_size = 144.0;
+    let cell_x = (wx / cell_size).floor() as i32;
+    let cell_z = (wz / cell_size).floor() as i32;
+
+    // Fixed deterministic offset within each 144m macro-region
+    let center_x = cell_x as f32 * cell_size + 72.0;
+    let center_z = cell_z as f32 * cell_size + 72.0;
+
+    let dx = (wx - center_x).abs();
+    let dz = (wz - center_z).abs();
+
+    // 1. Vertical entrance shaft descending from surface to subterranean chamber
+    if dx < 2.0 && dz < 2.0 && wy <= terrain_height + 0.5 && wy >= -24.0 {
+        return true;
+    }
+
+    // 2. Vaulted Crypt Chamber (12m x 6m x 12m) at elevation -26m to -20m
+    if dx < 6.0 && dz < 6.0 && wy >= -26.0 && wy <= -20.0 {
+        return true;
+    }
+
+    // 3. Subterranean tomb archway connecting to surrounding cave network
+    if dx < 1.5 && dz >= 6.0 && dz < 9.0 && wy >= -26.0 && wy <= -22.0 {
+        return true;
+    }
+
+    false
+}
+
+/// Evaluates if 3D procedural coordinates carve out a natural subterranean cavity:
+/// 1. Hillside cave mouths and 3D cavern chambers
+/// 2. Large ravines / chasm fissures
+/// 3. Designated crypt / tomb dungeon shafts and chambers
 #[inline]
 pub fn is_cave_air_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
-    let cave_crust = 4.0;
-    if wy > terrain_height - cave_crust || wy <= BEDROCK_ELEVATION + 2.0 {
+    if wy <= BEDROCK_ELEVATION + 1.0 {
         return false;
     }
+
+    // 1. Ravine / Chasm Fissures: deep jagged trenches cutting from surface down to -65m
+    let ravine_noise = Perlin::new(1339);
+    let r_sample = ravine_noise.get([wx as f64 * 0.007, wz as f64 * 0.007]);
+    if r_sample.abs() < 0.024 && wy <= terrain_height + 0.5 && wy >= -65.0 {
+        return true;
+    }
+
+    // 2. Designated Crypt / Tomb Dungeons: ancient stone entrance shaft & burial chamber
+    if is_dungeon_cavity_at(wx, wy, wz, terrain_height) {
+        return true;
+    }
+
+    // 3. 3D Subterranean Caverns & Hillside Cave Mouths
     let cave_noise = Perlin::new(1338);
     let freq = 0.035;
     let sample = cave_noise.get([wx as f64 * freq, wy as f64 * freq, wz as f64 * freq]);
-    sample > 0.38
+
+    // Standard deep cave
+    if wy < terrain_height - 3.5 && wy > -118.0 && sample > 0.38 {
+        return true;
+    }
+
+    // Hillside Cave Mouth: breaches the surface on steep hillsides/slopes when cave noise is intense
+    if wy >= terrain_height - 3.5 && wy <= terrain_height + 0.5 && sample > 0.44 {
+        let slope = (crate::get_terrain_height(wx + 1.5, wz) - crate::get_terrain_height(wx - 1.5, wz)).abs()
+            + (crate::get_terrain_height(wx, wz + 1.5) - crate::get_terrain_height(wx, wz - 1.5)).abs();
+        if slope > 0.40 {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Architectural Note: Primary key `chunk_key` maps spatial coordinates via
@@ -727,7 +789,7 @@ pub fn mine_rock_chunk(
     let hit_wx = (hit_vx as f32 + 0.5) * VOXEL_SIZE;
     let hit_wy = (hit_vy as f32 + 0.5) * VOXEL_SIZE;
     let hit_wz = (hit_vz as f32 + 0.5) * VOXEL_SIZE;
-    let hit_mat = get_voxel_at(ctx, hit_wx, hit_wy, hit_wz);
+    let hit_mat = get_voxel_or_procedural_at(ctx, hit_wx, hit_wy, hit_wz);
 
     if hit_mat == VoxelMaterial::Bedrock {
         return Err("Bedrock is indestructible.".to_string());
