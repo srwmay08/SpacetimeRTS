@@ -18,6 +18,7 @@ use crate::ai::{npc_brain, pet_component, peasant, harvestable_corpse};
 use crate::building::structure;
 use crate::voxel;
 use crate::player;
+use spacetime_rts_logic::{EquipmentSlot, ItemKind};
 
 // ----------------------------------------------------------------------------
 // DATA STRUCTURES & SCHEMAS
@@ -156,6 +157,9 @@ pub fn get_standing(a: &Faction, b: &Faction) -> FactionStanding {
 }
 
 pub fn is_weapon_two_handed(weapon_name: &str) -> bool {
+    if let Some(kind) = ItemKind::from_name(weapon_name) {
+        return kind.is_two_handed();
+    }
     matches!(
         weapon_name,
         "Greatsword"
@@ -424,6 +428,13 @@ pub fn equip_weapon(
         return Err(format!("Weapon '{}' not in inventory.", weapon_name));
     }
 
+    let equip_slot = EquipmentSlot::from_str(&slot)
+        .ok_or_else(|| "Invalid slot: Must be 'MainHand' or 'OffHand'.".to_string())?;
+
+    if !equip_slot.is_hand() {
+        return Err("Cannot equip weapon into non-hand slot.".to_string());
+    }
+
     let is_two_handed = is_weapon_two_handed(&weapon_name);
 
     let mut loadout = ctx.db.equipment_loadout().entity_id().find(session.entity_id)
@@ -433,23 +444,25 @@ pub fn equip_weapon(
             off_hand: "None".to_string(),
         });
 
-    log::debug!("Player {} equipped {} in {}", session.entity_id, weapon_name, slot);
+    log::debug!("Player {} equipped {} in {}", session.entity_id, weapon_name, equip_slot.as_str());
 
-    if slot == "MainHand" {
-        if is_two_handed {
-            loadout.off_hand = "None".to_string();
+    match equip_slot {
+        EquipmentSlot::MainHand => {
+            if is_two_handed {
+                loadout.off_hand = "None".to_string();
+            }
+            loadout.main_hand = weapon_name;
         }
-        loadout.main_hand = weapon_name;
-    } else if slot == "OffHand" {
-        if is_two_handed {
-            return Err("Cannot equip a two-handed weapon in off-hand.".to_string());
+        EquipmentSlot::OffHand => {
+            if is_two_handed {
+                return Err("Cannot equip a two-handed weapon in off-hand.".to_string());
+            }
+            if is_weapon_two_handed(&loadout.main_hand) {
+                loadout.main_hand = "None".to_string();
+            }
+            loadout.off_hand = weapon_name;
         }
-        if is_weapon_two_handed(&loadout.main_hand) {
-            loadout.main_hand = "None".to_string();
-        }
-        loadout.off_hand = weapon_name;
-    } else {
-        return Err("Invalid slot: Must be 'MainHand' or 'OffHand'.".to_string());
+        _ => return Err("Invalid hand slot: Must be 'MainHand' or 'OffHand'.".to_string()),
     }
 
     if ctx.db.equipment_loadout().entity_id().find(session.entity_id).is_some() {
@@ -472,12 +485,13 @@ pub fn unequip_weapon(
     let mut loadout = ctx.db.equipment_loadout().entity_id().find(session.entity_id)
         .ok_or_else(|| "Equipment loadout not found.".to_string())?;
 
-    if slot == "MainHand" {
-        loadout.main_hand = "None".to_string();
-    } else if slot == "OffHand" {
-        loadout.off_hand = "None".to_string();
-    } else {
-        return Err("Invalid slot: Must be 'MainHand' or 'OffHand'.".to_string());
+    let equip_slot = EquipmentSlot::from_str(&slot)
+        .ok_or_else(|| "Invalid slot: Must be 'MainHand' or 'OffHand'.".to_string())?;
+
+    match equip_slot {
+        EquipmentSlot::MainHand => loadout.main_hand = "None".to_string(),
+        EquipmentSlot::OffHand => loadout.off_hand = "None".to_string(),
+        _ => return Err("Invalid slot: Must be 'MainHand' or 'OffHand'.".to_string()),
     }
 
     ctx.db.equipment_loadout().entity_id().update(loadout);
@@ -498,9 +512,12 @@ pub fn fire_ranged_weapon(
     let loadout = ctx.db.equipment_loadout().entity_id().find(session.entity_id)
         .ok_or_else(|| "No equipment loadout found.".to_string())?;
 
-    let weapon_name = match slot.as_str() {
-        "MainHand" => &loadout.main_hand,
-        "OffHand" => &loadout.off_hand,
+    let equip_slot = EquipmentSlot::from_str(&slot)
+        .ok_or_else(|| "Invalid hand slot specified.".to_string())?;
+
+    let weapon_name = match equip_slot {
+        EquipmentSlot::MainHand => &loadout.main_hand,
+        EquipmentSlot::OffHand => &loadout.off_hand,
         _ => return Err("Invalid hand slot specified.".to_string()),
     };
 

@@ -79,19 +79,9 @@ pub fn update_interaction_prompt(
     if let Some(hit_data) = hit {
         if let Some(node_id) = resolve_node_id(hit_data.entity, &node_query, &parent_query) {
             if let Some(node) = conn.db.db.resource_node().node_id().find(&node_id) {
-                let prompt = match node.node_type.as_str() {
-                    "Bush" => {
-                        if node.health > 0 { "[E] Pick Berries" } else { "Berries Depleted" }
-                    }
-                    "Branch" => "[E] Pick up Branch",
-                    "Flint" => "[E] Pick up Flint",
-                    "LooseStone" => "[E] Pick up Stone",
-                    "Tree" => "Tree (Left-click with Stone Axe)",
-                    "FallenLog" => "[E] Chop Fallen Log",
-                    "Rubble" => "[E] Mine Rubble",
-                    "Rock" => "Rock (Left-click with Pickaxe)",
-                    _ => "[E] Gather",
-                };
+                let prompt = crate::ui::types::ResourceNodeType::from_str(&node.node_type)
+                    .map(|n| n.interaction_prompt(node.health))
+                    .unwrap_or("[E] Gather");
 
                 if text.sections[0].value != prompt {
                     text.sections[0].value = prompt.to_string();
@@ -112,15 +102,16 @@ pub fn update_interaction_prompt(
             return;
         } else if let Some(struct_id) = resolve_structure_id(hit_data.entity, &structure_query, &door_query, &parent_query) {
             if let Some(s) = conn.db.db.structure().structure_id().find(&struct_id) {
-                let is_hammer = active_item.0.as_deref() == Some("Hammer");
-                let new_prompt = if s.piece_type == "Door" && !s.is_blueprint {
+                let is_hammer = active_item.0.as_deref().and_then(crate::ui::types::ItemKind::from_name) == Some(crate::ui::types::ItemKind::Hammer);
+                let piece = crate::ui::types::StructurePieceType::from_str(&s.piece_type);
+                let new_prompt = if piece == Some(crate::ui::types::StructurePieceType::Door) && !s.is_blueprint {
                     let is_open = conn.db.db.door_state().structure_id().find(&struct_id).map_or(false, |d| d.is_open);
                     if is_open {
                         "[E] Close Door".to_string()
                     } else {
                         "[E] Open Door".to_string()
                     }
-                } else if s.piece_type == "Workbench" && !s.is_blueprint {
+                } else if piece == Some(crate::ui::types::StructurePieceType::Workbench) && !s.is_blueprint {
                     "[E] Open Workbench".to_string()
                 } else if s.is_blueprint {
                     format!("Autobuilding {} ({}%)...", s.piece_type, s.construction_progress)

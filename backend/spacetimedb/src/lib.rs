@@ -29,6 +29,7 @@ use crate::ai::{npc_brain, AiType, BrainState, harvestable_corpse, peasant, pet_
 use crate::building::{structure, Structure};
 use crate::voxel::voxel_chunk;
 use crate::hazard::node_facing;
+use spacetime_rts_logic::{ItemKind, ResourceNodeType};
 
 pub const CANONICAL_ITEMS: &[&str] = &[
     "1h Axe",
@@ -131,28 +132,6 @@ pub enum CameraModeType {
     Rts,
 }
 
-#[derive(SpacetimeType, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ResourceNodeType {
-    Bush,
-    Branch,
-    Flint,
-    LooseStone,
-    Tree,
-    Rock,
-}
-
-impl ResourceNodeType {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Bush => "Bush",
-            Self::Branch => "Branch",
-            Self::Flint => "Flint",
-            Self::LooseStone => "LooseStone",
-            Self::Tree => "Tree",
-            Self::Rock => "Rock",
-        }
-    }
-}
 
 #[table(accessor = global_state, public)]
 #[derive(Clone)]
@@ -1731,12 +1710,16 @@ pub fn interact_node(ctx: &ReducerContext, node_id: u64) -> Result<(), String> {
     let mut node = ctx.db.resource_node().node_id().find(node_id)
         .ok_or_else(|| "Node not found.".to_string())?;
 
-    match node.node_type.as_str() {
-        "Bush" => {
+    let node_kind = ResourceNodeType::from_str(&node.node_type)
+        .ok_or_else(|| "Entity not interactable.".to_string())?;
+
+    match node_kind {
+        ResourceNodeType::Bush => {
             if node.health == 0 {
                 return Err("Berries depleted.".into());
             }
-            add_item(&mut inventory, "Berry", 2);
+            let (drop_item, count) = node_kind.default_drop();
+            add_item(&mut inventory, drop_item.as_str(), count);
             ctx.db.inventory().entity_id().update(inventory);
 
             node.health = 0;
@@ -1751,18 +1734,9 @@ pub fn interact_node(ctx: &ReducerContext, node_id: u64) -> Result<(), String> {
                 });
             }
         }
-        "Branch" => {
-            add_item(&mut inventory, "Branch", 1);
-            ctx.db.inventory().entity_id().update(inventory);
-            ctx.db.resource_node().node_id().delete(node_id);
-        }
-        "Flint" => {
-            add_item(&mut inventory, "Flint", 1);
-            ctx.db.inventory().entity_id().update(inventory);
-            ctx.db.resource_node().node_id().delete(node_id);
-        }
-        "LooseStone" => {
-            add_item(&mut inventory, "LooseStone", 1);
+        ResourceNodeType::Branch | ResourceNodeType::Flint | ResourceNodeType::LooseStone => {
+            let (drop_item, count) = node_kind.default_drop();
+            add_item(&mut inventory, drop_item.as_str(), count);
             ctx.db.inventory().entity_id().update(inventory);
             ctx.db.resource_node().node_id().delete(node_id);
         }
@@ -1952,14 +1926,12 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
     }
 
     if let Some(node) = hit_node {
-        if node.required_tool == "Stone Axe" {
-            let has_axe = inventory.slots.iter().any(|s| s.item_type == "Stone Axe" && s.count > 0);
-            if !has_axe {
-                return Ok(());
-            }
-        } else if node.required_tool == "Pickaxe" {
-            let has_pick = inventory.slots.iter().any(|s| s.item_type == "Pickaxe" && s.count > 0);
-            if !has_pick {
+        let node_kind = ResourceNodeType::from_str(&node.node_type);
+        if let Some(tool_req) = node_kind.and_then(|k| k.required_tool()) {
+            let has_tool = inventory.slots.iter().any(|s| {
+                ItemKind::from_name(&s.item_type).map_or(false, |k| tool_req.is_satisfied_by(k)) && s.count > 0
+            });
+            if !has_tool {
                 return Ok(());
             }
         }
@@ -1980,32 +1952,15 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
             // instantly: it topples away from the logger as a server-scheduled fall hazard
             // (lethal to anything under the trunk at impact) and leaves a harvestable
             // FallenLog ruin. The wood is collected from that log (see hazard.rs).
-            if node.node_type == "Tree" {
+            if node_kind == Some(ResourceNodeType::Tree) {
                 crate::hazard::fell_tree(ctx, &node, px, pz);
                 return Ok(());
             }
 
-            let amount = (match node.node_type.as_str() {
-                "Tree" | "FallenLog" => 6,
-                "Rock" | "Rubble" | "CollapsedRubble" => 4,
-                "Ore:Iron" => 3,
-                "Gem:Ruby" => 1,
-                _ => 1,
-            } as f32 * node.scale).ceil() as u32;
+            let (drop_item, base_count) = node_kind.map(|k| k.default_drop()).unwrap_or((ItemKind::Wood, 1));
+            let amount = (base_count as f32 * node.scale).ceil() as u32;
 
-            let item = match node.node_type.as_str() {
-                "Tree" | "FallenLog" => "Wood",
-                "Rock" | "Rubble" => "Stone",
-                "CollapsedRubble" => "LooseStone",
-                "Ore:Iron" => "IronOre",
-                "Gem:Ruby" => "Ruby",
-                "Branch" => "Branch",
-                "Flint" => "Flint",
-                "LooseStone" => "LooseStone",
-                _ => "Wood",
-            };
-
-            add_item(&mut inventory, item, amount);
+            add_item(&mut inventory, drop_item.as_str(), amount);
 
             // Collapsed rubble node unearths buried treasure
             if node.node_type == "CollapsedRubble" {

@@ -98,237 +98,17 @@ pub const CANONICAL_ITEMS: &[&str] = &[
     "Wooden Shield",
 ];
 
-// ----------------------------------------------------------------------------
-// STRONGLY-TYPED EQUIPMENT SLOTS
-// ----------------------------------------------------------------------------
+#[allow(unused_imports)]
+pub use spacetime_rts_logic::{
+    CombatEventType, EquipmentSlot, ItemKind, ResourceNodeType, StructurePieceType, ToolKind,
+};
 
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum EquipmentSlot {
-    MainHand,
-    OffHand,
-    Head,
-    Chest,
-    Legs,
-    Feet,
+pub trait ItemKindWeaponExt {
+    fn to_weapon_type(&self) -> crate::weapons::WeaponType;
 }
 
-#[allow(dead_code)]
-impl EquipmentSlot {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::MainHand => "MainHand",
-            Self::OffHand => "OffHand",
-            Self::Head => "Head",
-            Self::Chest => "Chest",
-            Self::Legs => "Legs",
-            Self::Feet => "Feet",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "MainHand" | "main_hand" | "main" => Some(Self::MainHand),
-            "OffHand" | "off_hand" | "off" => Some(Self::OffHand),
-            "Head" | "head" | "helmet" => Some(Self::Head),
-            "Chest" | "chest" | "chestplate" => Some(Self::Chest),
-            "Legs" | "legs" | "greaves" => Some(Self::Legs),
-            "Feet" | "feet" | "boots" => Some(Self::Feet),
-            _ => None,
-        }
-    }
-
-    pub fn is_hand(&self) -> bool {
-        matches!(self, Self::MainHand | Self::OffHand)
-    }
-
-    pub fn is_armor(&self) -> bool {
-        matches!(self, Self::Head | Self::Chest | Self::Legs | Self::Feet)
-    }
-}
-
-// ----------------------------------------------------------------------------
-// STRONGLY-TYPED ITEM KIND ENUM
-// ----------------------------------------------------------------------------
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ItemKind {
-    // Core Medieval/Fantasy Weapons (Vertical Slice)
-    Longsword,
-    Greatsword,
-    Handaxe,
-    TwoHandAxe,
-    Warhammer,
-    Maul,
-    Club,
-    Dagger,
-    Spear,
-    Halberd,
-    Bow,
-    Crossbow,
-    Wand,
-    Runestaff,
-    WoodenShield,
-    Hammer,
-    Pickaxe,
-    Torch,
-
-    // Ammunition
-    WoodArrow,
-    FlintArrow,
-    CrossbowBolt,
-
-    // Armor Pieces
-    IronHelmet,
-    IronChestplate,
-    IronGreaves,
-    IronBoots,
-
-    // Containers & Bags
-    SmallPouch,
-    LeatherBag,
-    TravelersBackpack,
-    DragonflightHaversack,
-
-    // Resources & Survival Materials
-    Wood,
-    ElderWood,
-    Branch,
-    Stone,
-    LooseStone,
-    Flint,
-    Resin,
-    IronIngot,
-    LeatherScraps,
-    Berry,
-    CookedMeat,
-    Honey,
-
-    // Unarmed Natural State
-    Unarmed,
-}
-
-#[allow(dead_code)]
-impl ItemKind {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            // Weapons - Blades
-            "1h Sword" | "Sword" | "Longsword" | "Knight's Longsword" => Some(Self::Longsword),
-            "2h Sword" | "Greatsword" | "Two-Handed Sword" | "Zweihander Greatsword" => Some(Self::Greatsword),
-            "Dagger" | "Stiletto Dagger" => Some(Self::Dagger),
-
-            // Weapons - Axes
-            "1h Axe" | "Handaxe" | "Stone Axe" | "Bearded Handaxe" => Some(Self::Handaxe),
-            "2h Axe" | "Battleaxe" | "Greataxe" | "Two-Handed Axe" => Some(Self::TwoHandAxe),
-
-            // Weapons - Bludgeons
-            "Club" | "Knotted War Club" => Some(Self::Club),
-            "1h Hammer" | "Warhammer" | "Flanged Warhammer" => Some(Self::Warhammer),
-            "2h Hammer" | "Maul" | "Two-Handed Hammer" | "Heavy Iron Maul" => Some(Self::Maul),
-
-            // Weapons - Polearms
-            "Spear" | "Polearm Spear" | "Flint Spear" | "Hunting Spear" => Some(Self::Spear),
-            "Halberd" | "Halberd Polearm" => Some(Self::Halberd),
-
-            // Weapons - Ranged & Magic
-            "Bow" | "Long Bow" | "Longbow" | "2h Ranged Long Bow" | "Crude Bow" => Some(Self::Bow),
-            "Crossbow" | "Heavy Crossbow" => Some(Self::Crossbow),
-            "Wand" | "1h Ranged Wand" | "Arcane Wand" => Some(Self::Wand),
-            "Runestaff" | "2h Ranged Runestaff" => Some(Self::Runestaff),
-
-            // Shields & Tools
-            "Wooden Shield" | "Reinforced Wooden Shield" => Some(Self::WoodenShield),
-            "Hammer" | "Construction Hammer" => Some(Self::Hammer),
-            "Pickaxe" | "Mining Pickaxe" => Some(Self::Pickaxe),
-            "Torch" | "Pitch Torch" => Some(Self::Torch),
-
-            // Ammunition
-            "Wood Arrow" => Some(Self::WoodArrow),
-            "Flint Arrow" => Some(Self::FlintArrow),
-            "Crossbow Bolt" => Some(Self::CrossbowBolt),
-
-            // Armor
-            "Iron Helmet" => Some(Self::IronHelmet),
-            "Iron Chestplate" => Some(Self::IronChestplate),
-            "Iron Greaves" => Some(Self::IronGreaves),
-            "Iron Boots" => Some(Self::IronBoots),
-
-            // Bags
-            "Small Pouch" => Some(Self::SmallPouch),
-            "Leather Bag" => Some(Self::LeatherBag),
-            "Traveler's Backpack" => Some(Self::TravelersBackpack),
-            "Dragonflight Haversack" | "Bag of Sewn Evil-Eye" | "Shralok Pack" => Some(Self::DragonflightHaversack),
-
-            // Resources
-            "Wood" => Some(Self::Wood),
-            "Elder Wood" => Some(Self::ElderWood),
-            "Branch" => Some(Self::Branch),
-            "Stone" => Some(Self::Stone),
-            "LooseStone" => Some(Self::LooseStone),
-            "Flint" => Some(Self::Flint),
-            "Resin" => Some(Self::Resin),
-            "Iron Ingot" => Some(Self::IronIngot),
-            "Leather Scraps" => Some(Self::LeatherScraps),
-            "Berry" => Some(Self::Berry),
-            "Cooked Meat" => Some(Self::CookedMeat),
-            "Honey" => Some(Self::Honey),
-
-            // Unarmed
-            "Unarmed" | "None" => Some(Self::Unarmed),
-
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Longsword => "Longsword",
-            Self::Greatsword => "Greatsword",
-            Self::Handaxe => "Handaxe",
-            Self::TwoHandAxe => "TwoHandAxe",
-            Self::Warhammer => "Warhammer",
-            Self::Maul => "Maul",
-            Self::Club => "Club",
-            Self::Dagger => "Dagger",
-            Self::Spear => "Spear",
-            Self::Halberd => "Halberd",
-            Self::Bow => "Bow",
-            Self::Crossbow => "Crossbow",
-            Self::Wand => "Wand",
-            Self::Runestaff => "Runestaff",
-            Self::WoodenShield => "Wooden Shield",
-            Self::Hammer => "Hammer",
-            Self::Pickaxe => "Pickaxe",
-            Self::Torch => "Torch",
-            Self::WoodArrow => "Wood Arrow",
-            Self::FlintArrow => "Flint Arrow",
-            Self::CrossbowBolt => "Crossbow Bolt",
-            Self::IronHelmet => "Iron Helmet",
-            Self::IronChestplate => "Iron Chestplate",
-            Self::IronGreaves => "Iron Greaves",
-            Self::IronBoots => "Iron Boots",
-            Self::SmallPouch => "Small Pouch",
-            Self::LeatherBag => "Leather Bag",
-            Self::TravelersBackpack => "Traveler's Backpack",
-            Self::DragonflightHaversack => "Dragonflight Haversack",
-            Self::Wood => "Wood",
-            Self::ElderWood => "Elder Wood",
-            Self::Branch => "Branch",
-            Self::Stone => "Stone",
-            Self::LooseStone => "LooseStone",
-            Self::Flint => "Flint",
-            Self::Resin => "Resin",
-            Self::IronIngot => "Iron Ingot",
-            Self::LeatherScraps => "Leather Scraps",
-            Self::Berry => "Berry",
-            Self::CookedMeat => "Cooked Meat",
-            Self::Honey => "Honey",
-            Self::Unarmed => "Unarmed",
-        }
-    }
-
-    pub fn to_weapon_type(&self) -> crate::weapons::WeaponType {
+impl ItemKindWeaponExt for ItemKind {
+    fn to_weapon_type(&self) -> crate::weapons::WeaponType {
         match self {
             Self::Longsword => crate::weapons::WeaponType::Longsword,
             Self::Greatsword => crate::weapons::WeaponType::Greatsword,
@@ -342,54 +122,29 @@ impl ItemKind {
             Self::Halberd => crate::weapons::WeaponType::Halberd,
             Self::Bow => crate::weapons::WeaponType::Bow,
             Self::Crossbow => crate::weapons::WeaponType::Crossbow,
+            Self::HandCrossbow => crate::weapons::WeaponType::HandCrossbow,
+            Self::Revolver => crate::weapons::WeaponType::Revolver,
+            Self::Shotgun => crate::weapons::WeaponType::Shotgun,
+            Self::SniperRifle => crate::weapons::WeaponType::SniperRifle,
+            Self::BouncyBombLauncher => crate::weapons::WeaponType::BouncyBombLauncher,
             Self::Wand => crate::weapons::WeaponType::Wand,
+            Self::Orb => crate::weapons::WeaponType::Orb,
             Self::Runestaff => crate::weapons::WeaponType::Runestaff,
             Self::WoodenShield => crate::weapons::WeaponType::WoodenShield,
             Self::Hammer => crate::weapons::WeaponType::Hammer,
             Self::Pickaxe => crate::weapons::WeaponType::Pickaxe,
             Self::Torch => crate::weapons::WeaponType::Torch,
-            Self::Unarmed => crate::weapons::WeaponType::None,
+            Self::Javelin => crate::weapons::WeaponType::Javelin,
+            Self::Trident => crate::weapons::WeaponType::Trident,
+            Self::Rapier => crate::weapons::WeaponType::Rapier,
+            Self::TigerClaws => crate::weapons::WeaponType::TigerClaws,
+            Self::BlackJack => crate::weapons::WeaponType::BlackJack,
+            Self::Cestus => crate::weapons::WeaponType::Cestus,
+            Self::KnuckleDuster => crate::weapons::WeaponType::KnuckleDuster,
+            Self::FryingPan => crate::weapons::WeaponType::FryingPan,
+            Self::HolyMackerel => crate::weapons::WeaponType::HolyMackerel,
             _ => crate::weapons::WeaponType::None,
         }
-    }
-
-    pub fn is_two_handed(&self) -> bool {
-        matches!(
-            self,
-            Self::Greatsword
-                | Self::TwoHandAxe
-                | Self::Maul
-                | Self::Spear
-                | Self::Halberd
-                | Self::Bow
-                | Self::Crossbow
-                | Self::Runestaff
-        )
-    }
-
-    pub fn is_bag(&self) -> bool {
-        matches!(
-            self,
-            Self::SmallPouch
-                | Self::LeatherBag
-                | Self::TravelersBackpack
-                | Self::DragonflightHaversack
-        )
-    }
-
-    pub fn is_ammo(&self) -> bool {
-        matches!(self, Self::WoodArrow | Self::FlintArrow | Self::CrossbowBolt)
-    }
-
-    pub fn is_armor(&self) -> bool {
-        matches!(
-            self,
-            Self::IronHelmet | Self::IronChestplate | Self::IronGreaves | Self::IronBoots
-        )
-    }
-
-    pub fn is_tool(&self) -> bool {
-        matches!(self, Self::Hammer | Self::Pickaxe | Self::Torch)
     }
 }
 

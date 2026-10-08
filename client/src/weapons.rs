@@ -125,31 +125,15 @@ impl WeaponType {
         !matches!(self.archetype(), WeaponArchetype::ArchivedVariant)
     }
 
-    /// Parses item name through strongly-typed ItemKind first, falling back to legacy aliases.
+    /// Parses item name through strongly-typed ItemKind with complete alias coverage.
     pub fn from_item_name(item: Option<&str>) -> Self {
         let Some(name) = item else { return Self::None; };
-        if let Some(kind) = crate::ui::types::ItemKind::from_name(name) {
-            kind.to_weapon_type()
-        } else {
-            match name {
-                "1h Ranged Hand Crossbow" | "Hand Crossbow" => Self::HandCrossbow,
-                "1h Ranged Revolver" | "Revolver" => Self::Revolver,
-                "2h Ranged Shotgun" | "Shotgun" => Self::Shotgun,
-                "2h Ranged Sniper Rifle" | "Sniper Rifle" => Self::SniperRifle,
-                "Bouncy Bomb Launcher" => Self::BouncyBombLauncher,
-                "1h Ranged Orb" | "Orb" => Self::Orb,
-                "Polearm Trident" | "Trident" => Self::Trident,
-                "Polearm Javelin - Thrown" | "Polearm Javelin" | "Javelin" | "Thrown Javelin" => Self::Javelin,
-                "Rapier" => Self::Rapier,
-                "1h Tiger Claws" | "Tiger Claws" => Self::TigerClaws,
-                "1h Black Jack" | "Black Jack" | "Blackjack" => Self::BlackJack,
-                "Cestus" => Self::Cestus,
-                "Knuckle-Duster" => Self::KnuckleDuster,
-                "Frying Pan" => Self::FryingPan,
-                "Holy Mackerel" => Self::HolyMackerel,
-                _ => Self::None,
-            }
-        }
+        crate::ui::types::ItemKind::from_name(name)
+            .map(|k| {
+                use crate::ui::types::ItemKindWeaponExt;
+                k.to_weapon_type()
+            })
+            .unwrap_or(Self::None)
     }
 
     #[allow(dead_code)]
