@@ -8,6 +8,7 @@ mod network;
 mod input;
 mod camera;
 mod terrain;
+pub mod subterrain;
 mod ui;
 mod prediction;
 mod building; 

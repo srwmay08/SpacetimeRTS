@@ -44,108 +44,16 @@ pub const LOW_POLY_UNLOAD_RADIUS_CHUNKS: i32 = 15; // 240m radius (immediately b
 pub const LOW_POLY_NEAR_COLLIDER_DIST_SQ: f32 = 48.0 * 48.0; // 48m radius for Avian3D physics colliders
 pub const LOW_POLY_FAR_COLLIDER_UNLOAD_SQ: f32 = 56.0 * 56.0; // 56m radius hysteresis for collider unloading
 
-// Material constants for procedural voxel generation
+// Material constants & procedural noise evaluators re-exported from subterrain module
 pub const MAT_GRASS: u8 = 0;
-pub const MAT_DIRT: u8 = 1;
-pub const MAT_STONE: u8 = 2;
-pub const MAT_SAND: u8 = 3;
-pub const MAT_WOOD: u8 = 4;
-pub const MAT_REINFORCED_STONE: u8 = 5;
-pub const MAT_BEDROCK: u8 = 6;
-pub const MAT_IRON_ORE: u8 = 7;
-pub const MAT_RUBY: u8 = 8;
-pub const MAT_COLLAPSED_RUBBLE: u8 = 9;
-
-pub const BEDROCK_ELEVATION: f32 = -120.0;
-
-/// Evaluates procedural rock strata to embed Iron ore veins and deep Ruby crystal pockets
-/// via deterministic 3D integer coordinate hashing.
-#[inline]
-pub fn procedural_stone_or_ore(vx: i32, vy: i32, vz: i32, wy: f32) -> u8 {
-    let hash = ((vx.wrapping_mul(73856093) ^ vy.wrapping_mul(19349663) ^ vz.wrapping_mul(83492791)) as u32) % 10000;
-    if wy <= -50.0 && wy >= -115.0 && hash < 120 {
-        MAT_RUBY
-    } else if wy <= -5.0 && wy >= -75.0 && hash < 450 {
-        MAT_IRON_ORE
-    } else {
-        MAT_STONE
-    }
-}
-
-/// Evaluates if 3D procedural coordinates carve out an ancient crypt / tomb dungeon chamber or entrance shaft.
-#[inline]
-pub fn is_dungeon_cavity_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
-    let cell_size = 144.0;
-    let cell_x = (wx / cell_size).floor() as i32;
-    let cell_z = (wz / cell_size).floor() as i32;
-
-    let center_x = cell_x as f32 * cell_size + 72.0;
-    let center_z = cell_z as f32 * cell_size + 72.0;
-
-    let dx = (wx - center_x).abs();
-    let dz = (wz - center_z).abs();
-
-    // 1. Vertical entrance shaft descending from surface to subterranean chamber
-    if dx < 2.0 && dz < 2.0 && wy <= terrain_height + 0.5 && wy >= -24.0 {
-        return true;
-    }
-
-    // 2. Vaulted Crypt Chamber (12m x 6m x 12m) at elevation -26m to -20m
-    if dx < 6.0 && dz < 6.0 && wy >= -26.0 && wy <= -20.0 {
-        return true;
-    }
-
-    // 3. Subterranean tomb archway connecting to surrounding cave network
-    if dx < 1.5 && dz >= 6.0 && dz < 9.0 && wy >= -26.0 && wy <= -22.0 {
-        return true;
-    }
-
-    false
-}
-
-/// Evaluates if 3D procedural coordinates carve out a natural subterranean cavity:
-/// 1. Hillside cave mouths and 3D cavern chambers
-/// 2. Large ravines / chasm fissures
-/// 3. Designated crypt / tomb dungeon shafts and chambers
-#[inline]
-pub fn is_cave_air_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
-    if wy <= BEDROCK_ELEVATION + 1.0 {
-        return false;
-    }
-
-    // 1. Ravine / Chasm Fissures: deep jagged trenches cutting from surface down to -65m
-    let ravine_noise = Perlin::new(1339);
-    let r_sample = ravine_noise.get([wx as f64 * 0.007, wz as f64 * 0.007]);
-    if r_sample.abs() < 0.024 && wy <= terrain_height + 0.5 && wy >= -65.0 {
-        return true;
-    }
-
-    // 2. Designated Crypt / Tomb Dungeons: ancient stone entrance shaft & burial chamber
-    if is_dungeon_cavity_at(wx, wy, wz, terrain_height) {
-        return true;
-    }
-
-    // 3. 3D Subterranean Caverns & Hillside Cave Mouths
-    let cave_noise = Perlin::new(1338);
-    let freq = 0.035;
-    let sample = cave_noise.get([wx as f64 * freq, wy as f64 * freq, wz as f64 * freq]);
-
-    // Standard deep cave
-    if wy < terrain_height - 3.5 && wy > -118.0 && sample > 0.38 {
-        return true;
-    }
-
-    // Hillside Cave Mouth: breaches the surface on steep hillsides/slopes when cave noise is intense
-    if wy >= terrain_height - 3.5 && wy <= terrain_height + 0.5 && sample > 0.44 {
-        let slope = (compute_canonical_terrain_height(wx + 1.5, wz) - compute_canonical_terrain_height(wx - 1.5, wz)).abs()
-            + (compute_canonical_terrain_height(wx, wz + 1.5) - compute_canonical_terrain_height(wx, wz - 1.5)).abs();
-        if slope > 0.40 {
-            return true;
-        }
-    }
-
-    false
-}
+#[allow(unused_imports)]
+pub use crate::subterrain::{
+    MAT_DIRT, MAT_STONE, MAT_SAND, MAT_WOOD, MAT_REINFORCED_STONE,
+    MAT_BEDROCK, MAT_IRON_ORE, MAT_RUBY, MAT_COLLAPSED_RUBBLE, BEDROCK_ELEVATION,
+    is_dungeon_cavity_at, is_cave_air_at, procedural_stone_or_ore,
+    SubterrainChunkVisual, SubterrainChunkHasCollider, SubterrainChunkMarker,
+    mesh_subterrain_chunk,
+};
 
 // ----------------------------------------------------------------------------
 // PROCEDURAL TERRAIN CONFIGURATION & SAMPLER
@@ -482,157 +390,6 @@ pub fn unpack_chunk_key(key: u64) -> (i32, i32, i32) {
     (x_bits as i32, y_bits as i32, z_bits as i32)
 }
 
-/// Generates a low-poly faceted terrain mesh for a chunk at grid coordinates (cx, cz).
-/// Every triangle has separate unshared vertices and a flat geometric face normal,
-/// producing a distinctive, crisp low-poly aesthetic rather than smooth curves or Minecraft blocks.
-/// Helper checking if a neighbor voxel is solid.
-/// Checks the local chunk, adjacent loaded db_chunks, or falls back to procedural terrain and cave noise.
-#[allow(dead_code)]
-fn is_solid_voxel_neighbor(
-    db_chunks: &BTreeMap<u64, VoxelChunk>,
-    cx: i32,
-    cy: i32,
-    cz: i32,
-    lx: i32,
-    ly: i32,
-    lz: i32,
-) -> bool {
-    let mut n_cx = cx;
-    let mut n_cy = cy;
-    let mut n_cz = cz;
-    let mut n_lx = lx;
-    let mut n_ly = ly;
-    let mut n_lz = lz;
-
-    if n_lx < 0 {
-        n_cx -= 1;
-        n_lx += 16;
-    } else if n_lx >= 16 {
-        n_cx += 1;
-        n_lx -= 16;
-    }
-
-    if n_ly < 0 {
-        n_cy -= 1;
-        n_ly += 16;
-    } else if n_ly >= 16 {
-        n_cy += 1;
-        n_ly -= 16;
-    }
-
-    if n_lz < 0 {
-        n_cz -= 1;
-        n_lz += 16;
-    } else if n_lz >= 16 {
-        n_cz += 1;
-        n_lz -= 16;
-    }
-
-    let key = pack_chunk_key(n_cx, n_cy, n_cz);
-    if let Some(chunk) = db_chunks.get(&key) {
-        if n_lx >= 0 && n_lx < 16 && n_ly >= 0 && n_ly < 16 && n_lz >= 0 && n_lz < 16 {
-            let idx = n_lx as usize + (n_ly as usize * 16) + (n_lz as usize * 256);
-            if let Some(&mat) = chunk.voxels.get(idx) {
-                return mat != 0;
-            }
-        }
-        return false;
-    }
-
-    // Procedural evaluation for un-persisted neighbors
-    let wx = (n_cx * 16 + n_lx) as f32 * VOXEL_SIZE;
-    let wy = (n_cy * 16 + n_ly) as f32 * VOXEL_SIZE;
-    let wz = (n_cz * 16 + n_lz) as f32 * VOXEL_SIZE;
-
-    if wy <= BEDROCK_ELEVATION {
-        return true;
-    }
-    let h = compute_canonical_terrain_height(wx, wz);
-    if wy > h {
-        return false;
-    }
-    if is_cave_air_at(wx, wy, wz, h) {
-        return false;
-    }
-    true
-}
-
-fn get_voxel_face_color(mat: u8, is_top: bool, wy: f32, vx: i32, vy: i32, vz: i32) -> [f32; 4] {
-    let facet_hash = (((vx.wrapping_mul(37) ^ vy.wrapping_mul(59) ^ vz.wrapping_mul(71)) as f32 * 0.17).sin().abs() * 43758.5453).fract();
-    let facet_variation = (facet_hash - 0.5) * 0.09;
-
-    if is_top && wy >= 2.0 && wy <= 15.5 {
-        let r = (0.28 + facet_variation * 0.8).clamp(0.18, 0.40);
-        let g = (0.64 + facet_variation).clamp(0.48, 0.76);
-        let b = (0.28 + facet_variation * 0.8).clamp(0.18, 0.40);
-        [r, g, b, 1.0] // Meadow grass top
-    } else {
-        match mat {
-            1 => {
-                // Dirt
-                let r = (0.46 + facet_variation).clamp(0.35, 0.60);
-                let g = (0.38 + facet_variation).clamp(0.30, 0.50);
-                let b = (0.28 + facet_variation).clamp(0.20, 0.40);
-                [r, g, b, 1.0]
-            }
-            2 => {
-                // Stone: Low-poly BlendSwap #9440 faceted rock
-                let r = (0.42 + facet_variation).clamp(0.28, 0.56);
-                let g = (0.44 + facet_variation).clamp(0.30, 0.58);
-                let b = (0.46 + facet_variation * 0.8).clamp(0.32, 0.60);
-                [r, g, b, 1.0]
-            }
-            3 => {
-                // Sand
-                let r = (0.78 + facet_variation).clamp(0.65, 0.90);
-                let g = (0.72 + facet_variation).clamp(0.60, 0.85);
-                let b = (0.52 + facet_variation).clamp(0.40, 0.70);
-                [r, g, b, 1.0]
-            }
-            4 => [0.55, 0.40, 0.25, 1.0], // Wood
-            5 => {
-                // Reinforced stone
-                let r = (0.35 + facet_variation).clamp(0.25, 0.45);
-                let g = (0.35 + facet_variation).clamp(0.25, 0.45);
-                let b = (0.40 + facet_variation).clamp(0.30, 0.50);
-                [r, g, b, 1.0]
-            }
-            6 => {
-                // Bedrock: Dark basalt/obsidian with glowing magma cracks
-                let wx = vx as f32;
-                let wz = vz as f32;
-                let magma_seed = ((wx * 0.28).sin() * (wz * 0.28).cos()).abs();
-                if magma_seed > 0.65 {
-                    [2.2, 0.45, 0.08, 1.0] // Glowing magma crack (HDR emissive bloom)
-                } else {
-                    [0.10, 0.10, 0.13, 1.0] // Dark basalt / obsidian
-                }
-            }
-            7 => {
-                // IronOre: Rich oxidized metallic flecks
-                let r = (0.64 + facet_variation * 1.2).clamp(0.46, 0.80);
-                let g = (0.38 + facet_variation * 0.6).clamp(0.26, 0.50);
-                let b = (0.24 + facet_variation * 0.4).clamp(0.14, 0.36);
-                [r, g, b, 1.0]
-            }
-            8 => {
-                // Ruby: Vivid crystalline facet (HDR emissive bloom)
-                let r = (2.2 + facet_variation * 0.8).clamp(1.8, 2.6);
-                let g = (0.20 + facet_variation * 0.4).clamp(0.10, 0.35);
-                let b = (0.45 + facet_variation * 0.6).clamp(0.30, 0.60);
-                [r, g, b, 1.0]
-            }
-            9 => {
-                // CollapsedRubble
-                let r = (0.40 + facet_variation).clamp(0.28, 0.52);
-                let g = (0.36 + facet_variation).clamp(0.24, 0.48);
-                let b = (0.34 + facet_variation).clamp(0.22, 0.46);
-                [r, g, b, 1.0]
-            }
-            _ => [0.42, 0.44, 0.46, 1.0],
-        }
-    }
-}
 
 #[inline]
 fn push_unshared_face(
@@ -692,10 +449,10 @@ fn push_unshared_face(
     *curr_idx += 3;
 }
 
-/// Generates a low-poly faceted terrain mesh for a chunk at grid coordinates (cx, cz).
-/// Combines canonical unmined low-poly surface facets with 3D Face-Culled cubic blocks
-/// (flat 0° floors, 90° sheer walls, and 0° ceilings) for excavated volumes.
-pub fn mesh_low_poly_terrain_chunk(
+/// Generates a low-poly faceted surface mesh for a chunk at grid coordinates (cx, cz).
+/// Generates 16x16 faceted surface quads. When a surface quad is excavated to enter a tunnel,
+/// carves an inward-beveled threshold ramp that smoothly blends from ground elevation into the descending tunnel mouth.
+pub fn mesh_low_poly_surface_chunk(
     db_chunks: &BTreeMap<u64, VoxelChunk>,
     cx: i32,
     cz: i32,
@@ -703,19 +460,54 @@ pub fn mesh_low_poly_terrain_chunk(
     let chunk_base_x = cx as f32 * LOW_POLY_CHUNK_SPAN;
     let chunk_base_z = cz as f32 * LOW_POLY_CHUNK_SPAN;
 
-    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(2048);
-    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(2048);
-    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(2048);
-    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(2048);
-    let mut indices: Vec<u32> = Vec::with_capacity(2048);
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(1024);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(1024);
+    let mut colors: Vec<[f32; 4]> = Vec::with_capacity(1024);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(1024);
+    let mut indices: Vec<u32> = Vec::with_capacity(1024);
     let mut curr_idx = 0u32;
 
     let column_chunks: Vec<&VoxelChunk> = db_chunks.values()
         .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
         .collect();
 
-    // 1. Surface Quads (16x16 grid, 1.0m quads):
-    // For each quad (qx, qz), render surface terrain unless this quad has been excavated.
+    // Check excavated status for 16x16 surface quad grid
+    let mut excavated = [[false; 16]; 16];
+    for qz in 0..16 {
+        for qx in 0..16 {
+            let x0 = qx as f32 * LOW_POLY_QUAD_SIZE;
+            let z0 = qz as f32 * LOW_POLY_QUAD_SIZE;
+            let min_y = get_terrain_height(chunk_base_x + x0, chunk_base_z + z0)
+                .min(get_terrain_height(chunk_base_x + x0 + LOW_POLY_QUAD_SIZE, chunk_base_z + z0))
+                .min(get_terrain_height(chunk_base_x + x0, chunk_base_z + z0 + LOW_POLY_QUAD_SIZE))
+                .min(get_terrain_height(chunk_base_x + x0 + LOW_POLY_QUAD_SIZE, chunk_base_z + z0 + LOW_POLY_QUAD_SIZE));
+            let sub_surface_vy = (min_y - 0.25).floor() as i32;
+
+            if !column_chunks.is_empty() {
+                for check_vy in [sub_surface_vy, sub_surface_vy - 1] {
+                    let check_cy = check_vy.div_euclid(16);
+                    let check_ly = check_vy.rem_euclid(16) as usize;
+                    if let Some(chunk) = column_chunks.iter().find(|c| c.chunk_y == check_cy) {
+                        let idx = qx + (check_ly * 16) + (qz * 256);
+                        if let Some(&mat) = chunk.voxels.get(idx) {
+                            if mat == 0 {
+                                excavated[qz][qx] = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let quad_center_x = chunk_base_x + (qx as f32 + 0.5) * LOW_POLY_QUAD_SIZE;
+            let quad_center_z = chunk_base_z + (qz as f32 + 0.5) * LOW_POLY_QUAD_SIZE;
+            if is_cave_air_at(quad_center_x, min_y - 0.25, quad_center_z, min_y) {
+                excavated[qz][qx] = true;
+            }
+        }
+    }
+
+    // 1. Surface Quads & Beveled Threshold Ramps
     for qz in 0..16 {
         for qx in 0..16 {
             let x0 = qx as f32 * LOW_POLY_QUAD_SIZE;
@@ -728,35 +520,8 @@ pub fn mesh_low_poly_terrain_chunk(
             let y01 = get_terrain_height(chunk_base_x + x0, chunk_base_z + z1);
             let y11 = get_terrain_height(chunk_base_x + x1, chunk_base_z + z1);
 
-            let min_y = y00.min(y10).min(y01).min(y11);
-            let sub_surface_vy = (min_y - 0.25).floor() as i32;
-
-            // Check if surface block is genuinely excavated (mined to air below natural terrain)
-            let mut surface_excavated = false;
-            if !column_chunks.is_empty() {
-                for check_vy in [sub_surface_vy, sub_surface_vy - 1] {
-                    let check_cy = check_vy.div_euclid(16);
-                    let check_ly = check_vy.rem_euclid(16) as usize;
-                    if let Some(chunk) = column_chunks.iter().find(|c| c.chunk_y == check_cy) {
-                        let idx = qx + (check_ly * 16) + (qz * 256);
-                        if let Some(&mat) = chunk.voxels.get(idx) {
-                            if mat == 0 {
-                                surface_excavated = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Natural cave mouths, chasms, and dungeon entrance shafts carve through surface quads
-            let quad_center_x = chunk_base_x + (qx as f32 + 0.5) * LOW_POLY_QUAD_SIZE;
-            let quad_center_z = chunk_base_z + (qz as f32 + 0.5) * LOW_POLY_QUAD_SIZE;
-            if is_cave_air_at(quad_center_x, min_y - 0.25, quad_center_z, min_y) {
-                surface_excavated = true;
-            }
-
-            if !surface_excavated {
+            if !excavated[qz][qx] {
+                // Render standard low-poly surface quad
                 let v00 = Vec3::new(x0, y00, z0);
                 let v10 = Vec3::new(x1, y10, z0);
                 let v01 = Vec3::new(x0, y01, z1);
@@ -835,13 +600,98 @@ pub fn mesh_low_poly_terrain_chunk(
                     indices.push(curr_idx + 2);
                     curr_idx += 3;
                 }
+            } else {
+                // Excavated quad: Carve an inward-beveled threshold ramp that smoothly blends from
+                // ground elevation into the descending tunnel mouth for any solid adjacent borders!
+                let min_y = y00.min(y10).min(y01).min(y11);
+                let floor_y = (min_y - 1.2).max(BEDROCK_ELEVATION);
+                let bevel_inward = 0.35f32;
+                let ramp_color = [0.44, 0.40, 0.34, 1.0]; // Carved earth/stone threshold
+
+                // West border
+                if qx == 0 || !excavated[qz][qx - 1] {
+                    let v_top_0 = Vec3::new(x0, y00, z0);
+                    let v_top_1 = Vec3::new(x0, y01, z1);
+                    let v_bot_0 = Vec3::new(x0 + bevel_inward, floor_y, z0);
+                    let v_bot_1 = Vec3::new(x0 + bevel_inward, floor_y, z1);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v_top_0, v_top_1, v_bot_1, v_bot_0, [0.0, 1.0, 0.0], ramp_color, chunk_base_x, chunk_base_z);
+                }
+                // East border
+                if qx == 15 || !excavated[qz][qx + 1] {
+                    let v_top_0 = Vec3::new(x1, y11, z1);
+                    let v_top_1 = Vec3::new(x1, y10, z0);
+                    let v_bot_0 = Vec3::new(x1 - bevel_inward, floor_y, z1);
+                    let v_bot_1 = Vec3::new(x1 - bevel_inward, floor_y, z0);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v_top_0, v_top_1, v_bot_1, v_bot_0, [0.0, 1.0, 0.0], ramp_color, chunk_base_x, chunk_base_z);
+                }
+                // North border
+                if qz == 0 || !excavated[qz - 1][qx] {
+                    let v_top_0 = Vec3::new(x1, y10, z0);
+                    let v_top_1 = Vec3::new(x0, y00, z0);
+                    let v_bot_0 = Vec3::new(x1, floor_y, z0 + bevel_inward);
+                    let v_bot_1 = Vec3::new(x0, floor_y, z0 + bevel_inward);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v_top_0, v_top_1, v_bot_1, v_bot_0, [0.0, 1.0, 0.0], ramp_color, chunk_base_x, chunk_base_z);
+                }
+                // South border
+                if qz == 15 || !excavated[qz + 1][qx] {
+                    let v_top_0 = Vec3::new(x0, y01, z1);
+                    let v_top_1 = Vec3::new(x1, y11, z1);
+                    let v_bot_0 = Vec3::new(x0, floor_y, z1 - bevel_inward);
+                    let v_bot_1 = Vec3::new(x1, floor_y, z1 - bevel_inward);
+                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v_top_0, v_top_1, v_bot_1, v_bot_0, [0.0, 1.0, 0.0], ramp_color, chunk_base_x, chunk_base_z);
+                }
             }
         }
     }
 
-    // 2. Indestructible Bedrock Floor (-120.0m):
-    // Renders a low-poly faceted basalt/obsidian floor with glowing subterranean magma cracks
-    // across the entire chunk footprint.
+    if positions.is_empty() {
+        return None;
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
+    Some(mesh)
+}
+
+/// Generates a complete low-poly faceted terrain mesh combining the surface mesh
+/// with indestructible bedrock floor and active Voronoi smashed-cuboid subterranean strata.
+pub fn mesh_low_poly_terrain_chunk(
+    db_chunks: &BTreeMap<u64, VoxelChunk>,
+    cx: i32,
+    cz: i32,
+) -> Option<Mesh> {
+    let mut surface_mesh = mesh_low_poly_surface_chunk(db_chunks, cx, cz)?;
+
+    let chunk_base_x = cx as f32 * LOW_POLY_CHUNK_SPAN;
+    let chunk_base_z = cz as f32 * LOW_POLY_CHUNK_SPAN;
+
+    let mut positions = match surface_mesh.remove_attribute(Mesh::ATTRIBUTE_POSITION)? {
+        bevy::render::mesh::VertexAttributeValues::Float32x3(v) => v,
+        _ => return Some(surface_mesh),
+    };
+    let mut normals = match surface_mesh.remove_attribute(Mesh::ATTRIBUTE_NORMAL)? {
+        bevy::render::mesh::VertexAttributeValues::Float32x3(v) => v,
+        _ => return None,
+    };
+    let mut colors = match surface_mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR)? {
+        bevy::render::mesh::VertexAttributeValues::Float32x4(v) => v,
+        _ => return None,
+    };
+    let mut uvs = match surface_mesh.remove_attribute(Mesh::ATTRIBUTE_UV_0)? {
+        bevy::render::mesh::VertexAttributeValues::Float32x2(v) => v,
+        _ => return None,
+    };
+    let mut indices: Vec<u32> = match surface_mesh.indices()? {
+        Indices::U32(ind) => ind.clone(),
+        _ => return None,
+    };
+    let mut curr_idx = positions.len() as u32;
+
+    // 2. Indestructible Bedrock Floor (-120.0m)
     for bz in 0..16 {
         for bx in 0..16 {
             let x0 = bx as f32 * LOW_POLY_QUAD_SIZE;
@@ -854,9 +704,9 @@ pub fn mesh_low_poly_terrain_chunk(
             let world_bz = (cz * 16 + bz as i32) as f32 + 0.5;
             let magma_seed = ((world_bx * 0.28).sin() * (world_bz * 0.28).cos()).abs();
             let col = if magma_seed > 0.65 {
-                [2.2, 0.45, 0.08, 1.0] // Glowing magma crack (HDR emissive bloom)
+                [2.2, 0.45, 0.08, 1.0]
             } else {
-                [0.10, 0.10, 0.13, 1.0] // Dark basalt / obsidian
+                [0.10, 0.10, 0.13, 1.0]
             };
 
             let v0 = Vec3::new(x0, by, z0);
@@ -882,201 +732,27 @@ pub fn mesh_low_poly_terrain_chunk(
         }
     }
 
-    // 3. Subterranean Cave Chambers, Chasms & Excavated Volumes:
-    // Fast 18x18 bounded neighborhood grid evaluating natural caves and SpacetimeDB mining deltas.
-    let base_vy = BEDROCK_ELEVATION as i32; // -120
-    let mut chunk_max_h = BEDROCK_ELEVATION;
-    for pz in 0..=16 {
-        for px in 0..=16 {
-            chunk_max_h = chunk_max_h.max(get_terrain_height(chunk_base_x + px as f32, chunk_base_z + pz as f32));
-        }
-    }
-    let chunk_max_vy = (chunk_max_h + 1.0).ceil() as i32;
-    let y_span = (chunk_max_vy - base_vy + 2).max(1) as usize;
-
-    let grid_w = 18usize;
-    let grid_d = 18usize;
-    let mut grid = vec![0u8; grid_w * grid_d * y_span];
-
-    for pz in -1..=16i32 {
-        for px in -1..=16i32 {
-            let wx = chunk_base_x + px as f32 + 0.5;
-            let wz = chunk_base_z + pz as f32 + 0.5;
-            let terrain_h = get_terrain_height(wx, wz);
-            let surface_vy = terrain_h.floor() as i32;
-
-            let gx = (px + 1) as usize;
-            let gz = (pz + 1) as usize;
-
-            for vy in base_vy..=surface_vy {
-                let gy = (vy - base_vy) as usize;
-                let idx = gx + gz * grid_w + gy * (grid_w * grid_d);
-
-                if vy <= base_vy {
-                    grid[idx] = MAT_BEDROCK;
-                    continue;
-                }
-
-                // Check db_chunks first
-                let vx = cx * 16 + px;
-                let vz = cz * 16 + pz;
-                let cx_v = vx.div_euclid(16);
-                let cy_v = vy.div_euclid(16);
-                let cz_v = vz.div_euclid(16);
-                let key = pack_chunk_key(cx_v, cy_v, cz_v);
-
-                if let Some(chunk) = db_chunks.get(&key) {
-                    let lx = vx.rem_euclid(16) as usize;
-                    let ly = vy.rem_euclid(16) as usize;
-                    let lz = vz.rem_euclid(16) as usize;
-                    let c_idx = lx + ly * 16 + lz * 256;
-                    if let Some(&mat) = chunk.voxels.get(c_idx) {
-                        grid[idx] = mat;
-                        continue;
+    // 3. Append subterranean smashed-cuboid Voronoi cavity if active
+    let center_y = get_terrain_height(chunk_base_x + 8.0, chunk_base_z + 8.0);
+    if let Some(sub_mesh) = mesh_subterrain_chunk(db_chunks, cx, cz, center_y) {
+        if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(sub_pos)) = sub_mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(sub_norm)) = sub_mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
+                if let Some(bevy::render::mesh::VertexAttributeValues::Float32x4(sub_col)) = sub_mesh.attribute(Mesh::ATTRIBUTE_COLOR) {
+                    if let Some(bevy::render::mesh::VertexAttributeValues::Float32x2(sub_uvs)) = sub_mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
+                        if let Some(Indices::U32(sub_idx)) = sub_mesh.indices() {
+                            let base_idx = positions.len() as u32;
+                            positions.extend_from_slice(sub_pos);
+                            normals.extend_from_slice(sub_norm);
+                            colors.extend_from_slice(sub_col);
+                            uvs.extend_from_slice(sub_uvs);
+                            for &idx in sub_idx {
+                                indices.push(base_idx + idx);
+                            }
+                        }
                     }
-                }
-
-                // Unmined procedural terrain
-                let wy = vy as f32 + 0.5;
-                if is_cave_air_at(wx, wy, wz, terrain_h) {
-                    grid[idx] = 0; // Air
-                } else if wy > terrain_h - 3.0 {
-                    grid[idx] = MAT_DIRT;
-                } else {
-                    grid[idx] = procedural_stone_or_ore(vx, vy, vz, wy);
                 }
             }
         }
-    }
-
-    for lz in 0..16usize {
-        for lx in 0..16usize {
-            let gx = lx + 1;
-            let gz = lz + 1;
-            let quad_h = get_terrain_height(chunk_base_x + lx as f32 + 0.5, chunk_base_z + lz as f32 + 0.5);
-            let surface_vy = quad_h.floor() as i32;
-
-            let quad_center_x = chunk_base_x + lx as f32 + 0.5;
-            let quad_center_z = chunk_base_z + lz as f32 + 0.5;
-            let surface_open = is_cave_air_at(quad_center_x, quad_h - 0.25, quad_center_z, quad_h)
-                || {
-                    let check_cy = surface_vy.div_euclid(16);
-                    let check_ly = surface_vy.rem_euclid(16) as usize;
-                    if let Some(c) = column_chunks.iter().find(|c| c.chunk_y == check_cy) {
-                        c.voxels.get(lx + check_ly * 16 + lz * 256).copied().unwrap_or(1) == 0
-                    } else {
-                        false
-                    }
-                };
-
-            for vy in (base_vy + 1)..=surface_vy {
-                let gy = (vy - base_vy) as usize;
-                let idx = gx + gz * grid_w + gy * (grid_w * grid_d);
-                let mat = grid[idx];
-                if mat == 0 {
-                    continue;
-                }
-
-                let vx = cx * 16 + lx as i32;
-                let vz = cz * 16 + lz as i32;
-                let wy = vy as f32;
-
-                let x0 = lx as f32 * LOW_POLY_QUAD_SIZE;
-                let x1 = x0 + LOW_POLY_QUAD_SIZE;
-                let y0 = wy;
-                let y1 = y0 + LOW_POLY_QUAD_SIZE;
-                let z0 = lz as f32 * LOW_POLY_QUAD_SIZE;
-                let z1 = z0 + LOW_POLY_QUAD_SIZE;
-
-                let facet_seed = (vx.wrapping_mul(73856093) ^ vy.wrapping_mul(19349663) ^ vz.wrapping_mul(83492791)) as u32;
-                let jitter_x = ((facet_seed % 101) as f32 / 100.0 - 0.5) * 0.035;
-                let jitter_z = (((facet_seed >> 8) % 101) as f32 / 100.0 - 0.5) * 0.035;
-                let jitter_ceil = (((facet_seed >> 16) % 101) as f32 / 100.0 - 0.5) * 0.025;
-
-                // 1. +Y Face (Top - Walkable cave floor)
-                let neighbor_yp = if gy + 1 < y_span { grid[gx + gz * grid_w + (gy + 1) * (grid_w * grid_d)] } else { 0 };
-                if neighbor_yp == 0 {
-                    if vy < surface_vy || surface_open {
-                        let norm = [0.0, 1.0, 0.0];
-                        let col = get_voxel_face_color(mat, true, y1, vx, vy, vz);
-                        let v0 = Vec3::new(x0, y1, z0);
-                        let v1 = Vec3::new(x0, y1, z1);
-                        let v2 = Vec3::new(x1, y1, z1);
-                        let v3 = Vec3::new(x1, y1, z0);
-                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                    }
-                }
-
-                // 2. -Y Face (Bottom - Cave ceiling)
-                let neighbor_ym = if gy > 0 { grid[gx + gz * grid_w + (gy - 1) * (grid_w * grid_d)] } else { MAT_BEDROCK };
-                if neighbor_ym == 0 {
-                    let norm = [0.0, -1.0, 0.0];
-                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                    let cy = y0 + jitter_ceil;
-                    let v0 = Vec3::new(x0, cy, z0);
-                    let v1 = Vec3::new(x1, cy, z0);
-                    let v2 = Vec3::new(x1, cy, z1);
-                    let v3 = Vec3::new(x0, cy, z1);
-                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                }
-
-                // 3. +X Face (East Wall)
-                let neighbor_xp = grid[(gx + 1) + gz * grid_w + gy * (grid_w * grid_d)];
-                if neighbor_xp == 0 {
-                    let norm = [1.0, 0.0, 0.0];
-                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                    let cx1 = x1 + jitter_x;
-                    let v0 = Vec3::new(cx1, y0, z0);
-                    let v1 = Vec3::new(cx1, y1, z0);
-                    let v2 = Vec3::new(cx1, y1, z1);
-                    let v3 = Vec3::new(cx1, y0, z1);
-                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                }
-
-                // 4. -X Face (West Wall)
-                let neighbor_xm = grid[(gx - 1) + gz * grid_w + gy * (grid_w * grid_d)];
-                if neighbor_xm == 0 {
-                    let norm = [-1.0, 0.0, 0.0];
-                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                    let cx0 = x0 + jitter_x;
-                    let v0 = Vec3::new(cx0, y0, z1);
-                    let v1 = Vec3::new(cx0, y1, z1);
-                    let v2 = Vec3::new(cx0, y1, z0);
-                    let v3 = Vec3::new(cx0, y0, z0);
-                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                }
-
-                // 5. +Z Face (South Wall)
-                let neighbor_zp = grid[gx + (gz + 1) * grid_w + gy * (grid_w * grid_d)];
-                if neighbor_zp == 0 {
-                    let norm = [0.0, 0.0, 1.0];
-                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                    let cz1 = z1 + jitter_z;
-                    let v0 = Vec3::new(x1, y0, cz1);
-                    let v1 = Vec3::new(x1, y1, cz1);
-                    let v2 = Vec3::new(x0, y1, cz1);
-                    let v3 = Vec3::new(x0, y0, cz1);
-                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                }
-
-                // 6. -Z Face (North Wall)
-                let neighbor_zm = grid[gx + (gz - 1) * grid_w + gy * (grid_w * grid_d)];
-                if neighbor_zm == 0 {
-                    let norm = [0.0, 0.0, -1.0];
-                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                    let cz0 = z0 + jitter_z;
-                    let v0 = Vec3::new(x0, y0, cz0);
-                    let v1 = Vec3::new(x0, y1, cz0);
-                    let v2 = Vec3::new(x1, y1, cz0);
-                    let v3 = Vec3::new(x1, y0, cz0);
-                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                }
-            }
-        }
-    }
-
-    if positions.is_empty() {
-        return None;
     }
 
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
@@ -1111,10 +787,12 @@ pub fn update_infinite_voxel_terrain(
     conn: Res<SpacetimeConnection>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut chunk_query: Query<(Entity, &mut VoxelChunkMarker, &mut Handle<Mesh>, Option<&TerrainChunkHasCollider>)>,
+    mut chunk_query: Query<(Entity, &mut VoxelChunkMarker, &mut Handle<Mesh>, Option<&TerrainChunkHasCollider>), (With<TerrainChunkVisual>, Without<SubterrainChunkVisual>)>,
+    mut sub_chunk_query: Query<(Entity, &mut SubterrainChunkMarker, &mut Handle<Mesh>, Option<&SubterrainChunkHasCollider>), (With<SubterrainChunkVisual>, Without<TerrainChunkVisual>)>,
     render_settings: Option<Res<crate::spellbook::TerrainRenderSettings>>,
     mut default_material: Local<Option<Handle<StandardMaterial>>>,
     mut loaded_entities: Local<BTreeMap<u64, (Entity, u64, bool)>>,
+    mut loaded_sub_entities: Local<BTreeMap<u64, (Entity, u64, bool)>>,
     mut last_player_chunk: Local<Option<(i32, i32)>>,
 ) {
     if USE_VOXEL_WORLD_TERRAIN {
@@ -1149,14 +827,18 @@ pub fn update_infinite_voxel_terrain(
         loaded_entities.insert(marker.chunk_key, (entity, marker.last_modified_tick, has_col.is_some()));
     }
 
-    // 1. Check existing loaded chunks for server modifications or collider distance transitions
+    loaded_sub_entities.clear();
+    for (entity, marker, _, has_col) in sub_chunk_query.iter() {
+        loaded_sub_entities.insert(marker.chunk_key, (entity, marker.last_modified_tick, has_col.is_some()));
+    }
+
+    // 1. Check existing loaded surface chunks for modifications or collider distance transitions
     for (&key, &(existing_entity, last_tick, has_collider)) in loaded_entities.iter() {
         let (cx, _cy, cz) = unpack_chunk_key(key);
         let chunk_center_x = (cx as f32 + 0.5) * chunk_world_span;
         let chunk_center_z = (cz as f32 + 0.5) * chunk_world_span;
         let dist_sq = (chunk_center_x - p_pos.x).powi(2) + (chunk_center_z - p_pos.z).powi(2);
 
-        // Check if any server voxel chunk within this 16m chunk column has been modified
         let server_mod_tick = db_chunks.values()
             .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
             .map(|c| c.last_modified_tick)
@@ -1165,7 +847,7 @@ pub fn update_infinite_voxel_terrain(
 
         let editor_dirty = crate::zone_editor::consume_chunk_dirty(cx, cz);
         if server_mod_tick > last_tick || editor_dirty {
-            if let Some(new_mesh) = mesh_low_poly_terrain_chunk(&db_chunks, cx, cz) {
+            if let Some(new_mesh) = mesh_low_poly_surface_chunk(&db_chunks, cx, cz) {
                 let mesh_handle = meshes.add(new_mesh.clone());
                 let mut entity_cmds = commands.entity(existing_entity);
                 entity_cmds.insert(mesh_handle);
@@ -1177,12 +859,11 @@ pub fn update_infinite_voxel_terrain(
                 if let Ok((_, mut marker, _, _)) = chunk_query.get_mut(existing_entity) {
                     marker.last_modified_tick = server_mod_tick;
                 }
-                // Requirement 5: Remove ChunkHasGrass so sync_chunk_grass despawns floating grass and regenerates without mined areas
                 entity_cmds.remove::<crate::grass::ChunkHasGrass>();
             }
         }
 
-        // Dynamic collider management: add colliders near player, strip distant colliders
+        // Dynamic surface collider management
         if has_collider && dist_sq > LOW_POLY_FAR_COLLIDER_UNLOAD_SQ {
             commands.entity(existing_entity).remove::<Collider>().remove::<TerrainChunkHasCollider>();
         } else if !has_collider && dist_sq <= LOW_POLY_NEAR_COLLIDER_DIST_SQ {
@@ -1190,6 +871,52 @@ pub fn update_infinite_voxel_terrain(
                 if let Some(mesh) = meshes.get(&*mesh_handle) {
                     if let Some(col) = Collider::trimesh_from_mesh(mesh) {
                         commands.entity(existing_entity).insert((col, TerrainChunkHasCollider));
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Check existing loaded subterrain chunks for server modifications or collider transitions
+    for (&key, &(existing_entity, last_tick, has_collider)) in loaded_sub_entities.iter() {
+        let (cx, _cy, cz) = unpack_chunk_key(key);
+        let chunk_center_x = (cx as f32 + 0.5) * chunk_world_span;
+        let chunk_center_z = (cz as f32 + 0.5) * chunk_world_span;
+        let dist_sq = (chunk_center_x - p_pos.x).powi(2) + (chunk_center_z - p_pos.z).powi(2);
+
+        let server_mod_tick = db_chunks.values()
+            .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
+            .map(|c| c.last_modified_tick)
+            .max()
+            .unwrap_or(0);
+
+        if server_mod_tick > last_tick {
+            if let Some(new_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz, p_pos.y) {
+                let mesh_handle = meshes.add(new_mesh.clone());
+                let mut entity_cmds = commands.entity(existing_entity);
+                entity_cmds.insert(mesh_handle);
+                if dist_sq <= LOW_POLY_NEAR_COLLIDER_DIST_SQ {
+                    if let Some(col) = Collider::trimesh_from_mesh(&new_mesh) {
+                        entity_cmds.insert((col, SubterrainChunkHasCollider));
+                    }
+                }
+                if let Ok((_, mut marker, _, _)) = sub_chunk_query.get_mut(existing_entity) {
+                    marker.last_modified_tick = server_mod_tick;
+                }
+            } else {
+                // Cavity no longer within active window, despawn
+                commands.entity(existing_entity).despawn_recursive();
+            }
+        }
+
+        // Subterrain collider management
+        if has_collider && dist_sq > LOW_POLY_FAR_COLLIDER_UNLOAD_SQ {
+            commands.entity(existing_entity).remove::<Collider>().remove::<SubterrainChunkHasCollider>();
+        } else if !has_collider && dist_sq <= LOW_POLY_NEAR_COLLIDER_DIST_SQ {
+            if let Ok((_, _, mesh_handle, _)) = sub_chunk_query.get(existing_entity) {
+                if let Some(mesh) = meshes.get(&*mesh_handle) {
+                    if let Some(col) = Collider::trimesh_from_mesh(mesh) {
+                        commands.entity(existing_entity).insert((col, SubterrainChunkHasCollider));
                     }
                 }
             }
@@ -1206,7 +933,7 @@ pub fn update_infinite_voxel_terrain(
         (LOW_POLY_RADIUS_CHUNKS, LOW_POLY_UNLOAD_RADIUS_CHUNKS, 32)
     };
 
-    // 2. Collect candidate unspawned chunks within view radius
+    // 3. Collect candidate unspawned chunks within view radius
     let mut candidates: Vec<(i32, i32, i32, u64)> = Vec::with_capacity(512);
     let radius_sq = view_radius * view_radius;
 
@@ -1226,11 +953,8 @@ pub fn update_infinite_voxel_terrain(
         }
     }
 
-    // STRICT DISTANCE PRIORITY:
-    // Closest chunks to player (dist_sq = 0, then 1, 2, 4, 5...) are sorted first.
     candidates.sort_by_key(|c| c.2);
 
-    // Guaranteed immediate frame-1 loading for the player's immediate 3x3 surrounding chunks (dist_sq <= 2)
     let immediate_unspawned = candidates.iter().take_while(|c| c.2 <= 2).count();
     let max_spawn_this_frame = spawn_batch.max(immediate_unspawned);
 
@@ -1240,20 +964,21 @@ pub fn update_infinite_voxel_terrain(
             .map(|c| c.last_modified_tick)
             .max()
             .unwrap_or(0);
-        if let Some(new_mesh) = mesh_low_poly_terrain_chunk(&db_chunks, cx, cz) {
-            let dist_world_sq = dist_sq_chunks as f32 * chunk_world_span * chunk_world_span;
-            let needs_collider = dist_world_sq <= LOW_POLY_NEAR_COLLIDER_DIST_SQ;
 
+        let chunk_world_x = cx as f32 * chunk_world_span;
+        let chunk_world_z = cz as f32 * chunk_world_span;
+        let dist_world_sq = dist_sq_chunks as f32 * chunk_world_span * chunk_world_span;
+        let needs_collider = dist_world_sq <= LOW_POLY_NEAR_COLLIDER_DIST_SQ;
+
+        // A. Spawn Surface Chunk Entity
+        if let Some(surface_mesh) = mesh_low_poly_surface_chunk(&db_chunks, cx, cz) {
             let collider = if needs_collider {
-                Collider::trimesh_from_mesh(&new_mesh)
+                Collider::trimesh_from_mesh(&surface_mesh)
             } else {
                 None
             };
 
-            let mesh_handle = meshes.add(new_mesh);
-            let chunk_world_x = cx as f32 * chunk_world_span;
-            let chunk_world_z = cz as f32 * chunk_world_span;
-
+            let mesh_handle = meshes.add(surface_mesh);
             let mut entity_cmds = commands.spawn((
                 PbrBundle {
                     mesh: mesh_handle,
@@ -1277,17 +1002,49 @@ pub fn update_infinite_voxel_terrain(
                 entity_cmds.insert((col, TerrainChunkHasCollider));
             }
         }
+
+        // B. Spawn Subterrain Chunk Entity on-demand if cave or excavated tunnel exists within active vertical window
+        if !loaded_sub_entities.contains_key(&key) {
+            if let Some(sub_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz, p_pos.y) {
+                let sub_collider = if needs_collider {
+                    Collider::trimesh_from_mesh(&sub_mesh)
+                } else {
+                    None
+                };
+
+                let sub_mesh_handle = meshes.add(sub_mesh);
+                let mut sub_entity_cmds = commands.spawn((
+                    PbrBundle {
+                        mesh: sub_mesh_handle,
+                        material: mat_handle.clone(),
+                        transform: BevyTransform::from_xyz(chunk_world_x, 0.0, chunk_world_z),
+                        ..default()
+                    },
+                    RigidBody::Static,
+                    CollisionLayers::new([GameLayer::Terrain], [GameLayer::Default, GameLayer::Unit, GameLayer::Environment]),
+                    SubterrainChunkMarker {
+                        chunk_key: key,
+                        chunk_x: cx,
+                        chunk_z: cz,
+                        last_modified_tick: db_mod_tick,
+                        center_window_y: p_pos.y.floor() as i32,
+                    },
+                    SubterrainChunkVisual,
+                ));
+
+                if let Some(col) = sub_collider {
+                    sub_entity_cmds.insert((col, SubterrainChunkHasCollider));
+                }
+            }
+        }
     }
 
-    // 3. Despawn distant chunks beyond fog visual limit efficiently
-    // In Bevy atmospheric linear fog, terrain reaches 100% opacity at visible_range_meters (230.4m default).
-    // Any chunk whose nearest boundary to the player exceeds the fog limit is completely invisible.
+    // 4. Despawn distant surface & subterrain chunks beyond fog visual limit efficiently
     let fog_visual_limit_meters = if let Some(ref rs) = render_settings {
         if rs.spawn_full_zone { 64.0 * chunk_world_span } else { rs.visible_range_meters.max(160.0) }
     } else {
         230.4
     };
-    // Include an 8.0m (half-chunk) hysteresis buffer to prevent boundary thrashing while moving
     let discard_dist_meters = fog_visual_limit_meters + (chunk_world_span * 0.5);
     let discard_dist_sq = discard_dist_meters * discard_dist_meters;
     let unload_radius_sq = unload_radius * unload_radius;
@@ -1297,13 +1054,35 @@ pub fn update_infinite_voxel_terrain(
         let dx = cx - p_cx;
         let dz = cz - p_cz;
 
-        // Fast integer reject for chunks beyond grid unload radius
         if dx * dx + dz * dz > unload_radius_sq {
             commands.entity(entity).despawn_recursive();
             continue;
         }
 
-        // Efficient spatial bounding check: calculate squared distance to closest point on chunk AABB
+        let chunk_min_x = cx as f32 * chunk_world_span;
+        let chunk_max_x = chunk_min_x + chunk_world_span;
+        let chunk_min_z = cz as f32 * chunk_world_span;
+        let chunk_max_z = chunk_min_z + chunk_world_span;
+
+        let closest_x = p_pos.x.clamp(chunk_min_x, chunk_max_x);
+        let closest_z = p_pos.z.clamp(chunk_min_z, chunk_max_z);
+        let dist_to_chunk_sq = (closest_x - p_pos.x).powi(2) + (closest_z - p_pos.z).powi(2);
+
+        if dist_to_chunk_sq > discard_dist_sq {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+
+    for (&key, &(entity, _, _)) in loaded_sub_entities.iter() {
+        let (cx, _cy, cz) = unpack_chunk_key(key);
+        let dx = cx - p_cx;
+        let dz = cz - p_cz;
+
+        if dx * dx + dz * dz > unload_radius_sq {
+            commands.entity(entity).despawn_recursive();
+            continue;
+        }
+
         let chunk_min_x = cx as f32 * chunk_world_span;
         let chunk_max_x = chunk_min_x + chunk_world_span;
         let chunk_min_z = cz as f32 * chunk_world_span;

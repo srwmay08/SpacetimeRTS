@@ -128,6 +128,21 @@ pub fn is_dungeon_cavity_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> b
     false
 }
 
+use std::sync::OnceLock;
+
+static RAVINE_PERLIN: OnceLock<Perlin> = OnceLock::new();
+static CAVE_PERLIN: OnceLock<Perlin> = OnceLock::new();
+
+#[inline]
+pub fn get_ravine_perlin() -> &'static Perlin {
+    RAVINE_PERLIN.get_or_init(|| Perlin::new(1339))
+}
+
+#[inline]
+pub fn get_cave_perlin() -> &'static Perlin {
+    CAVE_PERLIN.get_or_init(|| Perlin::new(1338))
+}
+
 /// Evaluates if 3D procedural coordinates carve out a natural subterranean cavity:
 /// 1. Hillside cave mouths and 3D cavern chambers
 /// 2. Large ravines / chasm fissures
@@ -139,7 +154,7 @@ pub fn is_cave_air_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
     }
 
     // 1. Ravine / Chasm Fissures: deep jagged trenches cutting from surface down to -65m
-    let ravine_noise = Perlin::new(1339);
+    let ravine_noise = get_ravine_perlin();
     let r_sample = ravine_noise.get([wx as f64 * 0.007, wz as f64 * 0.007]);
     if r_sample.abs() < 0.024 && wy <= terrain_height + 0.5 && wy >= -65.0 {
         return true;
@@ -151,7 +166,7 @@ pub fn is_cave_air_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> bool {
     }
 
     // 3. 3D Subterranean Caverns & Hillside Cave Mouths
-    let cave_noise = Perlin::new(1338);
+    let cave_noise = get_cave_perlin();
     let freq = 0.035;
     let sample = cave_noise.get([wx as f64 * freq, wy as f64 * freq, wz as f64 * freq]);
 

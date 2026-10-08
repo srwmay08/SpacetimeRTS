@@ -11,6 +11,7 @@ pub mod network;
 pub mod input;
 pub mod camera;
 pub mod terrain;
+pub mod subterrain;
 pub mod ui;
 pub mod prediction;
 pub mod building; 
