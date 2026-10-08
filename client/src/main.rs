@@ -360,3 +360,101 @@ fn update_diagnostic_overlay(
 fn track_telemetry_metrics(time: Res<Time>, mut telemetry: ResMut<TelemetryTracker>) {
     telemetry.last_frame_time = time.elapsed_seconds_f64();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_all_registered_systems_query_disjointness() {
+        let mut world = World::new();
+
+        macro_rules! check_system {
+            ($sys:expr) => {
+                let mut system = IntoSystem::into_system($sys);
+                system.initialize(&mut world);
+            };
+        }
+
+        check_system!(toggle_console);
+        check_system!(handle_console_input);
+        check_system!(toggle_celestial_hud_hotkey);
+        check_system!(toggle_perspective);
+        check_system!(hotbar_input_system);
+        check_system!(input_router_system);
+        check_system!(toggle_tuner_ui);
+        check_system!(handle_tuner_interactions);
+        check_system!(toggle_weapon_hand_system);
+        check_system!(weapon_reload_input_system);
+        check_system!(tactical_ability_input_system);
+        check_system!(toggle_crosshair_menu);
+        check_system!(handle_crosshair_menu_interactions);
+        check_system!(handle_inventory_drag_and_drop);
+        check_system!(handle_paperdoll_interactions);
+        check_system!(handle_build_menu_selection);
+        check_system!(handle_crafting_interaction);
+        check_system!(toggle_build_mode);
+        check_system!(toggle_inventory_ui);
+        check_system!(action_bar_interaction);
+        check_system!(toggle_action_bar_visibility);
+        check_system!(sync_transforms);
+        check_system!(update_spatial_subscriptions);
+        check_system!(sync_logical_components);
+        check_system!(sync_resource_nodes);
+        check_system!(sync_structures);
+        check_system!(sync_door_states);
+        check_system!(sync_fall_hazards);
+        check_system!(sync_active_projectiles);
+        check_system!(sync_third_person_weapon_render_layers);
+        check_system!(context_aware_action_dispatcher);
+        check_system!(process_combat_events);
+        check_system!(update_tactical_abilities_system);
+        check_system!(update_arrow_projectiles);
+        check_system!(interior_occlusion_culling_system);
+        check_system!(update_infinite_voxel_terrain);
+        check_system!(spawn_modular_building_system);
+        check_system!(handle_building_destruction);
+        check_system!(spawn_or_update_view_model_weapon);
+        check_system!(update_sparring_goblin_ai);
+        check_system!(update_training_dummy_wobble);
+        check_system!(update_falling_trees);
+        check_system!(update_tree_colors);
+        check_system!(update_berry_visuals);
+        check_system!(update_fall_hazards);
+        check_system!(tick_voxel_gibs);
+        check_system!(tick_particles);
+        check_system!(update_rune_light_decay);
+        check_system!(player_movement_system);
+        check_system!(rts_navmesh_movement_system);
+        check_system!(update_camera_transition);
+        check_system!(animate_doors);
+        check_system!(animate_weapon_viewmodel);
+        check_system!(animate_third_person_weapons);
+        check_system!(update_building_destruction_animations);
+        check_system!(fps_look);
+        check_system!(update_camera_fov);
+        check_system!(rts_camera_controller);
+        check_system!(update_build_hologram);
+        check_system!(update_build_ui);
+        check_system!(update_comic_damage_floaters);
+        check_system!(update_building_destruction_visuals);
+        check_system!(visualize_selection);
+        check_system!(update_floating_health_bars);
+        check_system!(update_drag_ghost_ui);
+        check_system!(update_marquee_ui);
+        check_system!(update_console_ui);
+        check_system!(update_tuner_ui_display);
+        check_system!(update_hotbar_ui);
+        check_system!(update_hud_health_bar);
+        check_system!(update_celestial_hud_ui);
+        check_system!(update_interaction_prompt);
+        check_system!(update_inventory_ui);
+        check_system!(update_weapon_hud);
+        check_system!(update_reticle_crosshair_ui);
+        check_system!(update_reticle_adjacent_hud);
+        check_system!(update_reticle_abilities_and_hitmarker);
+        check_system!(update_diagnostic_overlay);
+        check_system!(track_telemetry_metrics);
+        check_system!(enforce_fps_limit);
+    }
+}
