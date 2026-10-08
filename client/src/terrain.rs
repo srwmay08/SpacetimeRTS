@@ -264,7 +264,7 @@ impl Plugin for TerrainPlugin {
 
 #[allow(dead_code)]
 pub const VOXEL_CHUNK_SIZE: usize = 16;
-pub const VOXEL_SIZE: f32 = 0.25;
+pub const VOXEL_SIZE: f32 = 1.0;
 
 
 static PERLIN: OnceLock<Perlin> = OnceLock::new();
@@ -290,8 +290,8 @@ pub fn get_perlin() -> &'static Perlin {
 
 // Cached terrain height lookup — quantizes to 0.25m grid for cache efficiency
 pub fn get_terrain_height(x: f32, z: f32) -> f32 {
-    let qx = (x / VOXEL_SIZE).round() as i32;
-    let qz = (z / VOXEL_SIZE).round() as i32;
+    let qx = (x * 4.0).round() as i32;
+    let qz = (z * 4.0).round() as i32;
     let delta = crate::zone_editor::get_sculpted_height_delta(x, z);
     
     // Try cache first (read lock)
@@ -391,45 +391,45 @@ pub fn unpack_chunk_key(key: u64) -> (i32, i32, i32) {
 /// Checks the local chunk, adjacent loaded db_chunks, or falls back to procedural terrain and cave noise.
 fn is_solid_voxel_neighbor(
     db_chunks: &BTreeMap<u64, VoxelChunk>,
-    scx: i32,
-    scy: i32,
-    scz: i32,
+    cx: i32,
+    cy: i32,
+    cz: i32,
     lx: i32,
     ly: i32,
     lz: i32,
 ) -> bool {
-    let mut n_scx = scx;
-    let mut n_scy = scy;
-    let mut n_scz = scz;
+    let mut n_cx = cx;
+    let mut n_cy = cy;
+    let mut n_cz = cz;
     let mut n_lx = lx;
     let mut n_ly = ly;
     let mut n_lz = lz;
 
     if n_lx < 0 {
-        n_scx -= 1;
+        n_cx -= 1;
         n_lx += 16;
     } else if n_lx >= 16 {
-        n_scx += 1;
+        n_cx += 1;
         n_lx -= 16;
     }
 
     if n_ly < 0 {
-        n_scy -= 1;
+        n_cy -= 1;
         n_ly += 16;
     } else if n_ly >= 16 {
-        n_scy += 1;
+        n_cy += 1;
         n_ly -= 16;
     }
 
     if n_lz < 0 {
-        n_scz -= 1;
+        n_cz -= 1;
         n_lz += 16;
     } else if n_lz >= 16 {
-        n_scz += 1;
+        n_cz += 1;
         n_lz -= 16;
     }
 
-    let key = pack_chunk_key(n_scx, n_scy, n_scz);
+    let key = pack_chunk_key(n_cx, n_cy, n_cz);
     if let Some(chunk) = db_chunks.get(&key) {
         if n_lx >= 0 && n_lx < 16 && n_ly >= 0 && n_ly < 16 && n_lz >= 0 && n_lz < 16 {
             let idx = n_lx as usize + (n_ly as usize * 16) + (n_lz as usize * 256);
@@ -441,9 +441,9 @@ fn is_solid_voxel_neighbor(
     }
 
     // Procedural evaluation for un-persisted neighbors
-    let wx = (n_scx * 16 + n_lx) as f32 * VOXEL_SIZE;
-    let wy = (n_scy * 16 + n_ly) as f32 * VOXEL_SIZE;
-    let wz = (n_scz * 16 + n_lz) as f32 * VOXEL_SIZE;
+    let wx = (n_cx * 16 + n_lx) as f32 * VOXEL_SIZE;
+    let wy = (n_cy * 16 + n_ly) as f32 * VOXEL_SIZE;
+    let wz = (n_cz * 16 + n_lz) as f32 * VOXEL_SIZE;
 
     if wy <= -120.0 {
         return true;
@@ -606,225 +606,250 @@ pub fn mesh_low_poly_terrain_chunk(
     let mut indices: Vec<u32> = Vec::with_capacity(2048);
     let mut curr_idx = 0u32;
 
-    // Process the sixteen 4m x 4m sub-cells in this 16m chunk
-    for sub_cz in 0..4 {
-        for sub_cx in 0..4 {
-            let scx = cx * 4 + sub_cx;
-            let scz = cz * 4 + sub_cz;
+    let column_chunks: Vec<&VoxelChunk> = db_chunks.values()
+        .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
+        .collect();
 
-            let column_chunks: Vec<&VoxelChunk> = db_chunks.values()
-                .filter(|c| c.chunk_x == scx && c.chunk_z == scz)
-                .collect();
+    // 1. Surface Quads (16x16 grid, 1.0m quads):
+    // For each quad (qx, qz), render surface terrain unless this quad has been excavated.
+    for qz in 0..16 {
+        for qx in 0..16 {
+            let x0 = qx as f32 * LOW_POLY_QUAD_SIZE;
+            let x1 = (qx + 1) as f32 * LOW_POLY_QUAD_SIZE;
+            let z0 = qz as f32 * LOW_POLY_QUAD_SIZE;
+            let z1 = (qz + 1) as f32 * LOW_POLY_QUAD_SIZE;
 
-            if column_chunks.is_empty() {
-                // 1. Unmodified sub-cell: flat-shaded low-poly surface facets (4x4 quads of 1.0m each)
-                for lz_q in 0..4 {
-                    for lx_q in 0..4 {
-                        let qx = sub_cx * 4 + lx_q;
-                        let qz = sub_cz * 4 + lz_q;
+            let y00 = get_terrain_height(chunk_base_x + x0, chunk_base_z + z0);
+            let y10 = get_terrain_height(chunk_base_x + x1, chunk_base_z + z0);
+            let y01 = get_terrain_height(chunk_base_x + x0, chunk_base_z + z1);
+            let y11 = get_terrain_height(chunk_base_x + x1, chunk_base_z + z1);
 
-                        let x0 = qx as f32 * LOW_POLY_QUAD_SIZE;
-                        let x1 = (qx + 1) as f32 * LOW_POLY_QUAD_SIZE;
-                        let z0 = qz as f32 * LOW_POLY_QUAD_SIZE;
-                        let z1 = (qz + 1) as f32 * LOW_POLY_QUAD_SIZE;
+            let avg_y = (y00 + y10 + y01 + y11) * 0.25;
+            let surface_vy = (avg_y / VOXEL_SIZE).floor() as i32;
+            let surface_cy = surface_vy.div_euclid(16);
+            let surface_ly = surface_vy.rem_euclid(16) as usize;
 
-                        let y00 = get_terrain_height(chunk_base_x + x0, chunk_base_z + z0);
-                        let y10 = get_terrain_height(chunk_base_x + x1, chunk_base_z + z0);
-                        let y01 = get_terrain_height(chunk_base_x + x0, chunk_base_z + z1);
-                        let y11 = get_terrain_height(chunk_base_x + x1, chunk_base_z + z1);
-
-                        let v00 = Vec3::new(x0, y00, z0);
-                        let v10 = Vec3::new(x1, y10, z0);
-                        let v01 = Vec3::new(x0, y01, z1);
-                        let v11 = Vec3::new(x1, y11, z1);
-
-                        let (tri1, tri2) = if (qx + qz) % 2 == 0 {
-                            ((v00, v01, v11), (v00, v11, v10))
-                        } else {
-                            ((v00, v01, v10), (v10, v01, v11))
-                        };
-
-                        for tri in [tri1, tri2] {
-                            let va = tri.0;
-                            let vb = tri.1;
-                            let vc = tri.2;
-
-                            let edge1 = vb - va;
-                            let edge2 = vc - va;
-                            let normal = edge1.cross(edge2).normalize_or_zero();
-
-                            let world_centroid = Vec3::new(
-                                chunk_base_x + (va.x + vb.x + vc.x) / 3.0,
-                                (va.y + vb.y + vc.y) / 3.0,
-                                chunk_base_z + (va.z + vb.z + vc.z) / 3.0,
-                            );
-
-                            let facet_hash = ((world_centroid.x * 37.17 + world_centroid.z * 53.31).sin().abs() * 43758.5453).fract();
-                            let facet_variation = (facet_hash - 0.5) * 0.08;
-
-                            let color = if let Some(painted) = crate::zone_editor::get_painted_biome_color(world_centroid.x, world_centroid.z) {
-                                painted
-                            } else if world_centroid.y > 15.5 {
-                                let snow_white = 0.94 + facet_variation * 0.5;
-                                [snow_white, snow_white + 0.02, snow_white + 0.05, 1.0]
-                            } else if normal.y < 0.60 {
-                                let r = (0.42 + facet_variation).clamp(0.25, 0.65);
-                                let g = (0.44 + facet_variation).clamp(0.25, 0.65);
-                                let b = (0.46 + facet_variation).clamp(0.25, 0.65);
-                                [r, g, b, 1.0]
-                            } else if world_centroid.y < 2.5 && normal.y >= 0.60 {
-                                let r = (0.78 + facet_variation).clamp(0.65, 0.90);
-                                let g = (0.72 + facet_variation).clamp(0.60, 0.85);
-                                let b = (0.52 + facet_variation).clamp(0.40, 0.70);
-                                [r, g, b, 1.0]
-                            } else if normal.y < 0.72 {
-                                let r = (0.46 + facet_variation).clamp(0.35, 0.60);
-                                let g = (0.38 + facet_variation).clamp(0.30, 0.50);
-                                let b = (0.28 + facet_variation).clamp(0.20, 0.40);
-                                [r, g, b, 1.0]
-                            } else {
-                                let r = (0.28 + facet_variation * 0.8).clamp(0.18, 0.40);
-                                let g = (0.64 + facet_variation).clamp(0.48, 0.76);
-                                let b = (0.28 + facet_variation * 0.8).clamp(0.18, 0.40);
-                                [r, g, b, 1.0]
-                            };
-
-                            let norm_arr = normal.to_array();
-                            positions.push(va.to_array());
-                            positions.push(vb.to_array());
-                            positions.push(vc.to_array());
-
-                            normals.push(norm_arr);
-                            normals.push(norm_arr);
-                            normals.push(norm_arr);
-
-                            colors.push(color);
-                            colors.push(color);
-                            colors.push(color);
-
-                            uvs.push([(chunk_base_x + va.x) * 0.1, (chunk_base_z + va.z) * 0.1]);
-                            uvs.push([(chunk_base_x + vb.x) * 0.1, (chunk_base_z + vb.z) * 0.1]);
-                            uvs.push([(chunk_base_x + vc.x) * 0.1, (chunk_base_z + vc.z) * 0.1]);
-
-                            indices.push(curr_idx);
-                            indices.push(curr_idx + 1);
-                            indices.push(curr_idx + 2);
-                            curr_idx += 3;
+            // Check if surface block is excavated (mined to air)
+            let mut surface_excavated = false;
+            if !column_chunks.is_empty() {
+                if let Some(chunk) = column_chunks.iter().find(|c| c.chunk_y == surface_cy) {
+                    let idx = qx + (surface_ly * 16) + (qz * 256);
+                    if let Some(&mat) = chunk.voxels.get(idx) {
+                        if mat == 0 {
+                            surface_excavated = true;
                         }
                     }
                 }
-            } else {
-                // 2. Excavated / volumetric column: 3D Face-Culling Mesher with Staggered Faceted Cuboids
-                // Emits horizontal walkable floors (0°), sheer vertical walls with subtle block depth jitter,
-                // and stepped ceilings, all with flat-shaded low-poly normals and mineral facet variations.
-                for chunk in column_chunks {
-                    let base_vx = chunk.chunk_x * 16;
-                    let base_vy = chunk.chunk_y * 16;
-                    let base_vz = chunk.chunk_z * 16;
+            }
 
-                    for lz in 0..16 {
-                        for lx in 0..16 {
-                            for ly in 0..16 {
-                                let idx = lx + (ly * 16) + (lz * 256);
-                                let mat = chunk.voxels[idx];
-                                if mat == 0 {
-                                    continue;
-                                }
+            if !surface_excavated {
+                let v00 = Vec3::new(x0, y00, z0);
+                let v10 = Vec3::new(x1, y10, z0);
+                let v01 = Vec3::new(x0, y01, z1);
+                let v11 = Vec3::new(x1, y11, z1);
 
-                                let vx = base_vx + lx as i32;
-                                let vy = base_vy + ly as i32;
-                                let vz = base_vz + lz as i32;
+                let (tri1, tri2) = if (qx + qz) % 2 == 0 {
+                    ((v00, v01, v11), (v00, v11, v10))
+                } else {
+                    ((v00, v01, v10), (v10, v01, v11))
+                };
 
-                                let wx = vx as f32 * VOXEL_SIZE;
-                                let wy = vy as f32 * VOXEL_SIZE;
-                                let wz = vz as f32 * VOXEL_SIZE;
+                for tri in [tri1, tri2] {
+                    let va = tri.0;
+                    let vb = tri.1;
+                    let vc = tri.2;
 
-                                let x0 = wx - chunk_base_x;
-                                let x1 = x0 + VOXEL_SIZE;
-                                let y0 = wy;
-                                let y1 = y0 + VOXEL_SIZE;
-                                let z0 = wz - chunk_base_z;
-                                let z1 = z0 + VOXEL_SIZE;
+                    let edge1 = vb - va;
+                    let edge2 = vc - va;
+                    let normal = edge1.cross(edge2).normalize_or_zero();
 
-                                // Subtle depth jitter for imperfect cuboid quarry faces
-                                let facet_seed = (vx.wrapping_mul(73856093) ^ vy.wrapping_mul(19349663) ^ vz.wrapping_mul(83492791)) as u32;
-                                let jitter_x = ((facet_seed % 101) as f32 / 100.0 - 0.5) * 0.035; // +/- 1.75cm
-                                let jitter_z = (((facet_seed >> 8) % 101) as f32 / 100.0 - 0.5) * 0.035; // +/- 1.75cm
-                                let jitter_ceil = (((facet_seed >> 16) % 101) as f32 / 100.0 - 0.5) * 0.025; // +/- 1.25cm
+                    let world_centroid = Vec3::new(
+                        chunk_base_x + (va.x + vb.x + vc.x) / 3.0,
+                        (va.y + vb.y + vc.y) / 3.0,
+                        chunk_base_z + (va.z + vb.z + vc.z) / 3.0,
+                    );
 
-                                // 6 Direction checks:
-                                // +Y (Top Face - walkable horizontal floor at 0°)
-                                if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32 + 1, lz as i32) {
-                                    let norm = [0.0, 1.0, 0.0];
-                                    let col = get_voxel_face_color(mat, true, y1, vx, vy, vz);
-                                    let v0 = Vec3::new(x0, y1, z0);
-                                    let v1 = Vec3::new(x0, y1, z1);
-                                    let v2 = Vec3::new(x1, y1, z1);
-                                    let v3 = Vec3::new(x1, y1, z0);
-                                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                                }
+                    let facet_hash = ((world_centroid.x * 37.17 + world_centroid.z * 53.31).sin().abs() * 43758.5453).fract();
+                    let facet_variation = (facet_hash - 0.5) * 0.08;
 
-                                // -Y (Bottom Face - horizontal ceiling with subtle staggered depth)
-                                if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32 - 1, lz as i32) {
-                                    let norm = [0.0, -1.0, 0.0];
-                                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                                    let cy = y0 + jitter_ceil;
-                                    let v0 = Vec3::new(x0, cy, z0);
-                                    let v1 = Vec3::new(x1, cy, z0);
-                                    let v2 = Vec3::new(x1, cy, z1);
-                                    let v3 = Vec3::new(x0, cy, z1);
-                                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                                }
+                    let color = if let Some(painted) = crate::zone_editor::get_painted_biome_color(world_centroid.x, world_centroid.z) {
+                        painted
+                    } else if world_centroid.y > 15.5 {
+                        let snow_white = 0.94 + facet_variation * 0.5;
+                        [snow_white, snow_white + 0.02, snow_white + 0.05, 1.0]
+                    } else if normal.y < 0.60 {
+                        let r = (0.42 + facet_variation).clamp(0.25, 0.65);
+                        let g = (0.44 + facet_variation).clamp(0.25, 0.65);
+                        let b = (0.46 + facet_variation).clamp(0.25, 0.65);
+                        [r, g, b, 1.0]
+                    } else if world_centroid.y < 2.5 && normal.y >= 0.60 {
+                        let r = (0.78 + facet_variation).clamp(0.65, 0.90);
+                        let g = (0.72 + facet_variation).clamp(0.60, 0.85);
+                        let b = (0.52 + facet_variation).clamp(0.40, 0.70);
+                        [r, g, b, 1.0]
+                    } else if normal.y < 0.72 {
+                        let r = (0.46 + facet_variation).clamp(0.35, 0.60);
+                        let g = (0.38 + facet_variation).clamp(0.30, 0.50);
+                        let b = (0.28 + facet_variation).clamp(0.20, 0.40);
+                        [r, g, b, 1.0]
+                    } else {
+                        let r = (0.28 + facet_variation * 0.8).clamp(0.18, 0.40);
+                        let g = (0.64 + facet_variation).clamp(0.48, 0.76);
+                        let b = (0.28 + facet_variation * 0.8).clamp(0.18, 0.40);
+                        [r, g, b, 1.0]
+                    };
 
-                                // +X (East Face - sheer vertical wall with staggered block depth)
-                                if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32 + 1, ly as i32, lz as i32) {
-                                    let norm = [1.0, 0.0, 0.0];
-                                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                                    let cx1 = x1 + jitter_x;
-                                    let v0 = Vec3::new(cx1, y0, z0);
-                                    let v1 = Vec3::new(cx1, y1, z0);
-                                    let v2 = Vec3::new(cx1, y1, z1);
-                                    let v3 = Vec3::new(cx1, y0, z1);
-                                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                                }
+                    let norm_arr = normal.to_array();
+                    positions.push(va.to_array());
+                    positions.push(vb.to_array());
+                    positions.push(vc.to_array());
 
-                                // -X (West Face - sheer vertical wall with staggered block depth)
-                                if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32 - 1, ly as i32, lz as i32) {
-                                    let norm = [-1.0, 0.0, 0.0];
-                                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                                    let cx0 = x0 + jitter_x;
-                                    let v0 = Vec3::new(cx0, y0, z1);
-                                    let v1 = Vec3::new(cx0, y1, z1);
-                                    let v2 = Vec3::new(cx0, y1, z0);
-                                    let v3 = Vec3::new(cx0, y0, z0);
-                                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                                }
+                    normals.push(norm_arr);
+                    normals.push(norm_arr);
+                    normals.push(norm_arr);
 
-                                // +Z (South Face - sheer vertical wall with staggered block depth)
-                                if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32, lz as i32 + 1) {
-                                    let norm = [0.0, 0.0, 1.0];
-                                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                                    let cz1 = z1 + jitter_z;
-                                    let v0 = Vec3::new(x1, y0, cz1);
-                                    let v1 = Vec3::new(x1, y1, cz1);
-                                    let v2 = Vec3::new(x0, y1, cz1);
-                                    let v3 = Vec3::new(x0, y0, cz1);
-                                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                                }
+                    colors.push(color);
+                    colors.push(color);
+                    colors.push(color);
 
-                                // -Z (North Face - sheer vertical wall with staggered block depth)
-                                if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32, lz as i32 - 1) {
-                                    let norm = [0.0, 0.0, -1.0];
-                                    let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
-                                    let cz0 = z0 + jitter_z;
-                                    let v0 = Vec3::new(x0, y0, cz0);
-                                    let v1 = Vec3::new(x0, y1, cz0);
-                                    let v2 = Vec3::new(x1, y1, cz0);
-                                    let v3 = Vec3::new(x1, y0, cz0);
-                                    push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
-                                }
+                    uvs.push([(chunk_base_x + va.x) * 0.1, (chunk_base_z + va.z) * 0.1]);
+                    uvs.push([(chunk_base_x + vb.x) * 0.1, (chunk_base_z + vb.z) * 0.1]);
+                    uvs.push([(chunk_base_x + vc.x) * 0.1, (chunk_base_z + vc.z) * 0.1]);
+
+                    indices.push(curr_idx);
+                    indices.push(curr_idx + 1);
+                    indices.push(curr_idx + 2);
+                    curr_idx += 3;
+                }
+            }
+        }
+    }
+
+    // 2. Excavated / Volumetric Blocks (Face-Culled 3D Voxel Mesher):
+    // For every solid voxel in column_chunks, emit faces exposed to air.
+    for chunk in column_chunks {
+        let base_vx = chunk.chunk_x * 16;
+        let base_vy = chunk.chunk_y * 16;
+        let base_vz = chunk.chunk_z * 16;
+
+        for lz in 0..16 {
+            for lx in 0..16 {
+                let quad_avg_y = get_terrain_height(chunk_base_x + lx as f32 + 0.5, chunk_base_z + lz as f32 + 0.5);
+                let surface_vy = (quad_avg_y / VOXEL_SIZE).floor() as i32;
+
+                for ly in 0..16 {
+                    let idx = lx + (ly * 16) + (lz * 256);
+                    let mat = chunk.voxels[idx];
+                    if mat == 0 {
+                        continue;
+                    }
+
+                    let vx = base_vx + lx as i32;
+                    let vy = base_vy + ly as i32;
+                    let vz = base_vz + lz as i32;
+
+                    let wx = vx as f32 * VOXEL_SIZE;
+                    let wy = vy as f32 * VOXEL_SIZE;
+                    let wz = vz as f32 * VOXEL_SIZE;
+
+                    let x0 = wx - chunk_base_x;
+                    let x1 = x0 + VOXEL_SIZE;
+                    let y0 = wy;
+                    let y1 = y0 + VOXEL_SIZE;
+                    let z0 = wz - chunk_base_z;
+                    let z1 = z0 + VOXEL_SIZE;
+
+                    // Subtle depth jitter for imperfect cuboid quarry faces
+                    let facet_seed = (vx.wrapping_mul(73856093) ^ vy.wrapping_mul(19349663) ^ vz.wrapping_mul(83492791)) as u32;
+                    let jitter_x = ((facet_seed % 101) as f32 / 100.0 - 0.5) * 0.035;
+                    let jitter_z = (((facet_seed >> 8) % 101) as f32 / 100.0 - 0.5) * 0.035;
+                    let jitter_ceil = (((facet_seed >> 16) % 101) as f32 / 100.0 - 0.5) * 0.025;
+
+                    // +Y (Top Face - walkable horizontal floor at 0°)
+                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32 + 1, lz as i32) {
+                        let is_surface_solid = vy >= surface_vy;
+                        let surface_cy = surface_vy.div_euclid(16);
+                        let surface_ly = surface_vy.rem_euclid(16) as usize;
+                        let surface_intact = if is_surface_solid {
+                            if chunk.chunk_y == surface_cy {
+                                let s_idx = lx + (surface_ly * 16) + (lz * 256);
+                                chunk.voxels.get(s_idx).copied().unwrap_or(0) != 0
+                            } else {
+                                false
                             }
+                        } else {
+                            false
+                        };
+
+                        if !surface_intact {
+                            let norm = [0.0, 1.0, 0.0];
+                            let col = get_voxel_face_color(mat, true, y1, vx, vy, vz);
+                            let v0 = Vec3::new(x0, y1, z0);
+                            let v1 = Vec3::new(x0, y1, z1);
+                            let v2 = Vec3::new(x1, y1, z1);
+                            let v3 = Vec3::new(x1, y1, z0);
+                            push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
                         }
+                    }
+
+                    // -Y (Bottom Face - horizontal ceiling)
+                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32 - 1, lz as i32) {
+                        let norm = [0.0, -1.0, 0.0];
+                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                        let cy = y0 + jitter_ceil;
+                        let v0 = Vec3::new(x0, cy, z0);
+                        let v1 = Vec3::new(x1, cy, z0);
+                        let v2 = Vec3::new(x1, cy, z1);
+                        let v3 = Vec3::new(x0, cy, z1);
+                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
+                    }
+
+                    // +X (East Wall)
+                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32 + 1, ly as i32, lz as i32) {
+                        let norm = [1.0, 0.0, 0.0];
+                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                        let cx1 = x1 + jitter_x;
+                        let v0 = Vec3::new(cx1, y0, z0);
+                        let v1 = Vec3::new(cx1, y1, z0);
+                        let v2 = Vec3::new(cx1, y1, z1);
+                        let v3 = Vec3::new(cx1, y0, z1);
+                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
+                    }
+
+                    // -X (West Wall)
+                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32 - 1, ly as i32, lz as i32) {
+                        let norm = [-1.0, 0.0, 0.0];
+                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                        let cx0 = x0 + jitter_x;
+                        let v0 = Vec3::new(cx0, y0, z1);
+                        let v1 = Vec3::new(cx0, y1, z1);
+                        let v2 = Vec3::new(cx0, y1, z0);
+                        let v3 = Vec3::new(cx0, y0, z0);
+                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
+                    }
+
+                    // +Z (South Wall)
+                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32, lz as i32 + 1) {
+                        let norm = [0.0, 0.0, 1.0];
+                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                        let cz1 = z1 + jitter_z;
+                        let v0 = Vec3::new(x1, y0, cz1);
+                        let v1 = Vec3::new(x1, y1, cz1);
+                        let v2 = Vec3::new(x0, y1, cz1);
+                        let v3 = Vec3::new(x0, y0, cz1);
+                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
+                    }
+
+                    // -Z (North Wall)
+                    if !is_solid_voxel_neighbor(db_chunks, chunk.chunk_x, chunk.chunk_y, chunk.chunk_z, lx as i32, ly as i32, lz as i32 - 1) {
+                        let norm = [0.0, 0.0, -1.0];
+                        let col = get_voxel_face_color(mat, false, y0, vx, vy, vz);
+                        let cz0 = z0 + jitter_z;
+                        let v0 = Vec3::new(x0, y0, cz0);
+                        let v1 = Vec3::new(x0, y1, cz0);
+                        let v2 = Vec3::new(x1, y1, cz0);
+                        let v3 = Vec3::new(x1, y0, cz0);
+                        push_unshared_face(&mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx, v0, v1, v2, v3, norm, col, chunk_base_x, chunk_base_z);
                     }
                 }
             }
@@ -912,26 +937,12 @@ pub fn update_infinite_voxel_terrain(
         let chunk_center_z = (cz as f32 + 0.5) * chunk_world_span;
         let dist_sq = (chunk_center_x - p_pos.x).powi(2) + (chunk_center_z - p_pos.z).powi(2);
 
-        // Check if any server voxel chunk within this 16m chunk has been modified
-        let mut server_mod_tick = 0u64;
-        let min_scx = cx * 4;
-        let max_scx = cx * 4 + 3;
-        let min_scz = cz * 4;
-        let max_scz = cz * 4 + 3;
-        for scz in min_scz..=max_scz {
-            for scx in min_scx..=max_scx {
-                let approx_y = get_terrain_height((scx as f32 + 0.5) * 4.0, (scz as f32 + 0.5) * 4.0);
-                let scy = (approx_y / 4.0).floor() as i32;
-                for cy in (scy - 1)..=(scy + 1) {
-                    let s_key = pack_chunk_key(scx, cy, scz);
-                    if let Some(c) = db_chunks.get(&s_key) {
-                        if c.last_modified_tick > server_mod_tick {
-                            server_mod_tick = c.last_modified_tick;
-                        }
-                    }
-                }
-            }
-        }
+        // Check if any server voxel chunk within this 16m chunk column has been modified
+        let server_mod_tick = db_chunks.values()
+            .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
+            .map(|c| c.last_modified_tick)
+            .max()
+            .unwrap_or(0);
 
         let editor_dirty = crate::zone_editor::consume_chunk_dirty(cx, cz);
         if server_mod_tick > last_tick || editor_dirty {
@@ -1005,7 +1016,11 @@ pub fn update_infinite_voxel_terrain(
     let max_spawn_this_frame = spawn_batch.max(immediate_unspawned);
 
     for (cx, cz, dist_sq_chunks, key) in candidates.into_iter().take(max_spawn_this_frame) {
-        let db_mod_tick = db_chunks.get(&key).map(|c| c.last_modified_tick).unwrap_or(0);
+        let db_mod_tick = db_chunks.values()
+            .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
+            .map(|c| c.last_modified_tick)
+            .max()
+            .unwrap_or(0);
         if let Some(new_mesh) = mesh_low_poly_terrain_chunk(&db_chunks, cx, cz) {
             let dist_world_sq = dist_sq_chunks as f32 * chunk_world_span * chunk_world_span;
             let needs_collider = dist_world_sq <= LOW_POLY_NEAR_COLLIDER_DIST_SQ;

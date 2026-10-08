@@ -205,22 +205,22 @@ pub fn generate_chunk_grass_mesh_with_chunks(
 
         // Requirement 5: Prevent hovering grass over mined/excavated voxels
         if let Some(chunks) = db_chunks {
-            let vx = (world_x / 0.25).floor() as i32;
-            let vz = (world_z / 0.25).floor() as i32;
-            let scx = vx.div_euclid(16);
-            let scz = vz.div_euclid(16);
+            let vx = (world_x / crate::terrain::VOXEL_SIZE).floor() as i32;
+            let vz = (world_z / crate::terrain::VOXEL_SIZE).floor() as i32;
+            let chunk_x = vx.div_euclid(16);
+            let chunk_z = vz.div_euclid(16);
             let lx_vox = vx.rem_euclid(16) as usize;
             let lz_vox = vz.rem_euclid(16) as usize;
-            let surface_cy = (world_y / 4.0).floor() as i32;
+            let surface_cy = (world_y / 16.0).floor() as i32;
 
             let mut is_mined = false;
             for cy in (surface_cy - 1)..=surface_cy {
-                let key = crate::terrain::pack_chunk_key(scx, cy, scz);
+                let key = crate::terrain::pack_chunk_key(chunk_x, cy, chunk_z);
                 if let Some(chunk) = chunks.get(&key) {
                     for sly in 0..16 {
                         let idx = lx_vox + (sly * 16) + (lz_vox * 256);
                         let vy = cy * 16 + sly as i32;
-                        let wy = (vy as f32 + 0.5) * 0.25;
+                        let wy = (vy as f32 + 0.5) * crate::terrain::VOXEL_SIZE;
                         if wy <= world_y && wy >= world_y - 2.5 {
                             if let Some(&mat) = chunk.voxels.get(idx) {
                                 if mat == 0 {

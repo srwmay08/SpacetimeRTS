@@ -21,10 +21,11 @@ use crate::combat::active_projectile;
 pub const CHUNK_SIZE: usize = 16;
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
-// Architectural Note: Authoritative Metric Voxel Scale (0.25m / 25cm).
-// Defines each discrete voxel cell as 0.25m x 0.25m x 0.25m, aligning the backend
-// volume model with the client Surface Nets dual-contouring mesher.
-pub const VOXEL_SIZE: f32 = 0.25;
+// Architectural Note: Authoritative Metric Voxel Scale (1.0m / Minecraft Block Scale).
+// Defines each discrete voxel cell as 1.0m x 1.0m x 1.0m, aligning the backend
+// volume model with the 1.0m terrain quads (LOW_POLY_QUAD_SIZE).
+pub const VOXEL_SIZE: f32 = 1.0;
+pub const CHUNK_SPAN: f32 = CHUNK_SIZE as f32 * VOXEL_SIZE;
 
 /// Absolute bottom boundary of the world.
 /// Bedrock forms an indestructible strata at and below this elevation that players
@@ -280,8 +281,8 @@ pub fn find_ground_surface_below(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32
     let lx = vx.rem_euclid(CHUNK_SIZE as i32) as usize;
     let lz = vz.rem_euclid(CHUNK_SIZE as i32) as usize;
 
-    let start_cy = (start_y / 4.0).floor() as i32;
-    let min_cy = (BEDROCK_ELEVATION / 4.0).floor() as i32;
+    let start_cy = (start_y / CHUNK_SPAN).floor() as i32;
+    let min_cy = (BEDROCK_ELEVATION / CHUNK_SPAN).floor() as i32;
 
     for cy in (min_cy..=start_cy).rev() {
         let key = pack_chunk_key(cx, cy, cz);
@@ -300,8 +301,8 @@ pub fn find_ground_surface_below(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32
                 }
             }
         } else {
-            let chunk_bottom = cy as f32 * 4.0;
-            let chunk_top = (cy as f32 + 1.0) * 4.0;
+            let chunk_bottom = cy as f32 * CHUNK_SPAN;
+            let chunk_top = (cy as f32 + 1.0) * CHUNK_SPAN;
 
             if chunk_bottom > terrain_height {
                 continue;
@@ -623,11 +624,11 @@ pub fn mine_single_voxel(
     Ok(current_mat)
 }
 
-/// Computes the 3D voxel coordinate set for an irregular rock chunk excavation.
-/// Rather than clearing an isolated 25cm cube or an austere box, generates a connected union
-/// of imperfect cuboids with deterministic lateral meandering and floor steps.
-/// This carves a comfortable passageway (~1.25m wide, ~2.0m tall) matching the player's
-/// humanoid capsule so miners do not have to break dozens of tiny bricks to move forward.
+/// Computes the 3D voxel coordinate set for an authoritative rock chunk excavation.
+/// Generates a directional human-sized bore (1.0m wide x 2.0m tall doorway) when facing
+/// horizontal walls, and a stepped 45° walkable descent when aiming downward into the floor.
+/// Every block excavated is a solid 1.0m³ man-sized rock matching Minecraft block scale,
+/// eliminating all 25cm micro-ledges and enabling smooth tunnel navigation.
 pub fn compute_rock_chunk_voxels(
     hit_vx: i32,
     hit_vy: i32,
@@ -643,110 +644,66 @@ pub fn compute_rock_chunk_voxels(
         (0.0, -1.0, 0.0)
     };
 
-    // Center the rock chunk slightly into the solid surface along aim direction (~0.5m)
-    let center_vx = hit_vx + (ndx * 2.0).round() as i32;
-    let center_vy = hit_vy + (ndy * 2.0).round() as i32;
-    let center_vz = hit_vz + (ndz * 2.0).round() as i32;
-
     let mut voxels = std::collections::BTreeSet::new();
 
-    let is_digging_down = ndy < -0.707;
-
-    if is_digging_down {
-        // Downward excavation: carves a stepped descent/stair shaft into the ground
-        // Core shaft: 5x5 horizontal, extending down 6 voxels (1.5m)
-        for dy in -6..=0 {
-            let max_spread = if dy < -3 { 1 } else { 2 };
-            for dx in -max_spread..=max_spread {
-                for dz in -max_spread..=max_spread {
-                    voxels.insert((center_vx + dx, center_vy + dy, center_vz + dz));
-                }
-            }
-        }
-        // Entry chamfer: forward step
-        let fwd_x = (ndx * 2.0).round() as i32;
-        let fwd_z = (ndz * 2.0).round() as i32;
-        for dy in -3..=1 {
-            for dx in -1..=1 {
-                for dz in -1..=1 {
-                    voxels.insert((hit_vx + dx + fwd_x, hit_vy + dy, hit_vz + dz + fwd_z));
-                }
-            }
-        }
+    // Primary horizontal stepping direction
+    let abs_x = ndx.abs();
+    let abs_z = ndz.abs();
+    let (step_x, step_z) = if abs_x >= abs_z {
+        (if ndx >= 0.0 { 1 } else { -1 }, 0)
     } else {
-        // Forward / Wall excavation: carves an arched, winding passageway
-        // Lateral vector perpendicular to horizontal aim direction
-        let horiz_len = (ndx * ndx + ndz * ndz).sqrt();
-        let (lat_x, lat_z) = if horiz_len > 0.001 {
-            (-ndz / horiz_len, ndx / horiz_len)
+        (0, if ndz >= 0.0 { 1 } else { -1 })
+    };
+
+    let horiz_len = (ndx * ndx + ndz * ndz).sqrt();
+
+    if ndy < -0.45 {
+        // --------------------------------------------------------------------
+        // 1. Downward Excavation: Stepped 45° Descent / Walkable Ramp
+        // --------------------------------------------------------------------
+        if horiz_len < 0.25 || ndy < -0.85 {
+            // Steep vertical descent: 2-block shaft
+            voxels.insert((hit_vx, hit_vy, hit_vz));
+            voxels.insert((hit_vx, hit_vy - 1, hit_vz));
         } else {
-            (1.0, 0.0)
+            // Stepped 45° descent: steps 1m forward and 1m down with 2m standing headroom
+            voxels.insert((hit_vx, hit_vy, hit_vz));
+            voxels.insert((hit_vx, hit_vy + 1, hit_vz));
+
+            let fwd_x = hit_vx + step_x;
+            let fwd_z = hit_vz + step_z;
+            voxels.insert((fwd_x, hit_vy - 1, fwd_z));
+            voxels.insert((fwd_x, hit_vy, fwd_z));
+            voxels.insert((fwd_x, hit_vy + 1, fwd_z));
+        }
+    } else if ndy > 0.60 {
+        // --------------------------------------------------------------------
+        // 2. Upward Excavation: Ceiling Clearance
+        // --------------------------------------------------------------------
+        voxels.insert((hit_vx, hit_vy, hit_vz));
+        voxels.insert((hit_vx, hit_vy + 1, hit_vz));
+    } else {
+        // --------------------------------------------------------------------
+        // 3. Horizontal / Wall Excavation: Directional 1m Wide x 2m Tall Corridor Bore
+        // --------------------------------------------------------------------
+        let (y_lower, y_upper) = if ndy > 0.10 {
+            (hit_vy - 1, hit_vy)
+        } else {
+            (hit_vy, hit_vy + 1)
         };
 
-        // Sinusoidal winding meander based on world elevation and coordinates
-        let meander_phase = (center_vx as f32 * 0.35 + center_vz as f32 * 0.35).sin();
-        let meander_offset = (meander_phase * 1.4).round() as i32;
-        let m_vx = center_vx + (lat_x * meander_offset as f32).round() as i32;
-        let m_vz = center_vz + (lat_z * meander_offset as f32).round() as i32;
-
-        let seed = (center_vx.wrapping_mul(73856093)
-            ^ center_vy.wrapping_mul(19349663)
-            ^ center_vz.wrapping_mul(83492791)) as u64;
-
-        // Cuboid 1: Main Core Body (approx 1.25m wide, 2.0m tall, 1.0m deep)
-        for dy in -2..=5 {
-            for d_lat in -2..=2 {
-                for d_depth in -1..=2 {
-                    let vx = m_vx + (lat_x * d_lat as f32).round() as i32 + (ndx * d_depth as f32).round() as i32;
-                    let vy = center_vy + dy;
-                    let vz = m_vz + (lat_z * d_lat as f32).round() as i32 + (ndz * d_depth as f32).round() as i32;
-                    voxels.insert((vx, vy, vz));
-                }
-            }
+        // Front doorway slice (1m wide x 2m high)
+        for y in y_lower..=y_upper {
+            voxels.insert((hit_vx, y, hit_vz));
         }
 
-        // Cuboid 2: Stepped Base / Walkable Floor Ramp (offsets slightly downward and forward)
-        for dy in -4..=-2 {
-            for d_lat in -1..=1 {
-                for d_depth in 0..=2 {
-                    let vx = m_vx + (lat_x * d_lat as f32).round() as i32 + (ndx * d_depth as f32).round() as i32;
-                    let vy = center_vy + dy;
-                    let vz = m_vz + (lat_z * d_lat as f32).round() as i32 + (ndz * d_depth as f32).round() as i32;
-                    voxels.insert((vx, vy, vz));
-                }
-            }
-        }
-
-        // Cuboid 3: Vaulted Cave Ceiling Arch (narrows at top, creating an organic stone roof)
-        for dy in 5..=6 {
-            let arch_width = if dy == 6 { 1 } else { 2 };
-            for d_lat in -arch_width..=arch_width {
-                for d_depth in -1..=1 {
-                    let vx = m_vx + (lat_x * d_lat as f32).round() as i32 + (ndx * d_depth as f32).round() as i32;
-                    let vy = center_vy + dy;
-                    let vz = m_vz + (lat_z * d_lat as f32).round() as i32 + (ndz * d_depth as f32).round() as i32;
-                    voxels.insert((vx, vy, vz));
-                }
-            }
-        }
-
-        // Cuboid 4: Imperfect Faceted Wall Alcove / Rock Fracture
-        let side = if seed % 2 == 0 { 2 } else { -2 };
-        for dy in -1..=3 {
-            for d_lat in 0..=1 {
-                for d_depth in 0..=1 {
-                    let eff_lat = side + if side > 0 { d_lat } else { -d_lat };
-                    let vx = m_vx + (lat_x * eff_lat as f32).round() as i32 + (ndx * d_depth as f32).round() as i32;
-                    let vy = center_vy + dy;
-                    let vz = m_vz + (lat_z * eff_lat as f32).round() as i32 + (ndz * d_depth as f32).round() as i32;
-                    voxels.insert((vx, vy, vz));
-                }
-            }
+        // Deepen corridor forward into rock by 1m so each break carves forward progress
+        let fwd_x = hit_vx + step_x;
+        let fwd_z = hit_vz + step_z;
+        for y in y_lower..=y_upper {
+            voxels.insert((fwd_x, y, fwd_z));
         }
     }
-
-    // Always include the hit voxel itself to ensure prompt boundary removal
-    voxels.insert((hit_vx, hit_vy, hit_vz));
 
     voxels
         .into_iter()
@@ -794,9 +751,9 @@ pub fn mine_rock_chunk(
         _ => 2,
     };
 
-    let macro_x = hit_vx.div_euclid(4);
-    let macro_y = hit_vy.div_euclid(4);
-    let macro_z = hit_vz.div_euclid(4);
+    let macro_x = hit_vx;
+    let macro_y = hit_vy.div_euclid(2);
+    let macro_z = hit_vz;
     let rock_key = pack_chunk_key(macro_x, macro_y, macro_z);
     let current_tick = ctx.timestamp.to_micros_since_unix_epoch() as u64;
 
@@ -1036,7 +993,7 @@ fn evaluate_structural_collapse(ctx: &ReducerContext, removed_voxels: &[(i32, i3
                     break;
                 }
 
-                if depth >= 32 {
+                if depth >= 8 {
                     continue;
                 }
 

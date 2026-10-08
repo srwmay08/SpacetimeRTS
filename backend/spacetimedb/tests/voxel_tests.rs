@@ -17,7 +17,7 @@ fn test_voxel_constants() {
     // fitting within SpacetimeDB BSATN serialization limits for low-latency network replication.
     assert_eq!(CHUNK_SIZE, 16);
     assert_eq!(CHUNK_VOLUME, 4096);
-    assert_eq!(VOXEL_SIZE, 0.25);
+    assert_eq!(VOXEL_SIZE, 1.0);
     assert_eq!(BEDROCK_ELEVATION, -120.0);
 }
 
@@ -132,19 +132,19 @@ fn test_local_to_index_bounds() {
 
 #[test]
 fn test_world_to_voxel_transform_positive() {
-    // Architectural Note: With VOXEL_SIZE = 0.25, every 4.0m world space equals 1 chunk (16 voxels).
+    // Architectural Note: With VOXEL_SIZE = 1.0, every 16.0m world space equals 1 chunk (16 voxels).
     // (0, 0, 0) world -> chunk (0, 0, 0), local (0, 0, 0)
     let (cx, cy, cz, lx, ly, lz) = world_to_voxel(0.0, 0.0, 0.0);
     assert_eq!((cx, cy, cz), (0, 0, 0));
     assert_eq!((lx, ly, lz), (0, 0, 0));
 
-    // (3.75, 0.0, 0.0) -> voxel 15 -> chunk 0, local 15
-    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(3.75, 0.0, 0.0);
+    // (15.0, 0.0, 0.0) -> voxel 15 -> chunk 0, local 15
+    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(15.0, 0.0, 0.0);
     assert_eq!((cx, cy, cz), (0, 0, 0));
     assert_eq!((lx, ly, lz), (15, 0, 0));
 
-    // (4.0, 0.0, 0.0) -> voxel 16 -> chunk 1, local 0
-    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(4.0, 0.0, 0.0);
+    // (16.0, 0.0, 0.0) -> voxel 16 -> chunk 1, local 0
+    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(16.0, 0.0, 0.0);
     assert_eq!((cx, cy, cz), (1, 0, 0));
     assert_eq!((lx, ly, lz), (0, 0, 0));
 }
@@ -153,18 +153,18 @@ fn test_world_to_voxel_transform_positive() {
 fn test_world_to_voxel_transform_negative() {
     // Architectural Note: Negative coordinates must use Euclidean division so that local coordinates
     // remain non-negative [0..15] within the negative chunk.
-    // (-0.25, 0.0, 0.0) -> voxel -1 -> chunk -1, local 15
-    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(-0.25, 0.0, 0.0);
+    // (-1.0, 0.0, 0.0) -> voxel -1 -> chunk -1, local 15
+    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(-1.0, 0.0, 0.0);
     assert_eq!((cx, cy, cz), (-1, 0, 0));
     assert_eq!((lx, ly, lz), (15, 0, 0));
 
-    // (-4.0, 0.0, 0.0) -> voxel -16 -> chunk -1, local 0
-    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(-4.0, 0.0, 0.0);
+    // (-16.0, 0.0, 0.0) -> voxel -16 -> chunk -1, local 0
+    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(-16.0, 0.0, 0.0);
     assert_eq!((cx, cy, cz), (-1, 0, 0));
     assert_eq!((lx, ly, lz), (0, 0, 0));
 
-    // (-4.25, 0.0, 0.0) -> voxel -17 -> chunk -2, local 15
-    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(-4.25, 0.0, 0.0);
+    // (-17.0, 0.0, 0.0) -> voxel -17 -> chunk -2, local 15
+    let (cx, cy, cz, lx, ly, lz) = world_to_voxel(-17.0, 0.0, 0.0);
     assert_eq!((cx, cy, cz), (-2, 0, 0));
     assert_eq!((lx, ly, lz), (15, 0, 0));
 }
@@ -174,9 +174,9 @@ fn test_dda_raymarch_axis_aligned_hit() {
     use backend::voxel::dda_raymarch_pure;
 
     // Ray starting at (0.5, 0.5, 0.5) pointing in +X direction.
-    // Place a stone voxel at vx = 8 (world X = 2.0 to 2.25).
+    // Place a stone voxel at vx = 2 (world X = 2.0 to 3.0).
     let hit = dda_raymarch_pure(0.5, 0.5, 0.5, 1.0, 0.0, 0.0, 5.0, |vx, vy, vz| {
-        if vx == 8 && vy == 2 && vz == 2 {
+        if vx == 2 && vy == 0 && vz == 0 {
             VoxelMaterial::Stone
         } else {
             VoxelMaterial::Air
@@ -185,12 +185,12 @@ fn test_dda_raymarch_axis_aligned_hit() {
 
     assert!(hit.is_some());
     let hit = hit.unwrap();
-    assert_eq!(hit.vx, 8);
-    assert_eq!(hit.vy, 2);
-    assert_eq!(hit.vz, 2);
+    assert_eq!(hit.vx, 2);
+    assert_eq!(hit.vy, 0);
+    assert_eq!(hit.vz, 0);
     assert_eq!(hit.material, VoxelMaterial::Stone);
     assert_eq!(hit.normal, (-1.0, 0.0, 0.0)); // Struck on west (-X) face
-    assert!((hit.distance - 1.5).abs() < 1e-4); // 8 * 0.25 = 2.0; 2.0 - 0.5 = 1.5m
+    assert!((hit.distance - 1.5).abs() < 1e-4); // 2 * 1.0 = 2.0; 2.0 - 0.5 = 1.5m
 }
 
 #[test]
@@ -310,15 +310,16 @@ fn test_compute_rock_chunk_voxels_scale_and_passageway_clearance() {
     // Forward excavation: aim along +X
     let voxels = compute_rock_chunk_voxels(10, 20, 10, 1.0, 0.0, 0.0);
 
-    // 1. Excavated volume: far exceeds a single 25cm cube (must be at least 40 voxels)
-    assert!(
-        voxels.len() >= 40,
-        "Rock chunk must excavate a substantial multi-voxel volume, got {}",
+    // 1. Excavated volume: 1x2 doorway extending 2m forward = 4 voxels (4.0m^3)
+    assert_eq!(
+        voxels.len(),
+        4,
+        "Rock chunk must excavate a solid 1x2 doorway slice (4 voxels), got {}",
         voxels.len()
     );
 
     // 2. Player humanoid capsule clearance:
-    // Humanoid capsule requires at least 0.8m width and 1.8m height.
+    // Humanoid capsule requires at least 1.8m height and 0.8m width.
     let mut min_y = i32::MAX;
     let mut max_y = i32::MIN;
     let mut min_z = i32::MAX;
@@ -334,30 +335,26 @@ fn test_compute_rock_chunk_voxels_scale_and_passageway_clearance() {
     let height_m = (max_y - min_y + 1) as f32 * VOXEL_SIZE;
     let width_m = (max_z - min_z + 1) as f32 * VOXEL_SIZE;
 
-    assert!(
-        height_m >= 1.75,
-        "Excavated rock chunk height ({:.2}m) must comfortably clear player humanoid capsule (1.8m)",
+    assert_eq!(
+        height_m,
+        2.0,
+        "Excavated rock chunk height ({:.2}m) must be exactly 2.0m for standing clearance",
         height_m
     );
-    assert!(
-        width_m >= 1.0,
-        "Excavated rock chunk width ({:.2}m) must comfortably clear player humanoid capsule (0.8m)",
+    assert_eq!(
+        width_m,
+        1.0,
+        "Excavated rock chunk width ({:.2}m) must be 1.0m",
         width_m
     );
-
-    // 3. Winding passageway: test that differing horizontal coordinates meander laterally
-    let voxels_step1 = compute_rock_chunk_voxels(10, 20, 10, 1.0, 0.0, 0.0);
-    let voxels_step2 = compute_rock_chunk_voxels(14, 20, 10, 1.0, 0.0, 0.0);
-    assert!(!voxels_step1.is_empty());
-    assert!(!voxels_step2.is_empty());
 }
 
 #[test]
 fn test_compute_rock_chunk_voxels_downward_shaft() {
     use backend::voxel::{compute_rock_chunk_voxels, VOXEL_SIZE};
 
-    // Downward excavation: looking down into floor
-    let voxels = compute_rock_chunk_voxels(0, 10, 0, 0.0, -1.0, 0.0);
+    // Downward stepped excavation: looking down into floor
+    let voxels = compute_rock_chunk_voxels(0, 10, 0, 1.0, -0.6, 0.0);
 
     let mut min_y = i32::MAX;
     let mut max_y = i32::MIN;
@@ -368,8 +365,8 @@ fn test_compute_rock_chunk_voxels_downward_shaft() {
 
     let depth_m = (max_y - min_y + 1) as f32 * VOXEL_SIZE;
     assert!(
-        depth_m >= 1.25,
-        "Downward rock chunk break must carve a walkable stepped descent at least 1.25m deep, got {:.2}m",
+        depth_m >= 2.0,
+        "Downward rock chunk break must carve a walkable stepped descent at least 2.0m deep with headroom, got {:.2}m",
         depth_m
     );
 }
