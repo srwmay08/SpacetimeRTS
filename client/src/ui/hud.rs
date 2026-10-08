@@ -359,73 +359,12 @@ pub fn update_reticle_adjacent_hud(
     weapon_state: Res<crate::weapons::WeaponState>,
     conn: Res<SpacetimeConnection>,
     camera_mode: Res<State<CameraMode>>,
-    mut ammo_text_q: Query<&mut Text, (With<ReticleAmmoText>, Without<ReticleCriticalHealthAlert>)>,
     mut bow_bar_q: Query<(&mut Style, &mut BackgroundColor), With<ReticleBowChargeBar>>,
-    mut crit_alert_q: Query<&mut Text, (With<ReticleCriticalHealthAlert>, Without<ReticleAmmoText>)>,
+    mut crit_alert_q: Query<&mut Text, With<ReticleCriticalHealthAlert>>,
 ) {
     if *camera_mode.get() != CameraMode::FPS { return; }
 
-    // 1. Reticle-Adjacent Ammo Gauge (Right of Crosshair)
-    if let Ok(mut text) = ammo_text_q.get_single_mut() {
-        let val = match weapon_state.current_weapon {
-            crate::weapons::WeaponType::Revolver => {
-                if weapon_state.revolver_is_reloading {
-                    "[ RELOADING ]".to_string()
-                } else {
-                    format!("[ {} / {} ]", weapon_state.revolver_ammo, weapon_state.revolver_max_ammo)
-                }
-            }
-            crate::weapons::WeaponType::Shotgun => {
-                if weapon_state.shotgun_is_reloading {
-                    "[ RELOADING ]".to_string()
-                } else if weapon_state.shotgun_is_pumping {
-                    "[ PUMPING ]".to_string()
-                } else {
-                    format!("[ {} / {} ]", weapon_state.shotgun_ammo, weapon_state.shotgun_max_ammo)
-                }
-            }
-            crate::weapons::WeaponType::Crossbow => {
-                if weapon_state.crossbow_loaded {
-                    "[ BOLT READY ]".to_string()
-                } else {
-                    format!("[ CRANK {:.1}s ]", weapon_state.crossbow_reload_timer.remaining_secs())
-                }
-            }
-            crate::weapons::WeaponType::HandCrossbow => {
-                if weapon_state.hand_crossbow_loaded {
-                    "[ READY ]".to_string()
-                } else {
-                    "[ RELOADING ]".to_string()
-                }
-            }
-            crate::weapons::WeaponType::Bow => {
-                if weapon_state.bow_drawing {
-                    format!("[ DRAW: {}% ]", (weapon_state.bow_charge * 100.0) as u32)
-                } else {
-                    "[ READY ]".to_string()
-                }
-            }
-            crate::weapons::WeaponType::None => "".to_string(),
-            _ => "[ READY ]".to_string(),
-        };
-
-        let color = match weapon_state.current_weapon {
-            crate::weapons::WeaponType::Revolver if weapon_state.revolver_ammo == 0 => Color::srgb(1.0, 0.2, 0.2),
-            crate::weapons::WeaponType::Revolver if weapon_state.revolver_ammo <= 2 => Color::srgb(1.0, 0.7, 0.1),
-            crate::weapons::WeaponType::Shotgun if weapon_state.shotgun_ammo == 0 => Color::srgb(1.0, 0.2, 0.2),
-            crate::weapons::WeaponType::Shotgun if weapon_state.shotgun_ammo == 1 => Color::srgb(1.0, 0.7, 0.1),
-            _ => Color::srgb(0.0, 1.0, 1.0),
-        };
-
-        if text.sections[0].value != val {
-            text.sections[0].value = val;
-        }
-        if text.sections[0].style.color != color {
-            text.sections[0].style.color = color;
-        }
-    }
-
-    // 2. Bow Charge Bar (Directly below crosshair)
+    // 1. Bow Charge Bar (Directly below crosshair)
     if let Ok((mut bar_style, mut bar_bg)) = bow_bar_q.get_single_mut() {
         if weapon_state.current_weapon == crate::weapons::WeaponType::Bow && weapon_state.bow_drawing {
             if bar_style.display != Display::Flex {

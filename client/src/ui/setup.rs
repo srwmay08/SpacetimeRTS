@@ -469,10 +469,6 @@ pub fn setup_ui(mut commands: Commands) {
                 ("Crossbow", "15 Wood, 5 Flint, 4 Leather [Workbench]"),
                 ("Hand Crossbow", "8 Wood, 3 Flint, 2 Leather [Workbench]"),
                 ("Crossbow Bolt", "6 Wood, 3 Flint (x15) [Workbench]"),
-                ("Revolver", "10 Stone, 8 Flint, 4 Leather [Workbench]"),
-                ("Revolver Ammo", "4 Stone, 2 Flint, 1 Resin (x12) [Workbench]"),
-                ("Shotgun", "15 Wood, 10 Stone, 6 Flint [Workbench]"),
-                ("Shotgun Shell", "4 Wood, 3 Stone, 1 Resin (x8) [Workbench]"),
                 ("Flint Arrow", "8 Wood, 2 Flint [Workbench]"),
                 ("Flint Spear", "5 Wood, 2 Flint [Workbench]"),
                 ("Wooden Shield", "10 Wood, 2 Leather [Workbench]"),
@@ -940,23 +936,6 @@ pub fn setup_ui(mut commands: Commands) {
             }
         });
 
-        // Reticle-Adjacent Ammo Gauge (Right of Crosshair)
-        reticle.spawn((
-            TextBundle::from_section(
-                "",
-                TextStyle {
-                    font_size: 13.0,
-                    color: Color::srgb(0.0, 1.0, 1.0),
-                    ..default()
-                }
-            ).with_style(Style {
-                position_type: PositionType::Absolute,
-                left: Val::Px(30.0),
-                top: Val::Px(-9.0),
-                ..default()
-            }),
-            ReticleAmmoText,
-        ));
 
         // Bow Draw / Charge Bar (Below Crosshair)
         reticle.spawn((

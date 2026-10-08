@@ -157,7 +157,7 @@ mod tests {
         }
 
         // Spawn advanced workbench recipes
-        let wb_items = ["Crossbow", "Revolver", "Wooden Shield"];
+        let wb_items = ["Crossbow", "Bow", "Wooden Shield"];
         for name in wb_items {
             app.world_mut().spawn((
                 NodeBundle {

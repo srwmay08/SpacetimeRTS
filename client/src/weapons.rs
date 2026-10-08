@@ -1205,7 +1205,6 @@ pub fn animate_weapon_viewmodel(
     mut swing_state: ResMut<SwingState>,
     hand_side: Res<EquippedHandSide>,
     mut root_q: Query<(&ViewModelWeaponRoot, &mut BevyTransform), (Without<ViewModelBowArrow>, Without<ViewModelPumpSlide>)>,
-    mut pump_q: Query<&mut BevyTransform, (With<ViewModelPumpSlide>, Without<ViewModelWeaponRoot>, Without<ViewModelBowArrow>)>,
     mut arrow_q: Query<(&mut Visibility, &mut BevyTransform), (With<ViewModelBowArrow>, Without<ViewModelWeaponRoot>, Without<ViewModelPumpSlide>, Without<ViewModelCrossbowBolt>)>,
     mut bolt_q: Query<&mut Visibility, (With<ViewModelCrossbowBolt>, Without<ViewModelBowArrow>)>,
 ) {
@@ -1269,43 +1268,7 @@ pub fn animate_weapon_viewmodel(
         }
     }
 
-    if weapon_state.revolver_is_reloading {
-        weapon_state.revolver_reload_timer.tick(time.delta());
-        if weapon_state.revolver_reload_timer.just_finished() {
-            weapon_state.revolver_ammo = weapon_state.revolver_max_ammo;
-            weapon_state.revolver_is_reloading = false;
-            weapon_state.revolver_reload_timer.reset();
-        }
-    }
-    weapon_state.revolver_cooldown.tick(time.delta());
-
-    if weapon_state.shotgun_is_reloading {
-        weapon_state.shotgun_reload_timer.tick(time.delta());
-        if weapon_state.shotgun_reload_timer.just_finished() {
-            weapon_state.shotgun_ammo = weapon_state.shotgun_max_ammo;
-            weapon_state.shotgun_is_reloading = false;
-            weapon_state.shotgun_reload_timer.reset();
-        }
-    }
-
-    if weapon_state.shotgun_is_pumping {
-        weapon_state.shotgun_pump_timer.tick(time.delta());
-        let t = weapon_state.shotgun_pump_timer.fraction();
-        let pump_slide_z = if t < 0.5 {
-            -0.26 + (t * 2.0) * 0.08
-        } else {
-            -0.18 - ((t - 0.5) * 2.0) * 0.08
-        };
-
-        for mut pump_t in pump_q.iter_mut() {
-            pump_t.translation.z = pump_slide_z;
-        }
-
-        if weapon_state.shotgun_pump_timer.just_finished() {
-            weapon_state.shotgun_is_pumping = false;
-            weapon_state.shotgun_pump_timer.reset();
-        }
-    }
+    // Note: Legacy firearm (Revolver/Shotgun) reload & pump loops archived in docs/archive/legacy_firearms.rs
 
     // 2. Bolt/Arrow Visibility & Dynamic Arrow Pullback
     for mut vis in bolt_q.iter_mut() {
@@ -1580,20 +1543,6 @@ pub fn weapon_reload_input_system(
 ) {
     for _ in reload_evts.read() {
         match weapon_state.current_weapon {
-            WeaponType::Revolver => {
-                if weapon_state.revolver_ammo < weapon_state.revolver_max_ammo && !weapon_state.revolver_is_reloading {
-                    weapon_state.revolver_is_reloading = true;
-                    weapon_state.revolver_reload_timer.reset();
-                    weapon_state.recoil_rot *= Quat::from_rotation_z(0.3);
-                }
-            }
-            WeaponType::Shotgun => {
-                if weapon_state.shotgun_ammo < weapon_state.shotgun_max_ammo && !weapon_state.shotgun_is_reloading && !weapon_state.shotgun_is_pumping {
-                    weapon_state.shotgun_is_reloading = true;
-                    weapon_state.shotgun_reload_timer.reset();
-                    weapon_state.recoil_offset += Vec3::new(0.0, -0.04, 0.04);
-                }
-            }
             WeaponType::Crossbow => {
                 if !weapon_state.crossbow_loaded {
                     weapon_state.crossbow_reload_timer.reset();
