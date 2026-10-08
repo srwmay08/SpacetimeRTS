@@ -731,6 +731,7 @@ pub struct BuildingPieceVisuals {
 }
 
 #[derive(Resource, Clone, Debug)]
+#[allow(dead_code)]
 pub struct GenericRubblePool {
     pub stone_cube: Handle<Mesh>,
     pub brick_block: Handle<Mesh>,

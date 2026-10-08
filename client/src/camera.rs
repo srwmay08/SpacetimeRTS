@@ -311,13 +311,6 @@ pub fn fps_look(
     }
 
     if window.cursor.grab_mode == CursorGrabMode::Locked {
-        let center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
-        if let Some(cursor_pos) = window.cursor_position() {
-            if (cursor_pos - center).length_squared() > 64.0 * 64.0 {
-                window.set_cursor_position(Some(center));
-            }
-        }
-
         let dt = time.delta_seconds();
 
         // 1. MMO Continuous Scroll-Wheel Zoom (0.0m = 1st person, >0.0m = 3rd person)

@@ -252,7 +252,9 @@ pub fn wait_for_connection(
         &mut GravityScale, 
         &mut crate::prediction::LocalMovementTracker,
         &mut crate::prediction::InputBuffer,
+        &mut crate::prediction::AuthoritativeState,
     ), With<PlayerBody>>,
+    mut client_tick: ResMut<crate::prediction::ClientTick>,
 ) {
     let _ = connection.db.frame_tick();
 
@@ -263,17 +265,29 @@ pub fn wait_for_connection(
                 next_state.set(GameState::InGame);
                 info!("Bootstrapping complete. Entering In-Game State.");
                 
-                let spawn_y = crate::terrain::get_terrain_height(0.0, 0.0) + 1.5;
+                let mut spawn_pos = Vec3::new(0.0, crate::terrain::get_terrain_height(0.0, 0.0) + 1.5, 0.0);
+                let mut server_tick = 0;
+
+                if let Some(player) = connection.db.db.player().identity().find(id) {
+                    if let Some(db_t) = connection.db.db.transform().entity_id().find(&player.entity_id) {
+                        spawn_pos = Vec3::new(db_t.x, db_t.y, db_t.z);
+                        server_tick = db_t.last_processed_tick;
+                    }
+                }
+
+                client_tick.0 = server_tick;
                 
-                if let Ok((mut transform, maybe_phys_pos, mut velocity, mut gravity, mut tracker, mut buffer)) = player_query.get_single_mut() {
-                    transform.translation = Vec3::new(0.0, spawn_y, 0.0);
+                if let Ok((mut transform, maybe_phys_pos, mut velocity, mut gravity, mut tracker, mut buffer, mut auth_state)) = player_query.get_single_mut() {
+                    transform.translation = spawn_pos;
                     if let Some(mut phys_pos) = maybe_phys_pos {
-                        phys_pos.0 = transform.translation;
+                        phys_pos.0 = spawn_pos;
                     }
                     velocity.x = 0.0; velocity.y = 0.0; velocity.z = 0.0;
                     gravity.0 = 8.0; 
-                    tracker.last_position = transform.translation;
+                    tracker.last_position = spawn_pos;
                     buffer.queue.clear();
+                    auth_state.position = spawn_pos;
+                    auth_state.last_processed_tick = server_tick;
                 }
             }
         }
@@ -398,7 +412,7 @@ pub fn sync_transforms(
         if Some(id) == my_entity_id { 
             if let Ok(mut auth_state) = player_query.get_single_mut() {
                 let server_pos = Vec3::new(db_t.x, db_t.y, db_t.z);
-                if auth_state.last_processed_tick != db_t.last_processed_tick || auth_state.position.distance_squared(server_pos) > 9.0 {
+                if auth_state.last_processed_tick != db_t.last_processed_tick || auth_state.position.distance_squared(server_pos) > 0.04 {
                     auth_state.position = server_pos;
                     auth_state.last_processed_tick = db_t.last_processed_tick;
                 }

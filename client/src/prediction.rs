@@ -63,17 +63,21 @@ fn buffer_and_send_movement(
     mut tick: ResMut<ClientTick>,
     mut timer: ResMut<NetworkTickTimer>,
     time: Res<Time>,
-    mut query: Query<(&Transform, &mut InputBuffer, &mut LocalMovementTracker), With<AuthoritativeState>>,
+    mut query: Query<(&Transform, &mut InputBuffer, &mut LocalMovementTracker, &AuthoritativeState), With<AuthoritativeState>>,
     conn: Res<SpacetimeConnection>,
 ) {
     if !timer.0.tick(time.delta()).just_finished() {
         return;
     }
 
-    for (transform, mut buffer, mut tracker) in query.iter_mut() {
+    for (transform, mut buffer, mut tracker, auth_state) in query.iter_mut() {
         let delta = transform.translation - tracker.last_position;
 
         if delta.length_squared() > 0.000001 {
+            // Safety guard: Ensure client tick is always strictly ahead of the server's last acknowledged tick
+            if tick.0 < auth_state.last_processed_tick {
+                tick.0 = auth_state.last_processed_tick;
+            }
             tick.0 += 1;
 
             buffer.queue.push_back(BufferedInput {
@@ -104,13 +108,31 @@ fn reconcile_server_state(
     // Architectural Note: 0.25m threshold (0.0625m^2) absorbs natural slope elevation
     // clamping while catching true authoritative desyncs.
     const TOLERANCE_SQ: f32 = 0.25 * 0.25;
-    // Discrepancy threshold: A positional jump > 3.0m (9.0m^2) indicates a death respawn / hard teleport.
-    const TELEPORT_THRESHOLD_SQ: f32 = 3.0 * 3.0;
+    // Hard teleport / death respawn threshold: 12.0m (144.0m^2).
+    // Prevents false positives during high-speed sprints or intra-tick prediction buffers.
+    const TELEPORT_THRESHOLD_SQ: f32 = 12.0 * 12.0;
 
     for (mut transform, maybe_physics_pos, maybe_lin_vel, mut buffer, auth_state, mut tracker) in query.iter_mut() {
+        // 1. Discard acknowledged inputs
+        buffer.queue.retain(|input| input.tick_id > auth_state.last_processed_tick);
+
+        // 2. Replay pending inputs on top of verified server position
+        let mut predicted_pos = auth_state.position;
+        for unacked_input in &buffer.queue {
+            predicted_pos += unacked_input.delta;
+        }
+
+        // 3. Compensate for intra-tick unbuffered displacement
+        let intra_tick_delta = transform.translation - tracker.last_position;
+        let expected_live_pos = predicted_pos + intra_tick_delta;
+
+        // 4. Divergence validation against predicted expected live position
+        let divergence_sq = transform.translation.distance_squared(expected_live_pos);
         let direct_dist_sq = transform.translation.distance_squared(auth_state.position);
 
-        if direct_dist_sq > TELEPORT_THRESHOLD_SQ {
+        // True hard teleport / death respawn: divergence exceeds 12m from expected live position
+        // AND the raw server distance exceeds 12m.
+        if divergence_sq > TELEPORT_THRESHOLD_SQ && direct_dist_sq > TELEPORT_THRESHOLD_SQ {
             // Hard teleport / death respawn detected: Flush all pre-death movement deltas,
             // zero residual physics momentum, and align player body & camera horizontally.
             buffer.queue.clear();
@@ -140,9 +162,7 @@ fn reconcile_server_state(
 
             // Snap RTS camera rig to the respawn coordinates so tactical view is centered
             for mut rig_t in rts_rig_query.iter_mut() {
-                rig_t.translation.x = auth_state.position.x;
-                rig_t.translation.z = auth_state.position.z;
-                rig_t.translation.y = auth_state.position.y;
+                rig_t.translation = auth_state.position;
             }
 
             tracing::info!(
@@ -151,22 +171,6 @@ fn reconcile_server_state(
             );
             continue;
         }
-
-        // 1. Discard acknowledged inputs
-        buffer.queue.retain(|input| input.tick_id > auth_state.last_processed_tick);
-
-        // 2. Replay pending inputs on top of verified server position
-        let mut predicted_pos = auth_state.position;
-        for unacked_input in &buffer.queue {
-            predicted_pos += unacked_input.delta;
-        }
-
-        // 3. Compensate for intra-tick unbuffered displacement
-        let intra_tick_delta = transform.translation - tracker.last_position;
-        let expected_live_pos = predicted_pos + intra_tick_delta;
-
-        // 4. Divergence validation
-        let divergence_sq = transform.translation.distance_squared(expected_live_pos);
 
         if divergence_sq > TOLERANCE_SQ {
             transform.translation = expected_live_pos;
