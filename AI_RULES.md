@@ -8,7 +8,8 @@
 ## 1. Project Context & High-Level Architecture
 We are developing a multiplayer fantasy real-time strategy (RTS) and survival game. 
 - **Backend:** SpacetimeDB v2.7+ server module written in Rust (2024 edition). All world simulation, transactions, combat verification, building stability, and player persistence run server-authoritatively inside WebAssembly sandbox reducers.
-- **Client:** Bevy 0.13 engine written in Rust, leveraging the official SpacetimeDB Rust SDK for real-time table replication, Avian3D (Rapier-based) for 3D physics/character movement, and custom WGSL shaders for stylized low-poly PBR rendering.
+- **Client:** Bevy engine written in Rust, leveraging the official SpacetimeDB Rust SDK for real-time table replication, Avian3D (XPBD/Parry-based) for 3D client physics and character movement, and custom WGSL shaders for stylized low-poly PBR rendering.
+- **Physics Architecture:** Avian3D runs exclusively on the Bevy client for responsive character prediction; standalone Rapier3D runs headless inside SpacetimeDB server WebAssembly reducers for authoritative hit verification and swept raycasts. Both share the exact same underlying collision kernel (Parry3D), with zero conflict.
 - **Target Target:** Seamless, fluid 60 FPS (16.67ms frame budget) supporting up to 50 concurrent players on a shared 400m × 400m procedural world.
 
 ---
