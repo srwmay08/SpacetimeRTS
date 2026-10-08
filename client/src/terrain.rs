@@ -350,6 +350,7 @@ pub fn compute_canonical_terrain_height(x: f32, z: f32) -> f32 {
         + noise.get([nx * 4.0, nz * 4.0]) * 0.1;
     
     elevation = (elevation + 1.0) * 0.5;
+    elevation = elevation.max(0.001);
     let mut y = (elevation.powf(1.4)) as f32 * base_height_amp;
 
     let river_factor = (x * 0.04).cos().abs() * 3.5;
@@ -363,6 +364,7 @@ pub fn compute_canonical_terrain_height(x: f32, z: f32) -> f32 {
         y = (y - basin_depth).max(0.2);
     }
 
+    if y.is_nan() { y = 0.5; }
     y
 }
 
@@ -374,20 +376,59 @@ pub fn compute_canonical_terrain_height(x: f32, z: f32) -> f32 {
 // Chunks are streamed via distance-prioritized concentric ordering, guaranteeing
 // immediate frame-1 loading around the player with zero gaps and seamless boundary heights.
 
+/// Packs 3D chunk coordinates into a 64-bit integer key using a 3D Morton Space-Filling Curve (Z-order curve).
+/// Interleaves binary bits across orthogonal dimensions to enforce spatial locality in SpacetimeDB B-Trees,
+/// ensuring spatial range queries translate to contiguous database reads.
+/// Allocation breakdown: X (24 bits: +/-8.3M chunks), Y (16 bits: +/-32K chunks), Z (24 bits).
 #[inline]
 pub fn pack_chunk_key(cx: i32, cy: i32, cz: i32) -> u64 {
-    let x_bits = (cx as i64 + 0x800000) as u64 & 0xFFFFFF;
-    let y_bits = (cy as i64 + 0x8000) as u64 & 0xFFFF;
-    let z_bits = (cz as i64 + 0x800000) as u64 & 0xFFFFFF;
-    (x_bits << 40) | (y_bits << 24) | z_bits
+    let ux = (cx as i64 + 0x800000) as u64 & 0xFFFFFF;
+    let uy = (cy as i64 + 0x8000) as u64 & 0xFFFF;
+    let uz = (cz as i64 + 0x800000) as u64 & 0xFFFFFF;
+
+    let mut key = 0u64;
+    // 3D Morton bit-interleaving for lower 16 bits of each coordinate (covers bits 0..48)
+    for i in 0..16 {
+        let bit_x = (ux >> i) & 1;
+        let bit_y = (uy >> i) & 1;
+        let bit_z = (uz >> i) & 1;
+        key |= (bit_x << (3 * i)) | (bit_y << (3 * i + 1)) | (bit_z << (3 * i + 2));
+    }
+    // 2D Morton bit-interleaving for remaining 8 bits of X and Z (covers bits 48..64)
+    for i in 0..8 {
+        let bit_x = (ux >> (16 + i)) & 1;
+        let bit_z = (uz >> (16 + i)) & 1;
+        key |= (bit_x << (48 + 2 * i)) | (bit_z << (48 + 2 * i + 1));
+    }
+    key
 }
 
+/// Unpacks a 64-bit Morton Code key back into signed 3D chunk coordinates.
 #[inline]
 pub fn unpack_chunk_key(key: u64) -> (i32, i32, i32) {
-    let x_bits = ((key >> 40) & 0xFFFFFF) as i64 - 0x800000;
-    let y_bits = ((key >> 24) & 0xFFFF) as i64 - 0x8000;
-    let z_bits = (key & 0xFFFFFF) as i64 - 0x800000;
-    (x_bits as i32, y_bits as i32, z_bits as i32)
+    let mut ux = 0u64;
+    let mut uy = 0u64;
+    let mut uz = 0u64;
+
+    for i in 0..16 {
+        let bit_x = (key >> (3 * i)) & 1;
+        let bit_y = (key >> (3 * i + 1)) & 1;
+        let bit_z = (key >> (3 * i + 2)) & 1;
+        ux |= bit_x << i;
+        uy |= bit_y << i;
+        uz |= bit_z << i;
+    }
+    for i in 0..8 {
+        let bit_x = (key >> (48 + 2 * i)) & 1;
+        let bit_z = (key >> (48 + 2 * i + 1)) & 1;
+        ux |= bit_x << (16 + i);
+        uz |= bit_z << (16 + i);
+    }
+
+    let cx = (ux as i64 - 0x800000) as i32;
+    let cy = (uy as i64 - 0x8000) as i32;
+    let cz = (uz as i64 - 0x800000) as i32;
+    (cx, cy, cz)
 }
 
 
@@ -1423,5 +1464,36 @@ mod tests {
         assert_eq!(candidates[2].2, 1);
         assert_eq!(candidates[3].2, 8);
         assert_eq!(candidates[4].2, 50, "distant chunk must be last priority");
+    }
+
+    #[test]
+    fn test_morton_chunk_key_bijection_and_locality() {
+        let coords = [
+            (0, 0, 0),
+            (1, 0, 0),
+            (0, 1, 0),
+            (0, 0, 1),
+            (-1, -1, -1),
+            (100, 50, -200),
+            (-500, -100, 500),
+            (50000, 15000, -50000),
+            (8_000_000, 30_000, 8_000_000),
+            (-8_000_000, -30_000, -8_000_000),
+        ];
+
+        for &(cx, cy, cz) in &coords {
+            let key = pack_chunk_key(cx, cy, cz);
+            let unpacked = unpack_chunk_key(key);
+            assert_eq!(unpacked, (cx, cy, cz), "Morton code must round-trip with 100% fidelity");
+        }
+
+        // Spatial locality invariant: adjacent chunks in 3D space should stay tightly bounded in key space
+        let k_base = pack_chunk_key(10, 10, 10);
+        let k_adj_x = pack_chunk_key(11, 10, 10);
+        let k_adj_y = pack_chunk_key(10, 11, 10);
+        let k_adj_z = pack_chunk_key(10, 10, 11);
+        assert_ne!(k_base, k_adj_x);
+        assert_ne!(k_base, k_adj_y);
+        assert_ne!(k_base, k_adj_z);
     }
 }

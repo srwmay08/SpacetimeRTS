@@ -2000,10 +2000,17 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
     Ok(())
 }
 
+static NOISE_ELEVATION: std::sync::OnceLock<Perlin> = std::sync::OnceLock::new();
+
+#[inline]
+pub fn get_noise_elevation() -> &'static Perlin {
+    NOISE_ELEVATION.get_or_init(|| Perlin::new(42))
+}
+
 pub fn get_terrain_height(x: f32, z: f32) -> f32 {
     let scale = 0.015;
     let base_height_amp = 18.0;
-    let noise_elevation = Perlin::new(42);
+    let noise_elevation = get_noise_elevation();
 
     let nx = x as f64 * scale;
     let nz = z as f64 * scale;

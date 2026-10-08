@@ -230,23 +230,59 @@ pub enum MineChunkOutcome {
     },
 }
 
-/// Packs 3D chunk coordinates into a 64-bit integer key without collisions.
+/// Packs 3D chunk coordinates into a 64-bit integer key using a 3D Morton Space-Filling Curve (Z-order curve).
+/// Interleaves binary bits across orthogonal dimensions to enforce spatial locality in SpacetimeDB B-Trees,
+/// ensuring spatial range queries translate to contiguous database reads.
 /// Allocation breakdown: X (24 bits: +/-8.3M chunks), Y (16 bits: +/-32K chunks), Z (24 bits).
 #[inline]
 pub fn pack_chunk_key(cx: i32, cy: i32, cz: i32) -> u64 {
-    let x_bits = (cx as i64 + 0x800000) as u64 & 0xFFFFFF;
-    let y_bits = (cy as i64 + 0x8000) as u64 & 0xFFFF;
-    let z_bits = (cz as i64 + 0x800000) as u64 & 0xFFFFFF;
-    (x_bits << 40) | (y_bits << 24) | z_bits
+    let ux = (cx as i64 + 0x800000) as u64 & 0xFFFFFF;
+    let uy = (cy as i64 + 0x8000) as u64 & 0xFFFF;
+    let uz = (cz as i64 + 0x800000) as u64 & 0xFFFFFF;
+
+    let mut key = 0u64;
+    // 3D Morton bit-interleaving for lower 16 bits of each coordinate (covers bits 0..48)
+    for i in 0..16 {
+        let bit_x = (ux >> i) & 1;
+        let bit_y = (uy >> i) & 1;
+        let bit_z = (uz >> i) & 1;
+        key |= (bit_x << (3 * i)) | (bit_y << (3 * i + 1)) | (bit_z << (3 * i + 2));
+    }
+    // 2D Morton bit-interleaving for remaining 8 bits of X and Z (covers bits 48..64)
+    for i in 0..8 {
+        let bit_x = (ux >> (16 + i)) & 1;
+        let bit_z = (uz >> (16 + i)) & 1;
+        key |= (bit_x << (48 + 2 * i)) | (bit_z << (48 + 2 * i + 1));
+    }
+    key
 }
 
-/// Unpacks a 64-bit chunk key back into signed 3D chunk coordinates.
+/// Unpacks a 64-bit Morton Code key back into signed 3D chunk coordinates.
 #[inline]
 pub fn unpack_chunk_key(key: u64) -> (i32, i32, i32) {
-    let x_bits = ((key >> 40) & 0xFFFFFF) as i64 - 0x800000;
-    let y_bits = ((key >> 24) & 0xFFFF) as i64 - 0x8000;
-    let z_bits = (key & 0xFFFFFF) as i64 - 0x800000;
-    (x_bits as i32, y_bits as i32, z_bits as i32)
+    let mut ux = 0u64;
+    let mut uy = 0u64;
+    let mut uz = 0u64;
+
+    for i in 0..16 {
+        let bit_x = (key >> (3 * i)) & 1;
+        let bit_y = (key >> (3 * i + 1)) & 1;
+        let bit_z = (key >> (3 * i + 2)) & 1;
+        ux |= bit_x << i;
+        uy |= bit_y << i;
+        uz |= bit_z << i;
+    }
+    for i in 0..8 {
+        let bit_x = (key >> (48 + 2 * i)) & 1;
+        let bit_z = (key >> (48 + 2 * i + 1)) & 1;
+        ux |= bit_x << (16 + i);
+        uz |= bit_z << (16 + i);
+    }
+
+    let cx = (ux as i64 - 0x800000) as i32;
+    let cy = (uy as i64 - 0x8000) as i32;
+    let cz = (uz as i64 - 0x800000) as i32;
+    (cx, cy, cz)
 }
 
 /// Converts local chunk voxel coordinates [0..15] to a contiguous array index.
