@@ -185,8 +185,8 @@ pub struct VisualFallHazard {
 /// - HighElf (The Pristine Bastion): Polished mint-green marble, lapis/obsidian roofs, gold filigree, sharp sweeping geometry.
 /// - Human (The Utilitarian Fortress): Rough-hewn grey stone blocks, red brick walls, iron-banded timber, blocky fortified geometry.
 /// Architectural Faction:
-/// [DEPRECATED]: Multi-race architectural mesh variations have been archived in
-/// `legacy_architectural_factions.rs`. Single Frontier Wood & Stone style is canonical.
+/// [ARCHIVED]: Multi-race architectural mesh variations have been archived in
+/// `docs/archive/legacy_architectural_factions.rs`. Single Frontier Wood & Stone style is canonical.
 /// Retained for network and historical event payload compatibility.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum BuildingFaction {
