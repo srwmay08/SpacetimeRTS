@@ -265,7 +265,7 @@ pub fn wait_for_connection(
                 next_state.set(GameState::InGame);
                 info!("Bootstrapping complete. Entering In-Game State.");
                 
-                let mut spawn_pos = Vec3::new(0.0, crate::terrain::get_terrain_height(0.0, 0.0) + 1.5, 0.0);
+                let mut spawn_pos = Vec3::new(0.0, crate::terrain::get_terrain_height(0.0, 0.0) + 1.05, 0.0);
                 let mut server_tick = 0;
 
                 if let Some(player) = connection.db.db.player().identity().find(id) {
