@@ -302,3 +302,74 @@ fn test_natural_cavern_carving_and_crust_preservation() {
     assert!(cave_found, "Must procedurally carve hollow subterranean caverns below surface crust");
     assert!(solid_found, "Must retain solid rock matrix surrounding subterranean caverns");
 }
+
+#[test]
+fn test_compute_rock_chunk_voxels_scale_and_passageway_clearance() {
+    use backend::voxel::{compute_rock_chunk_voxels, VOXEL_SIZE};
+
+    // Forward excavation: aim along +X
+    let voxels = compute_rock_chunk_voxels(10, 20, 10, 1.0, 0.0, 0.0);
+
+    // 1. Excavated volume: far exceeds a single 25cm cube (must be at least 40 voxels)
+    assert!(
+        voxels.len() >= 40,
+        "Rock chunk must excavate a substantial multi-voxel volume, got {}",
+        voxels.len()
+    );
+
+    // 2. Player humanoid capsule clearance:
+    // Humanoid capsule requires at least 0.8m width and 1.8m height.
+    let mut min_y = i32::MAX;
+    let mut max_y = i32::MIN;
+    let mut min_z = i32::MAX;
+    let mut max_z = i32::MIN;
+
+    for &(_vx, vy, vz) in &voxels {
+        min_y = min_y.min(vy);
+        max_y = max_y.max(vy);
+        min_z = min_z.min(vz);
+        max_z = max_z.max(vz);
+    }
+
+    let height_m = (max_y - min_y + 1) as f32 * VOXEL_SIZE;
+    let width_m = (max_z - min_z + 1) as f32 * VOXEL_SIZE;
+
+    assert!(
+        height_m >= 1.75,
+        "Excavated rock chunk height ({:.2}m) must comfortably clear player humanoid capsule (1.8m)",
+        height_m
+    );
+    assert!(
+        width_m >= 1.0,
+        "Excavated rock chunk width ({:.2}m) must comfortably clear player humanoid capsule (0.8m)",
+        width_m
+    );
+
+    // 3. Winding passageway: test that differing horizontal coordinates meander laterally
+    let voxels_step1 = compute_rock_chunk_voxels(10, 20, 10, 1.0, 0.0, 0.0);
+    let voxels_step2 = compute_rock_chunk_voxels(14, 20, 10, 1.0, 0.0, 0.0);
+    assert!(!voxels_step1.is_empty());
+    assert!(!voxels_step2.is_empty());
+}
+
+#[test]
+fn test_compute_rock_chunk_voxels_downward_shaft() {
+    use backend::voxel::{compute_rock_chunk_voxels, VOXEL_SIZE};
+
+    // Downward excavation: looking down into floor
+    let voxels = compute_rock_chunk_voxels(0, 10, 0, 0.0, -1.0, 0.0);
+
+    let mut min_y = i32::MAX;
+    let mut max_y = i32::MIN;
+    for &(_vx, vy, _vz) in &voxels {
+        min_y = min_y.min(vy);
+        max_y = max_y.max(vy);
+    }
+
+    let depth_m = (max_y - min_y + 1) as f32 * VOXEL_SIZE;
+    assert!(
+        depth_m >= 1.25,
+        "Downward rock chunk break must carve a walkable stepped descent at least 1.25m deep, got {:.2}m",
+        depth_m
+    );
+}

@@ -1908,44 +1908,60 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
             }
 
             let tool_dmg = if has_pickaxe { 160.0 } else { 45.0 };
-            if let Ok(mined_mat) = crate::voxel::mine_single_voxel(ctx, v_hit.vx, v_hit.vy, v_hit.vz, tool_dmg) {
-                let event_type = match mined_mat {
-                    crate::voxel::VoxelMaterial::IronOre => "HitIronOre".into(),
-                    crate::voxel::VoxelMaterial::Ruby => "HitRuby".into(),
-                    crate::voxel::VoxelMaterial::CollapsedRubble => "HitRubble".into(),
-                    _ => "HitRock".into(),
-                };
-                ctx.db.combat_event().insert(CombatEvent {
-                    id: 0,
-                    event_type,
-                    x: wx,
-                    y: wy,
-                    z: wz,
-                });
-
-                let (drop_item, count) = match mined_mat {
-                    crate::voxel::VoxelMaterial::IronOre => ("IronOre", 2),
-                    crate::voxel::VoxelMaterial::Ruby => ("Ruby", 1),
-                    crate::voxel::VoxelMaterial::CollapsedRubble => ("LooseStone", 2),
-                    crate::voxel::VoxelMaterial::Stone => ("Stone", 2),
-                    crate::voxel::VoxelMaterial::Dirt | crate::voxel::VoxelMaterial::Sand => ("LooseStone", 1),
-                    _ => ("Stone", 1),
-                };
-
-                add_item(&mut inventory, drop_item, count);
-
-                // Collapsed rubble buried loot payout!
-                if mined_mat == crate::voxel::VoxelMaterial::CollapsedRubble {
-                    let mut loot_seed = ctx.timestamp.to_micros_since_unix_epoch() as u64 ^ (v_hit.vx as u64).wrapping_mul(31);
-                    let loot_roll = prng(&mut loot_seed);
-                    if loot_roll < 0.35 {
-                        add_item(&mut inventory, "Ruby", 1);
-                    } else if loot_roll < 0.70 {
-                        add_item(&mut inventory, "IronOre", 2);
-                    }
+            match crate::voxel::mine_rock_chunk(ctx, v_hit.vx, v_hit.vy, v_hit.vz, dx, dy, dz, tool_dmg) {
+                Ok(crate::voxel::MineChunkOutcome::Cracked { hits_remaining: _, primary_mat }) => {
+                    let event_type = match primary_mat {
+                        crate::voxel::VoxelMaterial::IronOre | crate::voxel::VoxelMaterial::Ruby => "CrackOre".into(),
+                        _ => "CrackRock".into(),
+                    };
+                    ctx.db.combat_event().insert(CombatEvent {
+                        id: 0,
+                        event_type,
+                        x: wx,
+                        y: wy,
+                        z: wz,
+                    });
                 }
+                Ok(crate::voxel::MineChunkOutcome::Shattered { primary_mat, voxels_excavated: _ }) => {
+                    let event_type = match primary_mat {
+                        crate::voxel::VoxelMaterial::IronOre => "HitIronOre".into(),
+                        crate::voxel::VoxelMaterial::Ruby => "HitRuby".into(),
+                        crate::voxel::VoxelMaterial::CollapsedRubble => "HitRubble".into(),
+                        _ => "HitRock".into(),
+                    };
+                    ctx.db.combat_event().insert(CombatEvent {
+                        id: 0,
+                        event_type,
+                        x: wx,
+                        y: wy,
+                        z: wz,
+                    });
 
-                ctx.db.inventory().entity_id().update(inventory);
+                    let (drop_item, count) = match primary_mat {
+                        crate::voxel::VoxelMaterial::IronOre => ("IronOre", 3),
+                        crate::voxel::VoxelMaterial::Ruby => ("Ruby", 2),
+                        crate::voxel::VoxelMaterial::CollapsedRubble => ("LooseStone", 3),
+                        crate::voxel::VoxelMaterial::Stone => ("Stone", 3),
+                        crate::voxel::VoxelMaterial::Dirt | crate::voxel::VoxelMaterial::Sand => ("LooseStone", 2),
+                        _ => ("Stone", 2),
+                    };
+
+                    add_item(&mut inventory, drop_item, count);
+
+                    // Collapsed rubble buried loot payout!
+                    if primary_mat == crate::voxel::VoxelMaterial::CollapsedRubble {
+                        let mut loot_seed = ctx.timestamp.to_micros_since_unix_epoch() as u64 ^ (v_hit.vx as u64).wrapping_mul(31);
+                        let loot_roll = prng(&mut loot_seed);
+                        if loot_roll < 0.35 {
+                            add_item(&mut inventory, "Ruby", 1);
+                        } else if loot_roll < 0.70 {
+                            add_item(&mut inventory, "IronOre", 2);
+                        }
+                    }
+
+                    ctx.db.inventory().entity_id().update(inventory);
+                }
+                Err(_) => {}
             }
             return Ok(());
         }

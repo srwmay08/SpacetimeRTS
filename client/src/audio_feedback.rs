@@ -331,12 +331,72 @@ pub fn process_combat_events(
                         0.08,
                     );
                 }
-                "HitRock" => {
+                "CrackRock" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 6,
+                        Color::srgb(0.48, 0.48, 0.50),
+                        Color::srgb(0.65, 0.65, 0.68),
+                        0.05,
+                    );
+                    if let Some(ref handles) = audio_handles {
+                        play_sound(&mut commands, &handles.sword_clang);
+                    }
+                }
+                "CrackOre" => {
                     crate::terrain::spawn_voxel_gibs(
                         &mut commands, &mut meshes, &mut materials,
                         pos, 8,
+                        Color::srgb(0.64, 0.38, 0.25),
+                        Color::srgb(0.85, 0.15, 0.35),
+                        0.06,
+                    );
+                    if let Some(ref handles) = audio_handles {
+                        play_sound(&mut commands, &handles.sword_clang);
+                    }
+                }
+                "HitRock" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 22,
                         Color::srgb(0.48, 0.48, 0.50),
                         Color::srgb(0.65, 0.65, 0.68),
+                        0.09,
+                    );
+                    if let Some(ref handles) = audio_handles {
+                        play_sound(&mut commands, &handles.armor_break);
+                    }
+                }
+                "HitIronOre" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 24,
+                        Color::srgb(0.64, 0.38, 0.25),
+                        Color::srgb(0.80, 0.50, 0.30),
+                        0.09,
+                    );
+                    if let Some(ref handles) = audio_handles {
+                        play_sound(&mut commands, &handles.armor_break);
+                    }
+                }
+                "HitRuby" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 24,
+                        Color::srgb(0.88, 0.15, 0.35),
+                        Color::srgb(1.0, 0.30, 0.50),
+                        0.09,
+                    );
+                    if let Some(ref handles) = audio_handles {
+                        play_sound(&mut commands, &handles.armor_break);
+                    }
+                }
+                "HitRubble" => {
+                    crate::terrain::spawn_voxel_gibs(
+                        &mut commands, &mut meshes, &mut materials,
+                        pos, 18,
+                        Color::srgb(0.40, 0.36, 0.34),
+                        Color::srgb(0.50, 0.46, 0.42),
                         0.08,
                     );
                 }

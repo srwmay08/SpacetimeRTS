@@ -127,6 +127,33 @@ pub struct VoxelChunk {
     pub last_modified_tick: u64,
 }
 
+/// Tracks multi-hit excavation damage on individual rock chunks.
+/// Uses a private SpacetimeDB table (without public modifier) so state is server-authoritative
+/// and does not require client-side schema subscriptions.
+#[table(accessor = rock_excavation_state)]
+#[derive(Clone)]
+pub struct RockExcavationState {
+    #[primary_key]
+    pub rock_key: u64,
+    pub hits_taken: u32,
+    pub last_hit_tick: u64,
+}
+
+/// Result of striking a rock chunk with a mining tool or explosive impact.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MineChunkOutcome {
+    /// Hit registered, rock cracked / chipped, but requires more swings to shatter.
+    Cracked {
+        hits_remaining: u32,
+        primary_mat: VoxelMaterial,
+    },
+    /// Chunk shattered and cleared, yielding mined material and count of voxels excavated.
+    Shattered {
+        primary_mat: VoxelMaterial,
+        voxels_excavated: usize,
+    },
+}
+
 /// Packs 3D chunk coordinates into a 64-bit integer key without collisions.
 /// Allocation breakdown: X (24 bits: +/-8.3M chunks), Y (16 bits: +/-32K chunks), Z (24 bits).
 #[inline]
@@ -594,6 +621,289 @@ pub fn mine_single_voxel(
     evaluate_structural_collapse(ctx, &[(vx, vy, vz)]);
 
     Ok(current_mat)
+}
+
+/// Computes the 3D voxel coordinate set for an irregular rock chunk excavation.
+/// Rather than clearing an isolated 25cm cube or an austere box, generates a connected union
+/// of imperfect cuboids with deterministic lateral meandering and floor steps.
+/// This carves a comfortable passageway (~1.25m wide, ~2.0m tall) matching the player's
+/// humanoid capsule so miners do not have to break dozens of tiny bricks to move forward.
+pub fn compute_rock_chunk_voxels(
+    hit_vx: i32,
+    hit_vy: i32,
+    hit_vz: i32,
+    dir_x: f32,
+    dir_y: f32,
+    dir_z: f32,
+) -> Vec<(i32, i32, i32)> {
+    let dir_len = (dir_x * dir_x + dir_y * dir_y + dir_z * dir_z).sqrt();
+    let (ndx, ndy, ndz) = if dir_len > 0.001 {
+        (dir_x / dir_len, dir_y / dir_len, dir_z / dir_len)
+    } else {
+        (0.0, -1.0, 0.0)
+    };
+
+    // Center the rock chunk slightly into the solid surface along aim direction (~0.5m)
+    let center_vx = hit_vx + (ndx * 2.0).round() as i32;
+    let center_vy = hit_vy + (ndy * 2.0).round() as i32;
+    let center_vz = hit_vz + (ndz * 2.0).round() as i32;
+
+    let mut voxels = std::collections::BTreeSet::new();
+
+    let is_digging_down = ndy < -0.707;
+
+    if is_digging_down {
+        // Downward excavation: carves a stepped descent/stair shaft into the ground
+        // Core shaft: 5x5 horizontal, extending down 6 voxels (1.5m)
+        for dy in -6..=0 {
+            let max_spread = if dy < -3 { 1 } else { 2 };
+            for dx in -max_spread..=max_spread {
+                for dz in -max_spread..=max_spread {
+                    voxels.insert((center_vx + dx, center_vy + dy, center_vz + dz));
+                }
+            }
+        }
+        // Entry chamfer: forward step
+        let fwd_x = (ndx * 2.0).round() as i32;
+        let fwd_z = (ndz * 2.0).round() as i32;
+        for dy in -3..=1 {
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    voxels.insert((hit_vx + dx + fwd_x, hit_vy + dy, hit_vz + dz + fwd_z));
+                }
+            }
+        }
+    } else {
+        // Forward / Wall excavation: carves an arched, winding passageway
+        // Lateral vector perpendicular to horizontal aim direction
+        let horiz_len = (ndx * ndx + ndz * ndz).sqrt();
+        let (lat_x, lat_z) = if horiz_len > 0.001 {
+            (-ndz / horiz_len, ndx / horiz_len)
+        } else {
+            (1.0, 0.0)
+        };
+
+        // Sinusoidal winding meander based on world elevation and coordinates
+        let meander_phase = (center_vx as f32 * 0.35 + center_vz as f32 * 0.35).sin();
+        let meander_offset = (meander_phase * 1.4).round() as i32;
+        let m_vx = center_vx + (lat_x * meander_offset as f32).round() as i32;
+        let m_vz = center_vz + (lat_z * meander_offset as f32).round() as i32;
+
+        let seed = (center_vx.wrapping_mul(73856093)
+            ^ center_vy.wrapping_mul(19349663)
+            ^ center_vz.wrapping_mul(83492791)) as u64;
+
+        // Cuboid 1: Main Core Body (approx 1.25m wide, 2.0m tall, 1.0m deep)
+        for dy in -2..=5 {
+            for d_lat in -2..=2 {
+                for d_depth in -1..=2 {
+                    let vx = m_vx + (lat_x * d_lat as f32).round() as i32 + (ndx * d_depth as f32).round() as i32;
+                    let vy = center_vy + dy;
+                    let vz = m_vz + (lat_z * d_lat as f32).round() as i32 + (ndz * d_depth as f32).round() as i32;
+                    voxels.insert((vx, vy, vz));
+                }
+            }
+        }
+
+        // Cuboid 2: Stepped Base / Walkable Floor Ramp (offsets slightly downward and forward)
+        for dy in -4..=-2 {
+            for d_lat in -1..=1 {
+                for d_depth in 0..=2 {
+                    let vx = m_vx + (lat_x * d_lat as f32).round() as i32 + (ndx * d_depth as f32).round() as i32;
+                    let vy = center_vy + dy;
+                    let vz = m_vz + (lat_z * d_lat as f32).round() as i32 + (ndz * d_depth as f32).round() as i32;
+                    voxels.insert((vx, vy, vz));
+                }
+            }
+        }
+
+        // Cuboid 3: Vaulted Cave Ceiling Arch (narrows at top, creating an organic stone roof)
+        for dy in 5..=6 {
+            let arch_width = if dy == 6 { 1 } else { 2 };
+            for d_lat in -arch_width..=arch_width {
+                for d_depth in -1..=1 {
+                    let vx = m_vx + (lat_x * d_lat as f32).round() as i32 + (ndx * d_depth as f32).round() as i32;
+                    let vy = center_vy + dy;
+                    let vz = m_vz + (lat_z * d_lat as f32).round() as i32 + (ndz * d_depth as f32).round() as i32;
+                    voxels.insert((vx, vy, vz));
+                }
+            }
+        }
+
+        // Cuboid 4: Imperfect Faceted Wall Alcove / Rock Fracture
+        let side = if seed % 2 == 0 { 2 } else { -2 };
+        for dy in -1..=3 {
+            for d_lat in 0..=1 {
+                for d_depth in 0..=1 {
+                    let eff_lat = side + if side > 0 { d_lat } else { -d_lat };
+                    let vx = m_vx + (lat_x * eff_lat as f32).round() as i32 + (ndx * d_depth as f32).round() as i32;
+                    let vy = center_vy + dy;
+                    let vz = m_vz + (lat_z * eff_lat as f32).round() as i32 + (ndz * d_depth as f32).round() as i32;
+                    voxels.insert((vx, vy, vz));
+                }
+            }
+        }
+    }
+
+    // Always include the hit voxel itself to ensure prompt boundary removal
+    voxels.insert((hit_vx, hit_vy, hit_vz));
+
+    voxels
+        .into_iter()
+        .filter(|&(_vx, vy, _vz)| (vy as f32 * VOXEL_SIZE) > BEDROCK_ELEVATION)
+        .collect()
+}
+
+/// Authoritative rock chunk excavation across connected imperfect cuboids.
+/// Evaluates material-dependent multi-hit durability (1 hit for dirt/sand/rubble, 2 for stone,
+/// 3-4 for rich ores and reinforced stone), crack propagation, and structural invalidation.
+pub fn mine_rock_chunk(
+    ctx: &ReducerContext,
+    hit_vx: i32,
+    hit_vy: i32,
+    hit_vz: i32,
+    dir_x: f32,
+    dir_y: f32,
+    dir_z: f32,
+    tool_damage: f32,
+) -> Result<MineChunkOutcome, String> {
+    let hit_wx = (hit_vx as f32 + 0.5) * VOXEL_SIZE;
+    let hit_wy = (hit_vy as f32 + 0.5) * VOXEL_SIZE;
+    let hit_wz = (hit_vz as f32 + 0.5) * VOXEL_SIZE;
+    let hit_mat = get_voxel_at(ctx, hit_wx, hit_wy, hit_wz);
+
+    if hit_mat == VoxelMaterial::Bedrock {
+        return Err("Bedrock is indestructible.".to_string());
+    }
+    if hit_mat == VoxelMaterial::Air {
+        return Err("Cannot mine air.".to_string());
+    }
+    if tool_damage < hit_mat.hardness() {
+        return Err(format!(
+            "Insufficient tool damage: {} required for {:?}",
+            hit_mat.hardness(),
+            hit_mat
+        ));
+    }
+
+    let required_hits = match hit_mat {
+        VoxelMaterial::Dirt | VoxelMaterial::Sand | VoxelMaterial::CollapsedRubble => 1,
+        VoxelMaterial::Stone => 2,
+        VoxelMaterial::IronOre => 3,
+        VoxelMaterial::Ruby | VoxelMaterial::ReinforcedStone => 4,
+        _ => 2,
+    };
+
+    let macro_x = hit_vx.div_euclid(4);
+    let macro_y = hit_vy.div_euclid(4);
+    let macro_z = hit_vz.div_euclid(4);
+    let rock_key = pack_chunk_key(macro_x, macro_y, macro_z);
+    let current_tick = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+
+    let (hits, exists) = match ctx.db.rock_excavation_state().rock_key().find(rock_key) {
+        Some(state) => {
+            // Reset if hit was more than 30 seconds ago
+            if current_tick.saturating_sub(state.last_hit_tick) > 30_000_000 {
+                (1, true)
+            } else {
+                (state.hits_taken + 1, true)
+            }
+        }
+        None => (1, false),
+    };
+
+    if hits < required_hits {
+        if exists {
+            ctx.db.rock_excavation_state().rock_key().update(RockExcavationState {
+                rock_key,
+                hits_taken: hits,
+                last_hit_tick: current_tick,
+            });
+        } else {
+            ctx.db.rock_excavation_state().insert(RockExcavationState {
+                rock_key,
+                hits_taken: hits,
+                last_hit_tick: current_tick,
+            });
+        }
+        return Ok(MineChunkOutcome::Cracked {
+            hits_remaining: required_hits - hits,
+            primary_mat: hit_mat,
+        });
+    }
+
+    // Shatter the rock chunk!
+    if exists {
+        ctx.db.rock_excavation_state().rock_key().delete(rock_key);
+    }
+
+    let voxels_to_carve = compute_rock_chunk_voxels(hit_vx, hit_vy, hit_vz, dir_x, dir_y, dir_z);
+    let mut modified_chunk_keys = std::collections::BTreeSet::new();
+    let mut invalidated_voxels = Vec::new();
+
+    let mut min_wx = f32::MAX;
+    let mut max_wx = f32::MIN;
+    let mut min_wy = f32::MAX;
+    let mut max_wy = f32::MIN;
+    let mut min_wz = f32::MAX;
+    let mut max_wz = f32::MIN;
+
+    for (vx, vy, vz) in voxels_to_carve {
+        let cx = vx.div_euclid(CHUNK_SIZE as i32);
+        let cy = vy.div_euclid(CHUNK_SIZE as i32);
+        let cz = vz.div_euclid(CHUNK_SIZE as i32);
+        let lx = vx.rem_euclid(CHUNK_SIZE as i32) as usize;
+        let ly = vy.rem_euclid(CHUNK_SIZE as i32) as usize;
+        let lz = vz.rem_euclid(CHUNK_SIZE as i32) as usize;
+
+        let mut chunk = ensure_or_create_chunk(ctx, cx, cy, cz);
+        let idx = local_to_index(lx, ly, lz);
+        let current_mat = VoxelMaterial::from_u8(chunk.voxels[idx]);
+
+        if current_mat.is_solid() && current_mat != VoxelMaterial::Bedrock {
+            chunk.voxels[idx] = VoxelMaterial::Air as u8;
+            chunk.last_modified_tick = current_tick;
+            ctx.db.voxel_chunk().chunk_key().update(chunk);
+
+            invalidated_voxels.push((vx, vy, vz));
+            modified_chunk_keys.insert((cx, cy, cz));
+
+            let wx = (vx as f32 + 0.5) * VOXEL_SIZE;
+            let wy = (vy as f32 + 0.5) * VOXEL_SIZE;
+            let wz = (vz as f32 + 0.5) * VOXEL_SIZE;
+
+            min_wx = min_wx.min(wx);
+            max_wx = max_wx.max(wx);
+            min_wy = min_wy.min(wy);
+            max_wy = max_wy.max(wy);
+            min_wz = min_wz.min(wz);
+            max_wz = max_wz.max(wz);
+        }
+    }
+
+    if !invalidated_voxels.is_empty() {
+        ctx.db.nav_event().insert(crate::NavEvent {
+            id: 0,
+            min_x: min_wx - 1.0,
+            min_y: min_wy - 1.0,
+            min_z: min_wz - 1.0,
+            max_x: max_wx + 1.0,
+            max_y: max_wy + 1.0,
+            max_z: max_wz + 1.0,
+        });
+
+        let center_wx = (min_wx + max_wx) * 0.5;
+        let center_wy = (min_wy + max_wy) * 0.5;
+        let center_wz = (min_wz + max_wz) * 0.5;
+        crate::building::invalidate_structures_at(ctx, center_wx, center_wy, center_wz);
+
+        evaluate_structural_collapse(ctx, &invalidated_voxels);
+    }
+
+    Ok(MineChunkOutcome::Shattered {
+        primary_mat: hit_mat,
+        voxels_excavated: invalidated_voxels.len(),
+    })
 }
 
 // Architectural Note: Sub-Meter Voxel Sphere Mutation.
