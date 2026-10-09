@@ -371,7 +371,9 @@ pub fn mesh_subterrain_chunk(
         }
     }
 
-    // 2. Inspect column for player excavations or natural cave cavities
+    // 2. Fast Coarse Cave & Ravine Early-Out Check
+    // Rather than doing 52,000 voxel evaluations with 3D Perlin noise for chunks that are 100% solid rock,
+    // evaluate coarse 2D bounds (ravine fissures and dungeon chambers) and a sparse vertical probe first.
     let col_chunks: Vec<&VoxelChunk> = db_chunks.values()
         .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
         .collect();
@@ -380,8 +382,8 @@ pub fn mesh_subterrain_chunk(
 
     // Calculate maximum surface height across this chunk
     let mut chunk_max_h = BEDROCK_ELEVATION;
-    for pz in 0..=16 {
-        for px in 0..=16 {
+    for pz in (0..=16).step_by(4) {
+        for px in (0..=16).step_by(4) {
             let h = crate::terrain::get_terrain_height(chunk_base_x + px as f32, chunk_base_z + pz as f32);
             chunk_max_h = chunk_max_h.max(h);
         }
@@ -389,18 +391,31 @@ pub fn mesh_subterrain_chunk(
     let max_cavity_vy = (chunk_max_h - 3.9).floor() as i32;
     let base_vy = (BEDROCK_ELEVATION + 1.0).ceil() as i32; // -119
 
-    let mut has_cave = false;
-    for test_y in (-110..=max_cavity_vy).step_by(6) {
-        for &(ox, oz) in &[(4.0, 4.0), (12.0, 4.0), (4.0, 12.0), (12.0, 12.0)] {
-            if is_cave_air_at(chunk_base_x + ox, test_y as f32, chunk_base_z + oz, chunk_max_h) {
-                has_cave = true;
-                break;
+    // Fast 2D coarse tests:
+    let mid_x = chunk_base_x + 8.0;
+    let mid_z = chunk_base_z + 8.0;
+    let ravine_sample = get_ravine_perlin().get([mid_x as f64 * 0.007, mid_z as f64 * 0.007]);
+    let might_have_ravine = ravine_sample.abs() < 0.038;
+    let might_have_dungeon = is_dungeon_cavity_at(mid_x, -24.0, mid_z, chunk_max_h)
+        || is_dungeon_cavity_at(chunk_base_x + 2.0, -24.0, chunk_base_z + 2.0, chunk_max_h)
+        || is_dungeon_cavity_at(chunk_base_x + 14.0, -24.0, chunk_base_z + 14.0, chunk_max_h);
+
+    let mut has_cave = might_have_ravine || might_have_dungeon;
+    if !has_cave {
+        // Coarse 3D probe: check sparse points across the vertical column
+        for test_y in (-100..=max_cavity_vy).step_by(10) {
+            for &(ox, oz) in &[(4.0, 4.0), (12.0, 12.0)] {
+                if is_cave_air_at(chunk_base_x + ox, test_y as f32, chunk_base_z + oz, chunk_max_h) {
+                    has_cave = true;
+                    break;
+                }
             }
+            if has_cave { break; }
         }
-        if has_cave { break; }
     }
 
-    // Optimization: Solid stone chunk without cavities returns immediately with bedrock floor
+    // Optimization: Solid stone chunk without cavities returns immediately with bedrock floor.
+    // Skips allocating the 50,000-voxel grid and evaluating thousands of 3D noise calls!
     if !has_excavation && !has_cave {
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);

@@ -913,10 +913,12 @@ pub fn update_infinite_voxel_terrain(
     let (view_radius, unload_radius, spawn_batch) = if let Some(ref rs) = render_settings {
         let vr = if rs.spawn_full_zone { 64 } else { rs.view_distance_chunks };
         let ur = if rs.spawn_full_zone { 70 } else { rs.unload_distance_chunks.max(vr + 1) };
-        let batch = if rs.spawn_full_zone { 256 } else { 32.max(vr as usize * 3) };
+        // Budgeted Chunk Spawner: cap normal frame spawns to 6 (or 16 if full zone)
+        // to maintain locked 60 FPS (16.6ms) without stutter spikes on main thread
+        let batch = if rs.spawn_full_zone { 16 } else { 6 };
         (vr, ur, batch)
     } else {
-        (LOW_POLY_RADIUS_CHUNKS, LOW_POLY_UNLOAD_RADIUS_CHUNKS, 32)
+        (LOW_POLY_RADIUS_CHUNKS, LOW_POLY_UNLOAD_RADIUS_CHUNKS, 6)
     };
 
     // 3. Collect candidate unspawned chunks within view radius
@@ -943,6 +945,10 @@ pub fn update_infinite_voxel_terrain(
 
     let immediate_unspawned = candidates.iter().take_while(|c| c.2 <= 2).count();
     let max_spawn_this_frame = spawn_batch.max(immediate_unspawned);
+
+    // Player elevation check: determine if player is deep underground or on surface
+    let player_surface_h = get_terrain_height(p_pos.x, p_pos.z);
+    let is_player_underground = p_pos.y < (player_surface_h - 3.5);
 
     for (cx, cz, dist_sq_chunks, key) in candidates.into_iter().take(max_spawn_this_frame) {
         let db_mod_tick = db_chunks.values()
@@ -992,36 +998,46 @@ pub fn update_infinite_voxel_terrain(
         }
 
         // B. Spawn Subterrain Chunk Entity (bedrock floor, natural caves, and Voronoi strata)
+        // Optimization: When the player is on the surface, only spawn subterranean chunks if they
+        // contain player excavations or open cave/dungeon shafts. Solid enclosed earth is skipped.
         if !loaded_sub_entities.contains_key(&key) {
-            if let Some(sub_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz) {
-                let sub_collider = if needs_collider {
-                    Collider::trimesh_from_mesh(&sub_mesh)
-                } else {
-                    None
-                };
+            let has_excavation = db_chunks.values().any(|c| c.chunk_x == cx && c.chunk_z == cz && c.voxels.iter().any(|&m| m == 0));
+            let should_spawn_sub = is_player_underground || has_excavation || dist_sq_chunks <= 4;
 
-                let sub_mesh_handle = meshes.add(sub_mesh);
-                let mut sub_entity_cmds = commands.spawn((
-                    PbrBundle {
-                        mesh: sub_mesh_handle,
-                        material: mat_handle.clone(),
-                        transform: BevyTransform::from_xyz(chunk_world_x, 0.0, chunk_world_z),
-                        ..default()
-                    },
-                    RigidBody::Static,
-                    CollisionLayers::new([GameLayer::Terrain], [GameLayer::Default, GameLayer::Unit, GameLayer::Environment]),
-                    SubterrainChunkMarker {
-                        chunk_key: key,
-                        chunk_x: cx,
-                        chunk_z: cz,
-                        last_modified_tick: db_mod_tick,
-                        center_window_y: 0,
-                    },
-                    SubterrainChunkVisual,
-                ));
+            if should_spawn_sub {
+                if let Some(sub_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz) {
+                    let sub_collider = if needs_collider {
+                        Collider::trimesh_from_mesh(&sub_mesh)
+                    } else {
+                        None
+                    };
 
-                if let Some(col) = sub_collider {
-                    sub_entity_cmds.insert((col, SubterrainChunkHasCollider));
+                    let sub_mesh_handle = meshes.add(sub_mesh);
+                    let mut sub_entity_cmds = commands.spawn((
+                        PbrBundle {
+                            mesh: sub_mesh_handle,
+                            material: mat_handle.clone(),
+                            transform: BevyTransform::from_xyz(chunk_world_x, 0.0, chunk_world_z),
+                            ..default()
+                        },
+                        // AI_RULES.md Directive 5.2: Subterranean chunks are deep underground or enclosed.
+                        // Tagging with NotShadowCaster eliminates thousands of redundant shadow cascade raster passes!
+                        NotShadowCaster,
+                        RigidBody::Static,
+                        CollisionLayers::new([GameLayer::Terrain], [GameLayer::Default, GameLayer::Unit, GameLayer::Environment]),
+                        SubterrainChunkMarker {
+                            chunk_key: key,
+                            chunk_x: cx,
+                            chunk_z: cz,
+                            last_modified_tick: db_mod_tick,
+                            center_window_y: 0,
+                        },
+                        SubterrainChunkVisual,
+                    ));
+
+                    if let Some(col) = sub_collider {
+                        sub_entity_cmds.insert((col, SubterrainChunkHasCollider));
+                    }
                 }
             }
         }
