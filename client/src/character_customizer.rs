@@ -36,6 +36,13 @@ use bevy::window::{CursorGrabMode, PrimaryWindow};
 use crate::physics::LinearVelocity;
 use tracing::info;
 
+use rapier3d::prelude::{
+    CCDSolver, ColliderBuilder, ColliderHandle, ColliderSet, DefaultBroadPhase,
+    ImpulseJointSet, IntegrationParameters, IslandManager, MultibodyJointSet,
+    NarrowPhase, PhysicsPipeline, QueryPipeline, RigidBodyBuilder,
+    RigidBodyHandle, RigidBodySet, SharedShape,
+};
+
 use crate::components::*;
 use crate::core::*;
 use crate::camera::CharacterCameraSettings;
@@ -315,7 +322,83 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
 ];
 
 // ----------------------------------------------------------------------------
-// 3. ECS COMPONENTS & MARKERS
+// 3. RAW RAPIER PHYSICS WORLD RESOURCE & ECS HANDLES
+// ----------------------------------------------------------------------------
+
+/// Pure Rapier3D physics state wrapped as a standard Bevy Resource.
+/// Allows manual deterministic stepping in FixedUpdate and identical simulation
+/// matching the SpacetimeDB server.
+#[derive(Resource)]
+pub struct PhysicsWorld {
+    pub gravity: rapier3d::na::Vector3<f32>,
+    pub integration_parameters: IntegrationParameters,
+    pub physics_pipeline: PhysicsPipeline,
+    pub island_manager: IslandManager,
+    pub broad_phase: DefaultBroadPhase,
+    pub narrow_phase: NarrowPhase,
+    pub rigid_body_set: RigidBodySet,
+    pub collider_set: ColliderSet,
+    pub impulse_joint_set: ImpulseJointSet,
+    pub multibody_joint_set: MultibodyJointSet,
+    pub ccd_solver: CCDSolver,
+    pub query_pipeline: QueryPipeline,
+}
+
+impl Default for PhysicsWorld {
+    fn default() -> Self {
+        Self {
+            gravity: rapier3d::na::Vector3::new(0.0, -9.81, 0.0),
+            integration_parameters: IntegrationParameters::default(),
+            physics_pipeline: PhysicsPipeline::new(),
+            island_manager: IslandManager::new(),
+            broad_phase: DefaultBroadPhase::new(),
+            narrow_phase: NarrowPhase::new(),
+            rigid_body_set: RigidBodySet::new(),
+            collider_set: ColliderSet::new(),
+            impulse_joint_set: ImpulseJointSet::new(),
+            multibody_joint_set: MultibodyJointSet::new(),
+            ccd_solver: CCDSolver::new(),
+            query_pipeline: QueryPipeline::new(),
+        }
+    }
+}
+
+impl PhysicsWorld {
+    pub fn step(&mut self) {
+        let physics_hooks = ();
+        let event_handler = ();
+        self.physics_pipeline.step(
+            &self.gravity,
+            &self.integration_parameters,
+            &mut self.island_manager,
+            &mut self.broad_phase,
+            &mut self.narrow_phase,
+            &mut self.rigid_body_set,
+            &mut self.collider_set,
+            &mut self.impulse_joint_set,
+            &mut self.multibody_joint_set,
+            &mut self.ccd_solver,
+            Some(&mut self.query_pipeline),
+            &physics_hooks,
+            &event_handler,
+        );
+    }
+}
+
+/// Identifies the owning Rapier RigidBody for an entity.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RbHandle(pub RigidBodyHandle);
+
+/// Identifies the corresponding Rapier Collider hitbox for an articulated visual joint.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColHandle(pub ColliderHandle);
+
+/// Marks intermediate limb mesh segments for in-place scale and offset mutation.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LimbMeshSegment(pub JointType);
+
+// ----------------------------------------------------------------------------
+// 4. ECS COMPONENTS & MARKERS
 // ----------------------------------------------------------------------------
 
 /// Marks the specific anatomical joint for procedural rotation updates.
@@ -399,7 +482,7 @@ pub enum ActionState {
 }
 
 // ----------------------------------------------------------------------------
-// 4. PROCEDURAL MESH GENERATORS
+// 5. PROCEDURAL MESH GENERATORS
 // ----------------------------------------------------------------------------
 
 /// Generates a stylized, low-poly faceted 3D face mesh matching the FaceProfile.
@@ -510,10 +593,12 @@ pub fn create_low_poly_pyramid() -> Mesh {
 }
 
 // ----------------------------------------------------------------------------
-// 5. PROCEDURAL CHARACTER HIERARCHY ASSEMBLY
+// 6. PROCEDURAL CHARACTER HIERARCHY & COMPOUND PHYSICS SKELETON
 // ----------------------------------------------------------------------------
 
 /// Spawns the entire articulated character hierarchy matching the SpacetimeRTS directives.
+/// Constructs the visual Bevy entity tree and builds the compound Rapier physics skeleton
+/// simultaneously, attaching ColHandle to each joint and RbHandle to the root.
 pub fn spawn_procedural_character_hierarchy(
     commands: &mut Commands,
     parent_entity: Entity,
@@ -522,53 +607,18 @@ pub fn spawn_procedural_character_hierarchy(
     race: &RaceAnatomyProfile,
     face: &FaceProfile,
     render_layers: RenderLayers,
+    physics: &mut PhysicsWorld,
 ) -> Entity {
-    // Generate mesh assets
+    // 1. Create root kinematic RigidBody in Rapier physics world
+    let root_rb = RigidBodyBuilder::kinematic_position_based().build();
+    let root_rb_handle = physics.rigid_body_set.insert(root_rb);
+
+    // 2. Unit cuboid mesh shared across all procedural limbs (sized purely via Transform::scale)
+    let unit_cuboid = meshes.add(bevy::math::primitives::Cuboid::new(1.0, 1.0, 1.0));
     let face_mesh = meshes.add(generate_custom_face(face));
-    let skull_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
-        0.34 * race.head_scale,
-        0.38 * race.head_scale,
-        0.34 * race.head_scale,
-    ));
-    let torso_mesh = meshes.add(bevy::math::primitives::Cuboid::from_size(race.torso_size));
-    let upper_arm_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
-        race.limb_thickness,
-        race.upper_arm_length,
-        race.limb_thickness,
-    ));
-    let forearm_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
-        race.limb_thickness * 0.9,
-        race.forearm_length,
-        race.limb_thickness * 0.9,
-    ));
-    let hand_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
-        race.limb_thickness * 0.95,
-        0.12,
-        race.limb_thickness * 1.1,
-    ));
-    let upper_leg_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
-        race.limb_thickness * 1.15,
-        race.upper_leg_length,
-        race.limb_thickness * 1.15,
-    ));
-    let lower_leg_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
-        race.limb_thickness,
-        race.lower_leg_length,
-        race.limb_thickness,
-    ));
-    let foot_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
-        race.limb_thickness * 1.05,
-        0.10,
-        0.24,
-    ));
-    let pauldron_mesh = meshes.add(bevy::math::primitives::Cuboid::new(
-        race.pauldron_size * 1.3,
-        race.pauldron_size * 0.7,
-        race.pauldron_size * 1.3,
-    ));
     let spike_mesh = meshes.add(create_low_poly_pyramid());
 
-    // Material assets (Two-sided PBR materials for crisp low-poly faceted shading without backface culling gaps)
+    // 3. Material assets (Two-sided PBR materials for crisp low-poly faceted shading)
     let skin_mat = materials.add(StandardMaterial {
         base_color: race.skin_color,
         perceptual_roughness: 0.82,
@@ -602,11 +652,249 @@ pub fn spawn_procedural_character_hierarchy(
     let layers = render_layers;
     let mut model_root_id = Entity::PLACEHOLDER;
 
+    // 4. Construct Rapier compound colliders with parent root RigidBodyHandle (using half-extents)
+    let shoulder_y = race.torso_size.y * 0.5 - 0.08;
+    let hip_y = -race.torso_size.y * 0.5;
+
+    // Torso Collider (center: 0, 0, 0)
+    let torso_col = ColliderBuilder::cuboid(
+        race.torso_size.x * 0.5,
+        race.torso_size.y * 0.5,
+        race.torso_size.z * 0.5,
+    );
+    let torso_col_h = physics.collider_set.insert_with_parent(
+        torso_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Head Collider
+    let head_col = ColliderBuilder::cuboid(
+        0.34 * race.head_scale * 0.5,
+        0.38 * race.head_scale * 0.5,
+        0.34 * race.head_scale * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        0.0,
+        race.torso_size.y * 0.5 + 0.24 * race.head_scale,
+        0.0,
+    ));
+    let head_col_h = physics.collider_set.insert_with_parent(
+        head_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Upper Arm L Collider
+    let upper_arm_l_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 0.5,
+        race.upper_arm_length * 0.5,
+        race.limb_thickness * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        -race.shoulder_width_offset,
+        shoulder_y - race.upper_arm_length * 0.5,
+        0.0,
+    ));
+    let upper_arm_l_h = physics.collider_set.insert_with_parent(
+        upper_arm_l_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Forearm L Collider
+    let elbow_l_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 0.9 * 0.5,
+        race.forearm_length * 0.5,
+        race.limb_thickness * 0.9 * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        -race.shoulder_width_offset,
+        shoulder_y - race.upper_arm_length - race.forearm_length * 0.5,
+        0.0,
+    ));
+    let elbow_l_h = physics.collider_set.insert_with_parent(
+        elbow_l_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Hand L Collider
+    let hand_l_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 0.95 * 0.5,
+        0.12 * 0.5,
+        race.limb_thickness * 1.1 * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        -race.shoulder_width_offset,
+        shoulder_y - race.upper_arm_length - race.forearm_length - 0.04,
+        0.0,
+    ));
+    let hand_l_h = physics.collider_set.insert_with_parent(
+        hand_l_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Upper Arm R Collider
+    let upper_arm_r_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 0.5,
+        race.upper_arm_length * 0.5,
+        race.limb_thickness * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        race.shoulder_width_offset,
+        shoulder_y - race.upper_arm_length * 0.5,
+        0.0,
+    ));
+    let upper_arm_r_h = physics.collider_set.insert_with_parent(
+        upper_arm_r_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Forearm R Collider
+    let elbow_r_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 0.9 * 0.5,
+        race.forearm_length * 0.5,
+        race.limb_thickness * 0.9 * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        race.shoulder_width_offset,
+        shoulder_y - race.upper_arm_length - race.forearm_length * 0.5,
+        0.0,
+    ));
+    let elbow_r_h = physics.collider_set.insert_with_parent(
+        elbow_r_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Hand R Collider
+    let hand_r_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 0.95 * 0.5,
+        0.12 * 0.5,
+        race.limb_thickness * 1.1 * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        race.shoulder_width_offset,
+        shoulder_y - race.upper_arm_length - race.forearm_length - 0.04,
+        0.0,
+    ));
+    let hand_r_h = physics.collider_set.insert_with_parent(
+        hand_r_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Upper Leg L Collider
+    let upper_leg_l_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 1.15 * 0.5,
+        race.upper_leg_length * 0.5,
+        race.limb_thickness * 1.15 * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        -race.hip_width_offset,
+        hip_y - race.upper_leg_length * 0.5,
+        0.0,
+    ));
+    let upper_leg_l_h = physics.collider_set.insert_with_parent(
+        upper_leg_l_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Lower Leg L Collider
+    let knee_l_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 0.5,
+        race.lower_leg_length * 0.5,
+        race.limb_thickness * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        -race.hip_width_offset,
+        hip_y - race.upper_leg_length - race.lower_leg_length * 0.5,
+        0.0,
+    ));
+    let knee_l_h = physics.collider_set.insert_with_parent(
+        knee_l_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Foot L Collider
+    let foot_l_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 1.05 * 0.5,
+        0.10 * 0.5,
+        0.24 * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        -race.hip_width_offset,
+        hip_y - race.upper_leg_length - race.lower_leg_length - 0.04,
+        -0.05,
+    ));
+    let foot_l_h = physics.collider_set.insert_with_parent(
+        foot_l_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Upper Leg R Collider
+    let upper_leg_r_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 1.15 * 0.5,
+        race.upper_leg_length * 0.5,
+        race.limb_thickness * 1.15 * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        race.hip_width_offset,
+        hip_y - race.upper_leg_length * 0.5,
+        0.0,
+    ));
+    let upper_leg_r_h = physics.collider_set.insert_with_parent(
+        upper_leg_r_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Lower Leg R Collider
+    let knee_r_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 0.5,
+        race.lower_leg_length * 0.5,
+        race.limb_thickness * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        race.hip_width_offset,
+        hip_y - race.upper_leg_length - race.lower_leg_length * 0.5,
+        0.0,
+    ));
+    let knee_r_h = physics.collider_set.insert_with_parent(
+        knee_r_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
+    // Foot R Collider
+    let foot_r_col = ColliderBuilder::cuboid(
+        race.limb_thickness * 1.05 * 0.5,
+        0.10 * 0.5,
+        0.24 * 0.5,
+    )
+    .translation(rapier3d::na::Vector3::new(
+        race.hip_width_offset,
+        hip_y - race.upper_leg_length - race.lower_leg_length - 0.04,
+        -0.05,
+    ));
+    let foot_r_h = physics.collider_set.insert_with_parent(
+        foot_r_col,
+        root_rb_handle,
+        &mut physics.rigid_body_set,
+    );
+
     commands.entity(parent_entity).with_children(|root| {
         let r_id = root
             .spawn((
                 SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, -0.15, 0.0)),
                 CharacterModelRoot,
+                RbHandle(root_rb_handle),
                 RTSProxy,
             ))
             .with_children(|model_parent| {
@@ -614,13 +902,18 @@ pub fn spawn_procedural_character_hierarchy(
                 model_parent
                     .spawn((
                         PbrBundle {
-                            mesh: torso_mesh,
+                            mesh: unit_cuboid.clone(),
                             material: cloth_mat.clone(),
-                            transform: BevyTransform::from_xyz(0.0, 0.0, 0.0),
+                            transform: BevyTransform {
+                                translation: Vec3::ZERO,
+                                scale: race.torso_size,
+                                ..default()
+                            },
                             ..default()
                         },
                         JointType::Torso,
                         JointOwner(parent_entity),
+                        ColHandle(torso_col_h),
                         layers.clone(),
                     ))
                     .with_children(|torso| {
@@ -628,17 +921,26 @@ pub fn spawn_procedural_character_hierarchy(
                         let head_pivot_y = race.torso_size.y * 0.5 + 0.16 * race.head_scale;
                         torso
                             .spawn((
-                                SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, head_pivot_y, 0.0)),
+                                SpatialBundle::from_transform(BevyTransform {
+                                    translation: Vec3::new(0.0, head_pivot_y, 0.0),
+                                    scale: Vec3::splat(race.head_scale),
+                                    ..default()
+                                }),
                                 JointType::Head,
                                 JointOwner(parent_entity),
+                                ColHandle(head_col_h),
                             ))
                             .with_children(|head_pivot| {
                                 // Skull Base
                                 head_pivot.spawn((
                                     PbrBundle {
-                                        mesh: skull_mesh,
+                                        mesh: unit_cuboid.clone(),
                                         material: skin_mat.clone(),
-                                        transform: BevyTransform::from_xyz(0.0, 0.08 * race.head_scale, 0.0),
+                                        transform: BevyTransform {
+                                            translation: Vec3::new(0.0, 0.08, 0.0),
+                                            scale: Vec3::new(0.34, 0.38, 0.34),
+                                            ..default()
+                                        },
                                         ..default()
                                     },
                                     layers.clone(),
@@ -648,11 +950,7 @@ pub fn spawn_procedural_character_hierarchy(
                                     PbrBundle {
                                         mesh: face_mesh,
                                         material: skin_mat.clone(),
-                                        transform: BevyTransform::from_xyz(
-                                            0.0,
-                                            0.06 * race.head_scale,
-                                            -0.17 * race.head_scale,
-                                        ),
+                                        transform: BevyTransform::from_xyz(0.0, 0.06, -0.17),
                                         ..default()
                                     },
                                     ProceduralFaceMesh,
@@ -661,7 +959,6 @@ pub fn spawn_procedural_character_hierarchy(
                             });
 
                         // 3. LEFT ARM (Shoulder -> UpperArm -> Elbow -> Forearm -> Hand)
-                        let shoulder_y = race.torso_size.y * 0.5 - 0.08;
                         torso
                             .spawn((
                                 SpatialBundle::from_transform(BevyTransform::from_xyz(
@@ -671,25 +968,35 @@ pub fn spawn_procedural_character_hierarchy(
                                 )),
                                 JointType::ShoulderL,
                                 JointOwner(parent_entity),
+                                ColHandle(upper_arm_l_h),
                             ))
                             .with_children(|shoulder_l| {
                                 // Upper Arm mesh
                                 shoulder_l.spawn((
                                     PbrBundle {
-                                        mesh: upper_arm_mesh.clone(),
+                                        mesh: unit_cuboid.clone(),
                                         material: cloth_mat.clone(),
-                                        transform: BevyTransform::from_xyz(0.0, -race.upper_arm_length * 0.5, 0.0),
+                                        transform: BevyTransform {
+                                            translation: Vec3::new(0.0, -race.upper_arm_length * 0.5, 0.0),
+                                            scale: Vec3::new(race.limb_thickness, race.upper_arm_length, race.limb_thickness),
+                                            ..default()
+                                        },
                                         ..default()
                                     },
+                                    LimbMeshSegment(JointType::ShoulderL),
                                     layers.clone(),
                                 ));
                                 // Pauldron / Spikes
                                 if race.pauldron_size > 0.01 {
                                     shoulder_l.spawn((
                                         PbrBundle {
-                                            mesh: pauldron_mesh.clone(),
+                                            mesh: unit_cuboid.clone(),
                                             material: armor_mat.clone(),
-                                            transform: BevyTransform::from_xyz(-0.02, 0.04, 0.0),
+                                            transform: BevyTransform {
+                                                translation: Vec3::new(-0.02, 0.04, 0.0),
+                                                scale: Vec3::new(race.pauldron_size * 1.3, race.pauldron_size * 0.7, race.pauldron_size * 1.3),
+                                                ..default()
+                                            },
                                             ..default()
                                         },
                                         layers.clone(),
@@ -716,28 +1023,39 @@ pub fn spawn_procedural_character_hierarchy(
                                         )),
                                         JointType::ElbowL,
                                         JointOwner(parent_entity),
+                                        ColHandle(elbow_l_h),
                                     ))
                                     .with_children(|elbow_l| {
                                         // Forearm mesh
                                         elbow_l.spawn((
                                             PbrBundle {
-                                                mesh: forearm_mesh.clone(),
+                                                mesh: unit_cuboid.clone(),
                                                 material: skin_mat.clone(),
-                                                transform: BevyTransform::from_xyz(0.0, -race.forearm_length * 0.5, 0.0),
+                                                transform: BevyTransform {
+                                                    translation: Vec3::new(0.0, -race.forearm_length * 0.5, 0.0),
+                                                    scale: Vec3::new(race.limb_thickness * 0.9, race.forearm_length, race.limb_thickness * 0.9),
+                                                    ..default()
+                                                },
                                                 ..default()
                                             },
+                                            LimbMeshSegment(JointType::ElbowL),
                                             layers.clone(),
                                         ));
                                         // Hand L (Socket)
                                         elbow_l.spawn((
                                             PbrBundle {
-                                                mesh: hand_mesh.clone(),
+                                                mesh: unit_cuboid.clone(),
                                                 material: skin_mat.clone(),
-                                                transform: BevyTransform::from_xyz(0.0, -race.forearm_length - 0.04, 0.0),
+                                                transform: BevyTransform {
+                                                    translation: Vec3::new(0.0, -race.forearm_length - 0.04, 0.0),
+                                                    scale: Vec3::new(race.limb_thickness * 0.95, 0.12, race.limb_thickness * 1.1),
+                                                    ..default()
+                                                },
                                                 ..default()
                                             },
                                             JointType::HandL,
                                             JointOwner(parent_entity),
+                                            ColHandle(hand_l_h),
                                             layers.clone(),
                                         ));
                                     });
@@ -753,25 +1071,35 @@ pub fn spawn_procedural_character_hierarchy(
                                 )),
                                 JointType::ShoulderR,
                                 JointOwner(parent_entity),
+                                ColHandle(upper_arm_r_h),
                             ))
                             .with_children(|shoulder_r| {
                                 // Upper Arm mesh
                                 shoulder_r.spawn((
                                     PbrBundle {
-                                        mesh: upper_arm_mesh.clone(),
+                                        mesh: unit_cuboid.clone(),
                                         material: cloth_mat.clone(),
-                                        transform: BevyTransform::from_xyz(0.0, -race.upper_arm_length * 0.5, 0.0),
+                                        transform: BevyTransform {
+                                            translation: Vec3::new(0.0, -race.upper_arm_length * 0.5, 0.0),
+                                            scale: Vec3::new(race.limb_thickness, race.upper_arm_length, race.limb_thickness),
+                                            ..default()
+                                        },
                                         ..default()
                                     },
+                                    LimbMeshSegment(JointType::ShoulderR),
                                     layers.clone(),
                                 ));
                                 // Pauldron / Spikes
                                 if race.pauldron_size > 0.01 {
                                     shoulder_r.spawn((
                                         PbrBundle {
-                                            mesh: pauldron_mesh.clone(),
+                                            mesh: unit_cuboid.clone(),
                                             material: armor_mat.clone(),
-                                            transform: BevyTransform::from_xyz(0.02, 0.04, 0.0),
+                                            transform: BevyTransform {
+                                                translation: Vec3::new(0.02, 0.04, 0.0),
+                                                scale: Vec3::new(race.pauldron_size * 1.3, race.pauldron_size * 0.7, race.pauldron_size * 1.3),
+                                                ..default()
+                                            },
                                             ..default()
                                         },
                                         layers.clone(),
@@ -798,35 +1126,45 @@ pub fn spawn_procedural_character_hierarchy(
                                         )),
                                         JointType::ElbowR,
                                         JointOwner(parent_entity),
+                                        ColHandle(elbow_r_h),
                                     ))
                                     .with_children(|elbow_r| {
                                         // Forearm mesh
                                         elbow_r.spawn((
                                             PbrBundle {
-                                                mesh: forearm_mesh.clone(),
+                                                mesh: unit_cuboid.clone(),
                                                 material: skin_mat.clone(),
-                                                transform: BevyTransform::from_xyz(0.0, -race.forearm_length * 0.5, 0.0),
+                                                transform: BevyTransform {
+                                                    translation: Vec3::new(0.0, -race.forearm_length * 0.5, 0.0),
+                                                    scale: Vec3::new(race.limb_thickness * 0.9, race.forearm_length, race.limb_thickness * 0.9),
+                                                    ..default()
+                                                },
                                                 ..default()
                                             },
+                                            LimbMeshSegment(JointType::ElbowR),
                                             layers.clone(),
                                         ));
                                         // Hand R (Weapon Socket)
                                         elbow_r.spawn((
                                             PbrBundle {
-                                                mesh: hand_mesh.clone(),
+                                                mesh: unit_cuboid.clone(),
                                                 material: skin_mat.clone(),
-                                                transform: BevyTransform::from_xyz(0.0, -race.forearm_length - 0.04, 0.0),
+                                                transform: BevyTransform {
+                                                    translation: Vec3::new(0.0, -race.forearm_length - 0.04, 0.0),
+                                                    scale: Vec3::new(race.limb_thickness * 0.95, 0.12, race.limb_thickness * 1.1),
+                                                    ..default()
+                                                },
                                                 ..default()
                                             },
                                             JointType::HandR,
                                             JointOwner(parent_entity),
+                                            ColHandle(hand_r_h),
                                             layers.clone(),
                                         ));
                                     });
                             });
 
                         // 5. LEFT LEG (Hip -> UpperLeg -> Knee -> LowerLeg -> Foot)
-                        let hip_y = -race.torso_size.y * 0.5;
                         torso
                             .spawn((
                                 SpatialBundle::from_transform(BevyTransform::from_xyz(
@@ -836,15 +1174,21 @@ pub fn spawn_procedural_character_hierarchy(
                                 )),
                                 JointType::HipL,
                                 JointOwner(parent_entity),
+                                ColHandle(upper_leg_l_h),
                             ))
                             .with_children(|hip_l| {
                                 hip_l.spawn((
                                     PbrBundle {
-                                        mesh: upper_leg_mesh.clone(),
+                                        mesh: unit_cuboid.clone(),
                                         material: pants_mat.clone(),
-                                        transform: BevyTransform::from_xyz(0.0, -race.upper_leg_length * 0.5, 0.0),
+                                        transform: BevyTransform {
+                                            translation: Vec3::new(0.0, -race.upper_leg_length * 0.5, 0.0),
+                                            scale: Vec3::new(race.limb_thickness * 1.15, race.upper_leg_length, race.limb_thickness * 1.15),
+                                            ..default()
+                                        },
                                         ..default()
                                     },
+                                    LimbMeshSegment(JointType::HipL),
                                     layers.clone(),
                                 ));
                                 hip_l
@@ -856,26 +1200,37 @@ pub fn spawn_procedural_character_hierarchy(
                                         )),
                                         JointType::KneeL,
                                         JointOwner(parent_entity),
+                                        ColHandle(knee_l_h),
                                     ))
                                     .with_children(|knee_l| {
                                         knee_l.spawn((
                                             PbrBundle {
-                                                mesh: lower_leg_mesh.clone(),
+                                                mesh: unit_cuboid.clone(),
                                                 material: pants_mat.clone(),
-                                                transform: BevyTransform::from_xyz(0.0, -race.lower_leg_length * 0.5, 0.0),
+                                                transform: BevyTransform {
+                                                    translation: Vec3::new(0.0, -race.lower_leg_length * 0.5, 0.0),
+                                                    scale: Vec3::new(race.limb_thickness, race.lower_leg_length, race.limb_thickness),
+                                                    ..default()
+                                                },
                                                 ..default()
                                             },
+                                            LimbMeshSegment(JointType::KneeL),
                                             layers.clone(),
                                         ));
                                         knee_l.spawn((
                                             PbrBundle {
-                                                mesh: foot_mesh.clone(),
+                                                mesh: unit_cuboid.clone(),
                                                 material: pants_mat.clone(),
-                                                transform: BevyTransform::from_xyz(0.0, -race.lower_leg_length - 0.04, -0.05),
+                                                transform: BevyTransform {
+                                                    translation: Vec3::new(0.0, -race.lower_leg_length - 0.04, -0.05),
+                                                    scale: Vec3::new(race.limb_thickness * 1.05, 0.10, 0.24),
+                                                    ..default()
+                                                },
                                                 ..default()
                                             },
                                             JointType::FootL,
                                             JointOwner(parent_entity),
+                                            ColHandle(foot_l_h),
                                             layers.clone(),
                                         ));
                                     });
@@ -891,15 +1246,21 @@ pub fn spawn_procedural_character_hierarchy(
                                 )),
                                 JointType::HipR,
                                 JointOwner(parent_entity),
+                                ColHandle(upper_leg_r_h),
                             ))
                             .with_children(|hip_r| {
                                 hip_r.spawn((
                                     PbrBundle {
-                                        mesh: upper_leg_mesh.clone(),
+                                        mesh: unit_cuboid.clone(),
                                         material: pants_mat.clone(),
-                                        transform: BevyTransform::from_xyz(0.0, -race.upper_leg_length * 0.5, 0.0),
+                                        transform: BevyTransform {
+                                            translation: Vec3::new(0.0, -race.upper_leg_length * 0.5, 0.0),
+                                            scale: Vec3::new(race.limb_thickness * 1.15, race.upper_leg_length, race.limb_thickness * 1.15),
+                                            ..default()
+                                        },
                                         ..default()
                                     },
+                                    LimbMeshSegment(JointType::HipR),
                                     layers.clone(),
                                 ));
                                 hip_r
@@ -911,26 +1272,37 @@ pub fn spawn_procedural_character_hierarchy(
                                         )),
                                         JointType::KneeR,
                                         JointOwner(parent_entity),
+                                        ColHandle(knee_r_h),
                                     ))
                                     .with_children(|knee_r| {
                                         knee_r.spawn((
                                             PbrBundle {
-                                                mesh: lower_leg_mesh.clone(),
+                                                mesh: unit_cuboid.clone(),
                                                 material: pants_mat.clone(),
-                                                transform: BevyTransform::from_xyz(0.0, -race.lower_leg_length * 0.5, 0.0),
+                                                transform: BevyTransform {
+                                                    translation: Vec3::new(0.0, -race.lower_leg_length * 0.5, 0.0),
+                                                    scale: Vec3::new(race.limb_thickness, race.lower_leg_length, race.limb_thickness),
+                                                    ..default()
+                                                },
                                                 ..default()
                                             },
+                                            LimbMeshSegment(JointType::KneeR),
                                             layers.clone(),
                                         ));
                                         knee_r.spawn((
                                             PbrBundle {
-                                                mesh: foot_mesh.clone(),
+                                                mesh: unit_cuboid.clone(),
                                                 material: pants_mat.clone(),
-                                                transform: BevyTransform::from_xyz(0.0, -race.lower_leg_length - 0.04, -0.05),
+                                                transform: BevyTransform {
+                                                    translation: Vec3::new(0.0, -race.lower_leg_length - 0.04, -0.05),
+                                                    scale: Vec3::new(race.limb_thickness * 1.05, 0.10, 0.24),
+                                                    ..default()
+                                                },
                                                 ..default()
                                             },
                                             JointType::FootR,
                                             JointOwner(parent_entity),
+                                            ColHandle(foot_r_h),
                                             layers.clone(),
                                         ));
                                     });
@@ -945,23 +1317,26 @@ pub fn spawn_procedural_character_hierarchy(
 }
 
 // ----------------------------------------------------------------------------
-// 6. PROCEDURAL ANIMATION ENGINE
+// 7. PROCEDURAL ANIMATION ENGINE
 // ----------------------------------------------------------------------------
 
 /// Applies mathematical Euler/Quaternion rotations to all articulated joint pivots.
 /// Strictly implements walk/run oscillations, velocity-driven jumping, upper-body
 /// action overrides (melee swings, bow aiming), and hit reaction flinches.
+/// Caches trigonometric evaluations (phase_sin, rect_sin) and flattens chained
+/// Quat multiplications into single Quat::from_euler(EulerRot::XYZ, ...) calls.
 pub fn procedural_animator_system(
     time: Res<Time>,
-    mut character_q: Query<(&mut AnimationState, Option<&LinearVelocity>)>,
+    mut character_q: Query<(Entity, &mut AnimationState, Option<&LinearVelocity>, Has<PlayerBody>)>,
     editor_state: Res<CharacterEditorState>,
-    mut joint_q: Query<(&JointType, &JointOwner, &mut BevyTransform)>,
+    mut joint_q: Query<(&JointType, &JointOwner, &ColHandle, &mut BevyTransform)>,
+    mut physics: Option<ResMut<PhysicsWorld>>,
 ) {
     let dt = time.delta_seconds();
 
-    for (mut state, linvel_opt) in character_q.iter_mut() {
-        let (speed, is_grounded, vy) = if editor_state.is_open && editor_state.studio_preview_mode != StudioPreviewMode::LiveGameplay {
-            // Studio preview simulation
+    for (_entity, mut state, linvel_opt, is_player) in character_q.iter_mut() {
+        let (speed, is_grounded, vy) = if is_player && editor_state.is_open && editor_state.studio_preview_mode != StudioPreviewMode::LiveGameplay {
+            // Studio preview simulation isolated strictly to the local player
             match editor_state.studio_preview_mode {
                 StudioPreviewMode::Walk => (2.2, true, 0.0),
                 StudioPreviewMode::Run => (5.5, true, 0.0),
@@ -985,7 +1360,7 @@ pub fn procedural_animator_system(
         // 1. Advance Gait Clock (Frequency scales dynamically: Walk = ~7.0 rad/s, Run = ~12.0 rad/s)
         if state.is_grounded && speed > 0.1 {
             let frequency = if speed > 4.0 { 12.0 } else { 7.0 };
-            state.gait_phase += dt * frequency;
+            state.gait_phase = (state.gait_phase + dt * frequency) % std::f32::consts::TAU;
         } else {
             // Smoothly settle back to neutral idle
             state.gait_phase *= (1.0 - dt * 10.0).max(0.0);
@@ -1008,9 +1383,9 @@ pub fn procedural_animator_system(
         }
     }
 
-    for (joint, owner, mut tf) in joint_q.iter_mut() {
-        let Ok((state, linvel_opt)) = character_q.get(owner.0) else { continue; };
-        let speed = if editor_state.is_open && editor_state.studio_preview_mode != StudioPreviewMode::LiveGameplay {
+    for (joint, owner, col_handle, mut tf) in joint_q.iter_mut() {
+        let Ok((_, state, linvel_opt, is_player)) = character_q.get(owner.0) else { continue; };
+        let speed = if is_player && editor_state.is_open && editor_state.studio_preview_mode != StudioPreviewMode::LiveGameplay {
             match editor_state.studio_preview_mode {
                 StudioPreviewMode::Walk => 2.2,
                 StudioPreviewMode::Run => 5.5,
@@ -1022,168 +1397,190 @@ pub fn procedural_animator_system(
             Vec2::new(vel.x, vel.z).length()
         };
 
+        // Cache single trigonometric evaluation and half-wave rectifications per joint update
         let phase = state.gait_phase;
+        let phase_sin = phase.sin();
+        let rect_sin_pos = phase_sin.max(0.0);
+        let rect_sin_neg = (-phase_sin).max(0.0);
+
         let walk_run_blend = ((speed - 0.5) / 3.5).clamp(0.0, 1.0);
-        let amplitude = 0.35 + 0.35 * walk_run_blend; // 0.35 rad (walk) -> 0.70 rad (sprint)
-            match joint {
-                // TORSO: Forward lean during sprints + Hit reaction snap
-                JointType::Torso => {
-                    let sprint_lean = -0.15 * walk_run_blend;
-                    let hit_lean = state.hit_react_timer * 0.30;
-                    tf.rotation = Quat::from_rotation_x(sprint_lean + hit_lean);
-                }
+        let speed_factor = if state.is_grounded { (speed / 0.5).clamp(0.0, 1.0) } else { 1.0 };
+        let amplitude = (0.35 + 0.35 * walk_run_blend) * speed_factor;
 
-                // HEAD: Compensate torso lean + Hit reaction flinch
-                JointType::Head => {
-                    let hit_snap = state.hit_react_timer * 0.25;
-                    tf.rotation = Quat::from_rotation_x(hit_snap);
-                }
-
-                // LOWER BODY: Locomotion vs Airborne Trajectory
-                JointType::HipL => {
-                    if state.is_grounded {
-                        let rot_x = phase.sin() * amplitude;
-                        tf.rotation = Quat::from_rotation_x(rot_x);
-                    } else if state.vertical_velocity > 0.0 {
-                        // Ascending jump: Knees tuck upward
-                        tf.rotation = Quat::from_rotation_x(-0.40);
-                    } else {
-                        // Falling: Straighten downward
-                        tf.rotation = Quat::from_rotation_x(0.10);
-                    }
-                }
-
-                JointType::HipR => {
-                    if state.is_grounded {
-                        let rot_x = -phase.sin() * amplitude;
-                        tf.rotation = Quat::from_rotation_x(rot_x);
-                    } else if state.vertical_velocity > 0.0 {
-                        tf.rotation = Quat::from_rotation_x(-0.40);
-                    } else {
-                        tf.rotation = Quat::from_rotation_x(0.10);
-                    }
-                }
-
-                JointType::KneeL => {
-                    if state.is_grounded {
-                        // Half-wave rectified backward bend: Knees never bend forward
-                        let bend = (-phase.sin()).max(0.0) * (amplitude * 1.4);
-                        tf.rotation = Quat::from_rotation_x(bend);
-                    } else if state.vertical_velocity > 0.0 {
-                        tf.rotation = Quat::from_rotation_x(0.60);
-                    } else {
-                        tf.rotation = Quat::from_rotation_x(0.0);
-                    }
-                }
-
-                JointType::KneeR => {
-                    if state.is_grounded {
-                        let bend = (phase.sin()).max(0.0) * (amplitude * 1.4);
-                        tf.rotation = Quat::from_rotation_x(bend);
-                    } else if state.vertical_velocity > 0.0 {
-                        tf.rotation = Quat::from_rotation_x(0.60);
-                    } else {
-                        tf.rotation = Quat::from_rotation_x(0.0);
-                    }
-                }
-
-                // UPPER BODY LAYER: Counterbalance swing OR Action overrides
-                JointType::ShoulderL => {
-                    match &state.action {
-                        ActionState::BowAim { pitch, .. } => {
-                            // Left arm holds bow firmly pointed forward along aiming pitch
-                            tf.rotation = Quat::from_rotation_x(-1.57 + pitch)
-                                * Quat::from_rotation_y(0.15);
-                        }
-                        _ => {
-                            if !state.is_grounded {
-                                // Jump splay for balance (+Z rot)
-                                tf.rotation = Quat::from_rotation_z(0.30);
-                            } else {
-                                // Locomotion arm swing opposite to hip
-                                let arm_swing = -phase.sin() * (amplitude * 0.85);
-                                let hit_jitter = state.hit_react_timer * 0.20;
-                                tf.rotation = Quat::from_rotation_x(arm_swing)
-                                    * Quat::from_rotation_z(0.08 + hit_jitter);
-                            }
-                        }
-                    }
-                }
-
-                JointType::ElbowL => {
-                    match &state.action {
-                        ActionState::BowAim { .. } => {
-                            tf.rotation = Quat::from_rotation_x(0.05); // Locked straight
-                        }
-                        _ => {
-                            // Slight natural bend on backward swing
-                            let elbow_bend = (phase.sin()).max(0.0) * 0.40;
-                            tf.rotation = Quat::from_rotation_x(elbow_bend);
-                        }
-                    }
-                }
-
-                JointType::ShoulderR => {
-                    match &state.action {
-                        ActionState::MeleeSwing { timer, duration } => {
-                            // 3-Phase Melee Swing: Anticipation -> Snap -> Follow-through
-                            let t = (timer / duration.max(0.001)).clamp(0.0, 1.0);
-                            if t < 0.30 {
-                                // Phase 1: Wind back and up
-                                let p = t / 0.30;
-                                let rot_x = 0.0 + (-1.20 - 0.0) * p;
-                                tf.rotation = Quat::from_rotation_x(rot_x) * Quat::from_rotation_y(0.40);
-                            } else if t < 0.50 {
-                                // Phase 2: Forward snap cutting horizontally
-                                let p = (t - 0.30) / 0.20;
-                                let rot_x = -1.20 + (0.80 - -1.20) * p;
-                                tf.rotation = Quat::from_rotation_x(rot_x) * Quat::from_rotation_y(-0.60);
-                            } else {
-                                // Phase 3: Recovery / Follow-through
-                                let p = (t - 0.50) / 0.50;
-                                let rot_x = 0.80 + (0.0 - 0.80) * p;
-                                tf.rotation = Quat::from_rotation_x(rot_x) * Quat::from_rotation_y(-0.60 * (1.0 - p));
-                            }
-                        }
-                        ActionState::BowAim { .. } => {
-                            // Draw shoulder pulls back
-                            tf.rotation = Quat::from_rotation_x(-1.20) * Quat::from_rotation_y(0.35);
-                        }
-                        _ => {
-                            if !state.is_grounded {
-                                tf.rotation = Quat::from_rotation_z(-0.30);
-                            } else {
-                                let arm_swing = phase.sin() * (amplitude * 0.85);
-                                let hit_jitter = state.hit_react_timer * -0.20;
-                                tf.rotation = Quat::from_rotation_x(arm_swing)
-                                    * Quat::from_rotation_z(-0.08 + hit_jitter);
-                            }
-                        }
-                    }
-                }
-
-                JointType::ElbowR => {
-                    match &state.action {
-                        ActionState::MeleeSwing { timer, duration } => {
-                            let t = (timer / duration.max(0.001)).clamp(0.0, 1.0);
-                            let bend = if t < 0.30 { 0.80 } else if t < 0.50 { 0.25 } else { 0.10 };
-                            tf.rotation = Quat::from_rotation_x(bend);
-                        }
-                        ActionState::BowAim { draw_progress, .. } => {
-                            // Deep bend inward toward the cheekbone
-                            let draw_bend = 0.20 + (1.80 - 0.20) * draw_progress.clamp(0.0, 1.0);
-                            tf.rotation = Quat::from_rotation_x(draw_bend);
-                        }
-                        _ => {
-                            let elbow_bend = (-phase.sin()).max(0.0) * 0.40;
-                            tf.rotation = Quat::from_rotation_x(elbow_bend);
-                        }
-                    }
-                }
-
-                _ => {}
+        match joint {
+            // TORSO: Forward lean during sprints + Hit reaction snap
+            JointType::Torso => {
+                let sprint_lean = -0.15 * walk_run_blend;
+                let hit_lean = state.hit_react_timer * 0.30;
+                tf.rotation = Quat::from_euler(EulerRot::XYZ, sprint_lean + hit_lean, 0.0, 0.0);
             }
+
+            // HEAD: Compensate torso lean + Hit reaction flinch
+            JointType::Head => {
+                let hit_snap = state.hit_react_timer * 0.25;
+                tf.rotation = Quat::from_euler(EulerRot::XYZ, hit_snap, 0.0, 0.0);
+            }
+
+            // LOWER BODY: Locomotion vs Airborne Trajectory
+            JointType::HipL => {
+                if state.is_grounded {
+                    let rot_x = phase_sin * amplitude;
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, rot_x, 0.0, 0.0);
+                } else if state.vertical_velocity > 0.0 {
+                    // Ascending jump: Knees tuck upward
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, -0.40, 0.0, 0.0);
+                } else {
+                    // Falling: Straighten downward
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.10, 0.0, 0.0);
+                }
+            }
+
+            JointType::HipR => {
+                if state.is_grounded {
+                    let rot_x = -phase_sin * amplitude;
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, rot_x, 0.0, 0.0);
+                } else if state.vertical_velocity > 0.0 {
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, -0.40, 0.0, 0.0);
+                } else {
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.10, 0.0, 0.0);
+                }
+            }
+
+            JointType::KneeL => {
+                if state.is_grounded {
+                    // Half-wave rectified backward bend: Knees bend naturally backwards
+                    let bend = rect_sin_neg * (amplitude * 1.4);
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, bend, 0.0, 0.0);
+                } else if state.vertical_velocity > 0.0 {
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.60, 0.0, 0.0);
+                } else {
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.0);
+                }
+            }
+
+            JointType::KneeR => {
+                if state.is_grounded {
+                    let bend = rect_sin_pos * (amplitude * 1.4);
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, bend, 0.0, 0.0);
+                } else if state.vertical_velocity > 0.0 {
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.60, 0.0, 0.0);
+                } else {
+                    tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.0);
+                }
+            }
+
+            // UPPER BODY LAYER: Counterbalance swing OR Action overrides
+            JointType::ShoulderL => {
+                match &state.action {
+                    ActionState::BowAim { pitch, .. } => {
+                        // Left arm holds bow firmly pointed forward along aiming pitch
+                        tf.rotation = Quat::from_euler(EulerRot::XYZ, -1.57 + pitch, 0.15, 0.0);
+                    }
+                    _ => {
+                        if !state.is_grounded {
+                            tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, 0.30);
+                        } else {
+                            let arm_swing = -phase_sin * (amplitude * 0.85);
+                            let hit_jitter = state.hit_react_timer * 0.20;
+                            tf.rotation = Quat::from_euler(EulerRot::XYZ, arm_swing, 0.0, 0.08 + hit_jitter);
+                        }
+                    }
+                }
+            }
+
+            JointType::ElbowL => {
+                match &state.action {
+                    ActionState::BowAim { .. } => {
+                        tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.05, 0.0, 0.0);
+                    }
+                    _ => {
+                        let elbow_bend = rect_sin_pos * 0.40;
+                        tf.rotation = Quat::from_euler(EulerRot::XYZ, elbow_bend, 0.0, 0.0);
+                    }
+                }
+            }
+
+            JointType::ShoulderR => {
+                match &state.action {
+                    ActionState::MeleeSwing { timer, duration } => {
+                        let t = (timer / duration.max(0.001)).clamp(0.0, 1.0);
+                        if t < 0.30 {
+                            let p = t / 0.30;
+                            let rot_x = 0.0 + (-1.20 - 0.0) * p;
+                            tf.rotation = Quat::from_euler(EulerRot::XYZ, rot_x, 0.40, 0.0);
+                        } else if t < 0.50 {
+                            let p = (t - 0.30) / 0.20;
+                            let rot_x = -1.20 + (0.80 - -1.20) * p;
+                            tf.rotation = Quat::from_euler(EulerRot::XYZ, rot_x, -0.60, 0.0);
+                        } else {
+                            let p = (t - 0.50) / 0.50;
+                            let rot_x = 0.80 + (0.0 - 0.80) * p;
+                            tf.rotation = Quat::from_euler(EulerRot::XYZ, rot_x, -0.60 * (1.0 - p), 0.0);
+                        }
+                    }
+                    ActionState::BowAim { .. } => {
+                        tf.rotation = Quat::from_euler(EulerRot::XYZ, -1.20, 0.35, 0.0);
+                    }
+                    _ => {
+                        if !state.is_grounded {
+                            tf.rotation = Quat::from_euler(EulerRot::XYZ, 0.0, 0.0, -0.30);
+                        } else {
+                            let arm_swing = phase_sin * (amplitude * 0.85);
+                            let hit_jitter = state.hit_react_timer * -0.20;
+                            tf.rotation = Quat::from_euler(EulerRot::XYZ, arm_swing, 0.0, -0.08 + hit_jitter);
+                        }
+                    }
+                }
+
+                // Sync swinging arm rotation down to Rapier collider for precise hit-detection
+                if let Some(ref mut phys) = physics {
+                    if let Some(col) = phys.collider_set.get_mut(col_handle.0) {
+                        let cur_pos = col.position_wrt_parent().map_or(rapier3d::na::Isometry3::identity(), |iso| *iso);
+                        let rapier_rot = rapier3d::na::UnitQuaternion::new_normalize(
+                            rapier3d::na::Quaternion::new(tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z)
+                        );
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::from_parts(
+                            cur_pos.translation,
+                            rapier_rot,
+                        ));
+                    }
+                }
+            }
+
+            JointType::ElbowR => {
+                match &state.action {
+                    ActionState::MeleeSwing { timer, duration } => {
+                        let t = (timer / duration.max(0.001)).clamp(0.0, 1.0);
+                        let bend = if t < 0.30 { 0.80 } else if t < 0.50 { 0.25 } else { 0.10 };
+                        tf.rotation = Quat::from_euler(EulerRot::XYZ, bend, 0.0, 0.0);
+                    }
+                    ActionState::BowAim { draw_progress, .. } => {
+                        let draw_bend = 0.20 + (1.80 - 0.20) * draw_progress.clamp(0.0, 1.0);
+                        tf.rotation = Quat::from_euler(EulerRot::XYZ, draw_bend, 0.0, 0.0);
+                    }
+                    _ => {
+                        let elbow_bend = rect_sin_neg * 0.40;
+                        tf.rotation = Quat::from_euler(EulerRot::XYZ, elbow_bend, 0.0, 0.0);
+                    }
+                }
+
+                if let Some(ref mut phys) = physics {
+                    if let Some(col) = phys.collider_set.get_mut(col_handle.0) {
+                        let cur_pos = col.position_wrt_parent().map_or(rapier3d::na::Isometry3::identity(), |iso| *iso);
+                        let rapier_rot = rapier3d::na::UnitQuaternion::new_normalize(
+                            rapier3d::na::Quaternion::new(tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z)
+                        );
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::from_parts(
+                            cur_pos.translation,
+                            rapier_rot,
+                        ));
+                    }
+                }
+            }
+
+            _ => {}
         }
+    }
 }
 
 /// Synchronizes gameplay combat states (melee swing, bow drawing, grounded state)
@@ -1215,7 +1612,320 @@ pub fn sync_player_animation_state(
 }
 
 // ----------------------------------------------------------------------------
-// 7. IN-GAME CHARACTER CUSTOMIZER WORKBENCH UI
+// 8. MANUAL PHYSICS STEPPING & TRANSFORM SYNCHRONIZATION
+// ----------------------------------------------------------------------------
+
+/// Manually drives the pure Rapier physics simulation pipeline in Bevy's FixedUpdate schedule.
+/// After stepping, synchronizes the RigidBody translation to the corresponding Bevy Transform.
+pub fn step_physics_world_system(
+    mut physics: ResMut<PhysicsWorld>,
+    mut rb_q: Query<(&RbHandle, &mut BevyTransform)>,
+) {
+    physics.step();
+
+    for (rb_handle, mut transform) in rb_q.iter_mut() {
+        if let Some(rb) = physics.rigid_body_set.get(rb_handle.0) {
+            let pos = rb.translation();
+            transform.translation = Vec3::new(pos.x, pos.y, pos.z);
+            let rot = rb.rotation();
+            transform.rotation = Quat::from_xyzw(rot.i, rot.j, rot.k, rot.w);
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 9. IN-PLACE HITBOX & VISUAL MORPHOLOGY MUTATION
+// ----------------------------------------------------------------------------
+
+/// Live character update system responding to Changed<PlayerCharacterCustomization>.
+/// Spawns the character hierarchy initially if not present, and subsequently mutates
+/// visual Transform::scale/translations and Rapier Collider SharedShapes in-place,
+/// completely preventing memory leaks and entity reallocation churn.
+pub fn live_character_update_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut physics: ResMut<PhysicsWorld>,
+    player_q: Query<(Entity, &PlayerCharacterCustomization), (With<PlayerBody>, Changed<PlayerCharacterCustomization>)>,
+    existing_root_q: Query<(Entity, &Parent), With<CharacterModelRoot>>,
+    mut joint_q: Query<(&JointType, &JointOwner, &ColHandle, &mut BevyTransform)>,
+    mut limb_mesh_q: Query<(&LimbMeshSegment, &mut BevyTransform), Without<JointType>>,
+    face_mesh_q: Query<(&ProceduralFaceMesh, &Handle<Mesh>)>,
+) {
+    for (player_entity, custom) in player_q.iter() {
+        let has_model = existing_root_q.iter().any(|(_, p)| p.get() == player_entity);
+        if !has_model {
+            spawn_procedural_character_hierarchy(
+                &mut commands,
+                player_entity,
+                &mut meshes,
+                &mut materials,
+                &custom.anatomy,
+                &custom.face,
+                RenderLayers::layer(2),
+                &mut physics,
+            );
+            continue;
+        }
+
+        let race = &custom.anatomy;
+
+        // 1. Mutate visual joint transforms and Rapier compound hitboxes in-place
+        for (joint, owner, col_handle, mut tf) in joint_q.iter_mut() {
+            if owner.0 != player_entity {
+                continue;
+            }
+
+            match joint {
+                JointType::Torso => {
+                    tf.scale = race.torso_size;
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.torso_size.x * 0.5,
+                            race.torso_size.y * 0.5,
+                            race.torso_size.z * 0.5,
+                        ));
+                    }
+                }
+                JointType::Head => {
+                    tf.translation.y = race.torso_size.y * 0.5 + 0.16 * race.head_scale;
+                    tf.scale = Vec3::splat(race.head_scale);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            0.34 * race.head_scale * 0.5,
+                            0.38 * race.head_scale * 0.5,
+                            0.34 * race.head_scale * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            0.0,
+                            race.torso_size.y * 0.5 + 0.24 * race.head_scale,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::ShoulderL => {
+                    tf.translation = Vec3::new(-race.shoulder_width_offset, race.torso_size.y * 0.5 - 0.08, 0.0);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 0.5,
+                            race.upper_arm_length * 0.5,
+                            race.limb_thickness * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            -race.shoulder_width_offset,
+                            race.torso_size.y * 0.5 - 0.08 - race.upper_arm_length * 0.5,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::ShoulderR => {
+                    tf.translation = Vec3::new(race.shoulder_width_offset, race.torso_size.y * 0.5 - 0.08, 0.0);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 0.5,
+                            race.upper_arm_length * 0.5,
+                            race.limb_thickness * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            race.shoulder_width_offset,
+                            race.torso_size.y * 0.5 - 0.08 - race.upper_arm_length * 0.5,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::ElbowL => {
+                    tf.translation = Vec3::new(0.0, -race.upper_arm_length, 0.0);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 0.9 * 0.5,
+                            race.forearm_length * 0.5,
+                            race.limb_thickness * 0.9 * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            -race.shoulder_width_offset,
+                            race.torso_size.y * 0.5 - 0.08 - race.upper_arm_length - race.forearm_length * 0.5,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::ElbowR => {
+                    tf.translation = Vec3::new(0.0, -race.upper_arm_length, 0.0);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 0.9 * 0.5,
+                            race.forearm_length * 0.5,
+                            race.limb_thickness * 0.9 * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            race.shoulder_width_offset,
+                            race.torso_size.y * 0.5 - 0.08 - race.upper_arm_length - race.forearm_length * 0.5,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::HandL => {
+                    tf.translation = Vec3::new(0.0, -race.forearm_length - 0.04, 0.0);
+                    tf.scale = Vec3::new(race.limb_thickness * 0.95, 0.12, race.limb_thickness * 1.1);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 0.95 * 0.5,
+                            0.12 * 0.5,
+                            race.limb_thickness * 1.1 * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            -race.shoulder_width_offset,
+                            race.torso_size.y * 0.5 - 0.08 - race.upper_arm_length - race.forearm_length - 0.04,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::HandR => {
+                    tf.translation = Vec3::new(0.0, -race.forearm_length - 0.04, 0.0);
+                    tf.scale = Vec3::new(race.limb_thickness * 0.95, 0.12, race.limb_thickness * 1.1);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 0.95 * 0.5,
+                            0.12 * 0.5,
+                            race.limb_thickness * 1.1 * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            race.shoulder_width_offset,
+                            race.torso_size.y * 0.5 - 0.08 - race.upper_arm_length - race.forearm_length - 0.04,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::HipL => {
+                    tf.translation = Vec3::new(-race.hip_width_offset, -race.torso_size.y * 0.5, 0.0);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 1.15 * 0.5,
+                            race.upper_leg_length * 0.5,
+                            race.limb_thickness * 1.15 * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            -race.hip_width_offset,
+                            -race.torso_size.y * 0.5 - race.upper_leg_length * 0.5,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::HipR => {
+                    tf.translation = Vec3::new(race.hip_width_offset, -race.torso_size.y * 0.5, 0.0);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 1.15 * 0.5,
+                            race.upper_leg_length * 0.5,
+                            race.limb_thickness * 1.15 * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            race.hip_width_offset,
+                            -race.torso_size.y * 0.5 - race.upper_leg_length * 0.5,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::KneeL => {
+                    tf.translation = Vec3::new(0.0, -race.upper_leg_length, 0.0);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 0.5,
+                            race.lower_leg_length * 0.5,
+                            race.limb_thickness * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            -race.hip_width_offset,
+                            -race.torso_size.y * 0.5 - race.upper_leg_length - race.lower_leg_length * 0.5,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::KneeR => {
+                    tf.translation = Vec3::new(0.0, -race.upper_leg_length, 0.0);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 0.5,
+                            race.lower_leg_length * 0.5,
+                            race.limb_thickness * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            race.hip_width_offset,
+                            -race.torso_size.y * 0.5 - race.upper_leg_length - race.lower_leg_length * 0.5,
+                            0.0,
+                        ));
+                    }
+                }
+                JointType::FootL => {
+                    tf.translation = Vec3::new(0.0, -race.lower_leg_length - 0.04, -0.05);
+                    tf.scale = Vec3::new(race.limb_thickness * 1.05, 0.10, 0.24);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 1.05 * 0.5,
+                            0.10 * 0.5,
+                            0.24 * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            -race.hip_width_offset,
+                            -race.torso_size.y * 0.5 - race.upper_leg_length - race.lower_leg_length - 0.04,
+                            -0.05,
+                        ));
+                    }
+                }
+                JointType::FootR => {
+                    tf.translation = Vec3::new(0.0, -race.lower_leg_length - 0.04, -0.05);
+                    tf.scale = Vec3::new(race.limb_thickness * 1.05, 0.10, 0.24);
+                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                        col.set_shape(SharedShape::cuboid(
+                            race.limb_thickness * 1.05 * 0.5,
+                            0.10 * 0.5,
+                            0.24 * 0.5,
+                        ));
+                        col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
+                            race.hip_width_offset,
+                            -race.torso_size.y * 0.5 - race.upper_leg_length - race.lower_leg_length - 0.04,
+                            -0.05,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 2. Update visual limb mesh scales and offsets
+        for (segment, mut tf) in limb_mesh_q.iter_mut() {
+            match segment.0 {
+                JointType::ShoulderL | JointType::ShoulderR => {
+                    tf.translation = Vec3::new(0.0, -race.upper_arm_length * 0.5, 0.0);
+                    tf.scale = Vec3::new(race.limb_thickness, race.upper_arm_length, race.limb_thickness);
+                }
+                JointType::ElbowL | JointType::ElbowR => {
+                    tf.translation = Vec3::new(0.0, -race.forearm_length * 0.5, 0.0);
+                    tf.scale = Vec3::new(race.limb_thickness * 0.9, race.forearm_length, race.limb_thickness * 0.9);
+                }
+                JointType::HipL | JointType::HipR => {
+                    tf.translation = Vec3::new(0.0, -race.upper_leg_length * 0.5, 0.0);
+                    tf.scale = Vec3::new(race.limb_thickness * 1.15, race.upper_leg_length, race.limb_thickness * 1.15);
+                }
+                JointType::KneeL | JointType::KneeR => {
+                    tf.translation = Vec3::new(0.0, -race.lower_leg_length * 0.5, 0.0);
+                    tf.scale = Vec3::new(race.limb_thickness, race.lower_leg_length, race.limb_thickness);
+                }
+                _ => {}
+            }
+        }
+
+        // 3. Update procedural face mesh in-place without asset recreation
+        for (_, mesh_handle) in face_mesh_q.iter() {
+            if let Some(mesh) = meshes.get_mut(mesh_handle) {
+                *mesh = generate_custom_face(&custom.face);
+            }
+        }
+
+        info!("🎭 Mutated character anatomy and Rapier hitboxes in-place for Race: {}", race.race_name);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 10. IN-GAME CHARACTER CUSTOMIZER WORKBENCH UI
 // ----------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1279,17 +1989,14 @@ impl CharacterEditorState {
         let base = &CHARACTER_PRESETS[p_idx];
         self.face = base.face.clone();
         self.anatomy = base.anatomy.clone();
-
-        // Procedural variations (+/- 20%)
-        let jitter = |val: f32, pct: f32| -> f32 {
-            val * (1.0 + (0.5 - 0.5) * pct) // deterministic base jitter
-        };
-        self.face.jaw_width = jitter(self.face.jaw_width, 0.20);
-        self.face.cheekbone_width = jitter(self.face.cheekbone_width, 0.20);
-        self.face.nose_tip_z = jitter(self.face.nose_tip_z, 0.25);
     }
 
     pub fn export_rust_code(&self) -> String {
+        let skin = self.anatomy.skin_color.to_srgba();
+        let cloth = self.anatomy.cloth_color.to_srgba();
+        let pants = self.anatomy.pants_color.to_srgba();
+        let armor = self.anatomy.armor_color.to_srgba();
+
         format!(
             "// ============================================================================\n\
              // Procedurally Generated Character Morphology Definition\n\
@@ -1308,7 +2015,7 @@ impl CharacterEditorState {
              \x20       eye_depth: {:.3},\n\
              \x20   }},\n\
              \x20   anatomy: RaceAnatomyProfile {{\n\
-             \x20       race_name: \"{}\".into(),\n\
+             \x20       race_name: \"{}\",\n\
              \x20       torso_size: Vec3::new({:.2}, {:.2}, {:.2}),\n\
              \x20       shoulder_width_offset: {:.3},\n\
              \x20       hip_width_offset: {:.3},\n\
@@ -1347,10 +2054,10 @@ impl CharacterEditorState {
             self.anatomy.lower_leg_length,
             self.anatomy.limb_thickness,
             self.anatomy.head_scale,
-            0.85, 0.68, 0.55,
-            0.24, 0.36, 0.52,
-            0.18, 0.16, 0.15,
-            0.45, 0.45, 0.48,
+            skin.red, skin.green, skin.blue,
+            cloth.red, cloth.green, cloth.blue,
+            pants.red, pants.green, pants.blue,
+            armor.red, armor.green, armor.blue,
             self.anatomy.pauldron_size,
             self.anatomy.has_shoulder_spikes,
         )
@@ -1358,7 +2065,7 @@ impl CharacterEditorState {
 }
 
 // ----------------------------------------------------------------------------
-// 8. UI COMPONENT TAGS & ACTIONS
+// 11. UI COMPONENT TAGS & ACTIONS
 // ----------------------------------------------------------------------------
 
 #[derive(Component)]
@@ -1407,7 +2114,7 @@ pub enum EditorAction {
 pub struct EditorValueDisplay(pub String);
 
 // ----------------------------------------------------------------------------
-// 9. UI SETUP & HIERARCHY SPAWNING
+// 12. UI SETUP & HIERARCHY SPAWNING
 // ----------------------------------------------------------------------------
 
 pub fn setup_character_editor_ui(mut commands: Commands) {
@@ -1679,7 +2386,7 @@ pub fn setup_character_editor_ui(mut commands: Commands) {
 }
 
 // ----------------------------------------------------------------------------
-// 10. UI HELPER SPAWNERS
+// 13. UI HELPER SPAWNERS
 // ----------------------------------------------------------------------------
 
 fn spawn_editor_button(
@@ -1875,7 +2582,7 @@ fn spawn_palette_row(
 }
 
 // ----------------------------------------------------------------------------
-// 11. TOGGLE & INTERACTION SYSTEMS
+// 14. TOGGLE & INTERACTION SYSTEMS
 // ----------------------------------------------------------------------------
 
 pub use crate::input::ToggleCharacterEditorEvent;
@@ -2025,8 +2732,8 @@ pub fn handle_character_editor_interactions(
                     Color::srgb(0.38, 0.52, 0.32), // Troll moss
                 ];
                 let cur = editor.anatomy.skin_color;
-                let next = tones.iter().find(|&&c| c != cur).copied().unwrap_or(tones[0]);
-                editor.anatomy.skin_color = next;
+                let next_idx = tones.iter().position(|&c| c == cur).map(|i| (i + 1) % tones.len()).unwrap_or(0);
+                editor.anatomy.skin_color = tones[next_idx];
                 mark_dirty = true;
             }
             EditorAction::CycleClothColor => {
@@ -2038,8 +2745,8 @@ pub fn handle_character_editor_interactions(
                     Color::srgb(0.38, 0.32, 0.24), // Rough leather
                 ];
                 let cur = editor.anatomy.cloth_color;
-                let next = cloths.iter().find(|&&c| c != cur).copied().unwrap_or(cloths[0]);
-                editor.anatomy.cloth_color = next;
+                let next_idx = cloths.iter().position(|&c| c == cur).map(|i| (i + 1) % cloths.len()).unwrap_or(0);
+                editor.anatomy.cloth_color = cloths[next_idx];
                 mark_dirty = true;
             }
             EditorAction::CycleArmorColor => {
@@ -2050,8 +2757,8 @@ pub fn handle_character_editor_interactions(
                     Color::srgb(0.60, 0.40, 0.25), // Bronze
                 ];
                 let cur = editor.anatomy.armor_color;
-                let next = armors.iter().find(|&&c| c != cur).copied().unwrap_or(armors[0]);
-                editor.anatomy.armor_color = next;
+                let next_idx = armors.iter().position(|&c| c == cur).map(|i| (i + 1) % armors.len()).unwrap_or(0);
+                editor.anatomy.armor_color = armors[next_idx];
                 mark_dirty = true;
             }
             EditorAction::ToggleShoulderSpikes => {
@@ -2112,7 +2819,7 @@ pub fn update_character_editor_display(
     editor: Res<CharacterEditorState>,
     mut display_q: Query<(&EditorValueDisplay, &mut Text)>,
 ) {
-    if !editor.is_open {
+    if !editor.is_changed() || !editor.is_open {
         return;
     }
 
@@ -2159,49 +2866,13 @@ pub fn update_character_editor_display(
     }
 }
 
-/// Rebuilds the player's 3D articulated model when customization parameters change.
-pub fn sync_player_model_rebuild_system(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut player_q: Query<(Entity, &mut PlayerCharacterCustomization), With<PlayerBody>>,
-    existing_root_q: Query<(Entity, &Parent), With<CharacterModelRoot>>,
-) {
-    for (player_entity, mut custom) in player_q.iter_mut() {
-        if !custom.dirty {
-            continue;
-        }
-        custom.dirty = false;
-
-        // Despawn existing procedural model hierarchy
-        for (root_entity, parent) in existing_root_q.iter() {
-            if parent.get() == player_entity {
-                commands.entity(root_entity).despawn_recursive();
-            }
-        }
-
-        // Spawn freshly compiled articulated hierarchy
-        spawn_procedural_character_hierarchy(
-            &mut commands,
-            player_entity,
-            &mut meshes,
-            &mut materials,
-            &custom.anatomy,
-            &custom.face,
-            RenderLayers::layer(2),
-        );
-
-        info!("🎭 Rebuilt procedural character model for player (Race: {})", custom.anatomy.race_name);
-    }
-}
-
 /// Dynamically toggles tab panel containers based on the active tab, and highlights tab buttons.
 pub fn update_editor_tab_visibility(
     editor: Res<CharacterEditorState>,
     mut tab_panel_q: Query<(&EditorTabPanel, &mut Style)>,
     mut tab_button_q: Query<(&EditorAction, &mut BorderColor, &mut BackgroundColor), With<Button>>,
 ) {
-    if !editor.is_changed() && !editor.is_open {
+    if !editor.is_changed() {
         return;
     }
 
@@ -2262,7 +2933,7 @@ pub fn orient_character_model_to_locomotion_system(
 }
 
 // ----------------------------------------------------------------------------
-// 12. CHARACTER CUSTOMIZER PLUGIN REGISTRATION
+// 15. CHARACTER CUSTOMIZER PLUGIN REGISTRATION
 // ----------------------------------------------------------------------------
 
 pub struct CharacterCustomizerPlugin;
@@ -2270,7 +2941,9 @@ pub struct CharacterCustomizerPlugin;
 impl Plugin for CharacterCustomizerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CharacterEditorState>()
+            .init_resource::<PhysicsWorld>()
             .add_systems(OnEnter(GameState::InGame), setup_character_editor_ui)
+            .add_systems(FixedUpdate, step_physics_world_system)
             .add_systems(
                 Update,
                 (
@@ -2278,7 +2951,7 @@ impl Plugin for CharacterCustomizerPlugin {
                     handle_character_editor_interactions,
                     update_character_editor_display,
                     update_editor_tab_visibility,
-                    sync_player_model_rebuild_system,
+                    live_character_update_system,
                     sync_player_animation_state,
                     procedural_animator_system,
                     orient_character_model_to_locomotion_system,
@@ -2289,7 +2962,7 @@ impl Plugin for CharacterCustomizerPlugin {
 }
 
 // ----------------------------------------------------------------------------
-// 13. UNIT TESTS
+// 16. UNIT TESTS
 // ----------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -2334,5 +3007,33 @@ mod tests {
         assert!(code.contains("pub const CUSTOM_CHARACTER_PRESET: CharacterPreset"));
         assert!(code.contains("jaw_width:"));
         assert!(code.contains("torso_size:"));
+    }
+
+    #[test]
+    fn test_physics_world_compound_skeleton_stepping() {
+        let mut physics = PhysicsWorld::default();
+
+        let root_rb = RigidBodyBuilder::kinematic_position_based().build();
+        let root_handle = physics.rigid_body_set.insert(root_rb);
+        let rb_comp = RbHandle(root_handle);
+
+        let col = ColliderBuilder::cuboid(0.2, 0.3, 0.1);
+        let col_handle = physics.collider_set.insert_with_parent(
+            col,
+            root_handle,
+            &mut physics.rigid_body_set,
+        );
+        let col_comp = ColHandle(col_handle);
+
+        assert_eq!(rb_comp.0, root_handle);
+        assert_eq!(col_comp.0, col_handle);
+
+        // Verify in-place hitbox update without dropping body
+        if let Some(c) = physics.collider_set.get_mut(col_handle) {
+            c.set_shape(SharedShape::cuboid(0.25, 0.35, 0.15));
+        }
+
+        physics.step();
+        assert!(physics.rigid_body_set.get(root_handle).is_some());
     }
 }

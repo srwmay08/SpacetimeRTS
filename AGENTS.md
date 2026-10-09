@@ -49,4 +49,4 @@ You must strictly obey the following project expectations on every turn. Refer t
 ## 6. Output Integrity & Git Protocol
 - **No Laziness / No Truncation:** Always output complete, ready-to-compile files from top to bottom. Placeholders like `// ... existing code ...` are strictly forbidden.
 - **In-Line Architectural Rationale:** Document the *why* for all non-obvious algorithms and structures.
-- **Commit & Push:** Make clean commits adhering to Conventional Commits and keep `origin main` synchronized.
+<!-- - **Commit & Push:** Make clean commits adhering to Conventional Commits and keep `origin main` synchronized. -->

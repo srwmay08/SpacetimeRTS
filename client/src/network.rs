@@ -373,6 +373,7 @@ pub fn sync_transforms(
     player_body_query: Query<&BevyTransform, With<PlayerBody>>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut physics: ResMut<crate::character_customizer::PhysicsWorld>,
     render_settings: Option<Res<crate::spellbook::TerrainRenderSettings>>,
     mut spawned_ids: Local<BTreeSet<u64>>,
     mut creature_cache: Local<Option<crate::creatures::CachedCreatureMeshes>>,
@@ -498,6 +499,7 @@ pub fn sync_transforms(
                 &default_preset.anatomy,
                 &default_preset.face,
                 RenderLayers::from_layers(&[0, 1, 2]),
+                &mut physics,
             );
 
             spawned_ids.insert(id);
