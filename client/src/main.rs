@@ -47,7 +47,7 @@ use crate::audio_feedback::*;
 use crate::tactical_abilities::*;
 use crate::tree_colors::*;
 use crate::resource_nodes::*;
-use crate::creatures::{setup_sparring_yard, update_training_dummy_wobble, update_sparring_goblin_ai, creature_shadow_culling_system};
+use crate::creatures::{setup_sparring_yard, update_training_dummy_wobble, update_sparring_goblin_ai, creature_shadow_culling_system, update_creature_locomotion_animations};
 
 pub use crate::core::UpdateSet;
 
@@ -224,6 +224,7 @@ fn main() {
         .add_systems(Update, (
             update_sparring_goblin_ai,
             update_training_dummy_wobble,
+            update_creature_locomotion_animations,
             update_falling_trees,
             update_tree_colors,
             update_berry_visuals,

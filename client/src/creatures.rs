@@ -756,7 +756,8 @@ pub fn spawn_creature_visual_entity(
     npc_brain: Option<&crate::module_bindings::NpcBrain>,
     player_pos: Vec3,
 ) -> Entity {
-    let mut visual_transform = Transform::from_xyz(0.0, -1.05, 0.0);
+    let mut visual_transform = Transform::from_xyz(0.0, -1.05, 0.0)
+        .with_rotation(Quat::from_rotation_y(std::f32::consts::PI));
 
     let (mesh_handle, root_collider) = if is_pet {
         visual_transform.translation.y = -0.45;
@@ -816,6 +817,7 @@ pub fn spawn_creature_visual_entity(
         SpatialBundle::from_transform(Transform::from_xyz(db_t.x, db_t.y, db_t.z)),
         LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
         LogicalRotation(Quat::IDENTITY),
+        LinearVelocity::ZERO,
         Selectable, 
         RigidBody::Kinematic, 
         root_collider,
@@ -828,6 +830,8 @@ pub fn spawn_creature_visual_entity(
 
     let dist_sq = (db_t.x - player_pos.x).powi(2) + (db_t.z - player_pos.z).powi(2);
     let is_shadow_culled = dist_sq > crate::resource_nodes::TREE_SHADOW_NEAR_DIST_SQ;
+    let base_y = visual_transform.translation.y;
+    let base_rot = visual_transform.rotation;
 
     entity_cmds.with_children(|parent| {
         let mut visual_cmds = parent.spawn((
@@ -836,6 +840,11 @@ pub fn spawn_creature_visual_entity(
                 material: cache.creature_material.clone(),
                 transform: visual_transform,
                 ..default()
+            },
+            CreatureLocomotionBob {
+                gait_phase: 0.0,
+                base_y,
+                base_rot,
             },
             RenderLayers::from_layers(&[0, 1, 2]), RTSProxy,
         ));
@@ -982,12 +991,20 @@ pub fn setup_sparring_yard(
             [GameLayer::Default, GameLayer::Terrain, GameLayer::Environment],
         ),
     )).with_children(|parent| {
-        parent.spawn(PbrBundle {
-            mesh: goblin_mesh,
-            material: goblin_mat,
-            transform: BevyTransform::from_xyz(0.0, -1.08, 0.0),
-            ..default()
-        });
+        parent.spawn((
+            PbrBundle {
+                mesh: goblin_mesh,
+                material: goblin_mat,
+                transform: BevyTransform::from_xyz(0.0, -1.08, 0.0)
+                    .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+                ..default()
+            },
+            CreatureLocomotionBob {
+                gait_phase: 0.0,
+                base_y: -1.08,
+                base_rot: Quat::from_rotation_y(std::f32::consts::PI),
+            },
+        ));
     });
 
     // 3. Sparring Yard Training Torches / Ring Markers
@@ -1143,6 +1160,57 @@ pub fn update_sparring_goblin_ai(
         } else {
             goblin_vel.x *= 0.85;
             goblin_vel.z *= 0.85;
+        }
+    }
+}
+
+/// Component attached to visual mesh children of creatures and NPCs to drive
+/// rhythmic procedural locomotion bobbing and walking weight transfers.
+#[derive(Component, Debug, Clone)]
+pub struct CreatureLocomotionBob {
+    pub gait_phase: f32,
+    pub base_y: f32,
+    pub base_rot: Quat,
+}
+
+impl Default for CreatureLocomotionBob {
+    fn default() -> Self {
+        Self {
+            gait_phase: 0.0,
+            base_y: -1.05,
+            base_rot: Quat::from_rotation_y(std::f32::consts::PI),
+        }
+    }
+}
+
+/// Animates low-poly creature and NPC visual meshes with dynamic step bobbing,
+/// waddle rocking, and forward lean when moving, smoothly returning to rest when stopped.
+pub fn update_creature_locomotion_animations(
+    time: Res<Time>,
+    parent_q: Query<(&BevyTransform, Option<&LinearVelocity>), Without<CreatureLocomotionBob>>,
+    mut child_q: Query<(&Parent, &mut BevyTransform, &mut CreatureLocomotionBob)>,
+) {
+    let dt = time.delta_seconds();
+    for (parent, mut transform, mut bob) in child_q.iter_mut() {
+        let Ok((_, maybe_vel)) = parent_q.get(parent.get()) else { continue; };
+        let speed = maybe_vel.map_or(0.0, |v| Vec2::new(v.x, v.z).length());
+
+        if speed > 0.15 {
+            let freq = (8.0 + speed * 1.5).min(18.0);
+            bob.gait_phase += dt * freq;
+            let step_bob = (bob.gait_phase * 2.0).sin().abs() * 0.04;
+            let roll_waddle = (bob.gait_phase).sin() * 0.035;
+            let forward_lean = -0.05;
+
+            transform.translation.y = bob.base_y + step_bob;
+            transform.rotation = bob.base_rot
+                * Quat::from_rotation_z(roll_waddle)
+                * Quat::from_rotation_x(forward_lean);
+        } else {
+            bob.gait_phase = 0.0;
+            let decay = (12.0 * dt).min(1.0);
+            transform.translation.y += (bob.base_y - transform.translation.y) * decay;
+            transform.rotation = transform.rotation.slerp(bob.base_rot, decay);
         }
     }
 }

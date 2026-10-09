@@ -118,6 +118,7 @@ pub fn input_router_system(
     node_query: Query<(&Node, &GlobalTransform, &Visibility, &Style)>,
     mut flick_tracker: ResMut<MouseFlickTracker>,
     mut mouse_motion: EventReader<MouseMotion>,
+    char_editor: Option<Res<crate::character_customizer::CharacterEditorState>>,
 ) {
     if console.is_open {
         return;
@@ -141,11 +142,12 @@ pub fn input_router_system(
 
     let cursor_pos = window_query.get_single().ok().and_then(|w| w.cursor_position());
     let cursor_locked = window_query.get_single().map_or(false, |w| w.cursor.grab_mode == CursorGrabMode::Locked);
+    let is_editor_open = char_editor.as_ref().map_or(false, |e| e.is_open);
 
     let mut is_over_ui = if cursor_locked {
         false
     } else {
-        interaction_query.iter().any(|i| *i != Interaction::None) || drag_drop.is_dragging
+        interaction_query.iter().any(|i| *i != Interaction::None) || drag_drop.is_dragging || is_editor_open
     };
     
     if !cursor_locked && !is_over_ui {

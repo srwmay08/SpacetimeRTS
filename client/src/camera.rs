@@ -271,6 +271,17 @@ pub fn rts_camera_controller(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct FpsLookUiParams<'w, 's> {
+    pub console: Res<'w, ConsoleState>,
+    pub inv_query: Query<'w, 's, &'static Style, With<InventoryUiRoot>>,
+    pub build_menu_query: Query<'w, 's, &'static Style, With<BuildMenuRoot>>,
+    pub char_editor_ui: Query<'w, 's, &'static Style, With<crate::character_customizer::CharacterEditorRoot>>,
+    pub char_editor: Option<Res<'w, crate::character_customizer::CharacterEditorState>>,
+    pub tuner: Option<Res<'w, crate::tuner::WeaponTunerState>>,
+    pub spellbook: Option<Res<'w, crate::spellbook::SpellbookWindowState>>,
+}
+
 pub fn fps_look(
     mut mouse_motion: EventReader<MouseMotion>,
     mut scroll_evts: EventReader<MouseWheel>,
@@ -279,9 +290,7 @@ pub fn fps_look(
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>, 
     keys: Res<ButtonInput<KeyCode>>,
-    console: Res<ConsoleState>,
-    inv_query: Query<&Style, With<InventoryUiRoot>>,
-    build_menu_query: Query<&Style, With<BuildMenuRoot>>,
+    ui_params: FpsLookUiParams,
     mut cam_settings: ResMut<CharacterCameraSettings>,
     time: Res<Time>,
     spatial_query: SpatialQuery,
@@ -291,9 +300,13 @@ pub fn fps_look(
     let Ok((player_entity, mut body_transform)) = body_query.get_single_mut() else { return; };
     let Ok((mut head_transform, mut head_layers)) = head_query.get_single_mut() else { return; };
 
-    let is_inventory_open = inv_query.get_single().map_or(false, |s| s.display != Display::None);
-    let is_build_menu_open = build_menu_query.get_single().map_or(false, |s| s.display != Display::None);
-    let ui_active = is_inventory_open || is_build_menu_open || console.is_open;
+    let is_inventory_open = ui_params.inv_query.get_single().map_or(false, |s| s.display != Display::None);
+    let is_build_menu_open = ui_params.build_menu_query.get_single().map_or(false, |s| s.display != Display::None);
+    let is_customizer_ui_open = ui_params.char_editor_ui.get_single().map_or(false, |s| s.display != Display::None);
+    let is_customizer_open = ui_params.char_editor.as_ref().map_or(false, |e| e.is_open) || is_customizer_ui_open;
+    let is_tuner_open = ui_params.tuner.as_ref().map_or(false, |t| t.is_open);
+    let is_spellbook_open = ui_params.spellbook.as_ref().map_or(false, |s| s.is_open);
+    let ui_active = is_inventory_open || is_build_menu_open || ui_params.console.is_open || is_customizer_open || is_tuner_open || is_spellbook_open;
 
     if ui_active {
         if window.cursor.grab_mode != CursorGrabMode::None {

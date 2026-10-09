@@ -56,6 +56,8 @@ pub struct UiActionQueries<'w, 's> {
     pub build_menu: Query<'w, 's, &'static mut Style, With<BuildMenuRoot>>,
     pub inventory: Query<'w, 's, &'static mut Style, (With<InventoryUiRoot>, Without<BuildMenuRoot>)>,
     pub window: Query<'w, 's, &'static mut Window, With<PrimaryWindow>>,
+    pub char_editor: Option<Res<'w, crate::character_customizer::CharacterEditorState>>,
+    pub tuner: Option<Res<'w, crate::tuner::WeaponTunerState>>,
 }
 
 #[derive(SystemParam)]
@@ -87,7 +89,7 @@ pub fn context_aware_action_dispatcher(
     mut ui_queries: UiActionQueries,
     mut weapons: WeaponActionParams,
 ) {
-    if console.is_open {
+    if console.is_open || ui_queries.char_editor.as_ref().map_or(false, |e| e.is_open) || ui_queries.tuner.as_ref().map_or(false, |t| t.is_open) {
         return;
     }
 
