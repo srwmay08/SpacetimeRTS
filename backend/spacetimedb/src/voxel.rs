@@ -128,19 +128,28 @@ pub fn is_dungeon_cavity_at(wx: f32, wy: f32, wz: f32, terrain_height: f32) -> b
     false
 }
 
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
-static RAVINE_PERLIN: OnceLock<Perlin> = OnceLock::new();
-static CAVE_PERLIN: OnceLock<Perlin> = OnceLock::new();
+static RAVINE_PERLIN: OnceLock<RwLock<Perlin>> = OnceLock::new();
+static CAVE_PERLIN: OnceLock<RwLock<Perlin>> = OnceLock::new();
 
 #[inline]
-pub fn get_ravine_perlin() -> &'static Perlin {
-    RAVINE_PERLIN.get_or_init(|| Perlin::new(1339))
+pub fn get_ravine_perlin() -> Perlin {
+    *RAVINE_PERLIN.get_or_init(|| RwLock::new(Perlin::new(1339))).read().unwrap()
 }
 
 #[inline]
-pub fn get_cave_perlin() -> &'static Perlin {
-    CAVE_PERLIN.get_or_init(|| Perlin::new(1338))
+pub fn get_cave_perlin() -> Perlin {
+    *CAVE_PERLIN.get_or_init(|| RwLock::new(Perlin::new(1338))).read().unwrap()
+}
+
+pub fn set_subterrain_seeds(cave_seed: u32, ravine_seed: u32) {
+    if let Ok(mut lock) = RAVINE_PERLIN.get_or_init(|| RwLock::new(Perlin::new(1339))).write() {
+        *lock = Perlin::new(ravine_seed);
+    }
+    if let Ok(mut lock) = CAVE_PERLIN.get_or_init(|| RwLock::new(Perlin::new(1338))).write() {
+        *lock = Perlin::new(cave_seed);
+    }
 }
 
 /// Evaluates if 3D procedural coordinates carve out a natural subterranean cavity:
@@ -383,6 +392,55 @@ pub fn ensure_or_create_chunk(ctx: &ReducerContext, cx: i32, cy: i32, cz: i32) -
 pub fn find_ground_surface_below(ctx: &ReducerContext, wx: f32, wy: f32, wz: f32) -> f32 {
     let terrain_height = crate::get_terrain_height(wx, wz);
     let feet_y = wy - 1.05;
+
+    // Overworld surface fast-path:
+    // If the player is on or above the surface crust, check if this surface quad is intact.
+    // When intact, return the continuous smooth float `terrain_height` to prevent
+    // 1.0m integer voxel quantization snapping on overworld slopes and hills.
+    if feet_y >= terrain_height - 3.5 {
+        let vx = (wx / VOXEL_SIZE).floor() as i32;
+        let vz = (wz / VOXEL_SIZE).floor() as i32;
+        let cx = vx.div_euclid(CHUNK_SIZE as i32);
+        let cz = vz.div_euclid(CHUNK_SIZE as i32);
+        let lx = vx.rem_euclid(CHUNK_SIZE as i32) as usize;
+        let lz = vz.rem_euclid(CHUNK_SIZE as i32) as usize;
+
+        let sub_surface_vy = (terrain_height - 0.25).floor() as i32;
+        let cy = sub_surface_vy.div_euclid(16);
+        let ly = sub_surface_vy.rem_euclid(16) as usize;
+        let key = pack_chunk_key(cx, cy, cz);
+
+        let mut is_excavated = false;
+        if let Some(chunk) = ctx.db.voxel_chunk().chunk_key().find(key) {
+            let idx = local_to_index(lx, ly, lz);
+            if let Some(&mat_byte) = chunk.voxels.get(idx) {
+                if mat_byte == 0 {
+                    is_excavated = true;
+                }
+            }
+        }
+
+        if !is_excavated {
+            return terrain_height;
+        } else {
+            // Surface quad excavated: Return the floor elevation of the excavated surface threshold ramp
+            // matching client (terrain_height - 1.2m). This prevents integer voxel quantization snaps
+            // and prediction rollback snaps when a surface voxel is destroyed!
+            let sub_sub_surface_vy = sub_surface_vy - 1;
+            let cy2 = sub_sub_surface_vy.div_euclid(16);
+            let ly2 = sub_sub_surface_vy.rem_euclid(16) as usize;
+            let key2 = pack_chunk_key(cx, cy2, cz);
+            let deeper_excavated = ctx.db.voxel_chunk().chunk_key().find(key2).map_or(false, |c| {
+                let idx = local_to_index(lx, ly2, lz);
+                c.voxels.get(idx).map_or(false, |&m| m == 0)
+            });
+
+            if !deeper_excavated {
+                return (terrain_height - 1.2).max(BEDROCK_ELEVATION);
+            }
+        }
+    }
+
     let start_y = (feet_y + 0.5).min(terrain_height + 2.0);
 
     let vx = (wx / VOXEL_SIZE).floor() as i32;

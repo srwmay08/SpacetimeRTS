@@ -140,6 +140,8 @@ pub struct GlobalState {
     pub time_of_day: f32,
     #[default(0)]
     pub last_npc_check: u64,
+    #[default(42)]
+    pub world_seed: u32,
 }
 
 #[table(accessor = waypoint, public)]
@@ -493,7 +495,9 @@ pub fn init(ctx: &ReducerContext) {
         scheduled_at: ScheduleAt::Interval(Duration::from_millis(100).into()),
     });
 
-    ctx.db.global_state().insert(GlobalState { id: 0, time_of_day: 8.0, last_npc_check: 0 });
+    let initial_seed = 42;
+    ctx.db.global_state().insert(GlobalState { id: 0, time_of_day: 8.0, last_npc_check: 0, world_seed: initial_seed });
+    apply_world_seed(initial_seed);
 
     seed_authoritative_recipes(ctx);
     crate::building::seed_default_materials(ctx);
@@ -764,7 +768,8 @@ pub fn spawn_world_resource_nodes(ctx: &ReducerContext) {
         ctx.db.resource_node().node_id().delete(id);
     }
 
-    let mut seed = ctx.timestamp.to_micros_since_unix_epoch() as u64;
+    let seed_base = ctx.db.global_state().id().find(0).map(|s| s.world_seed).unwrap_or(42);
+    let mut seed = (seed_base as u64) ^ 0x9E37_79B9_7F4A_7C15;
     let mut total_spawned = 0usize;
 
     // Fast 2D spatial grid for instantaneous overlap testing at high density
@@ -1035,6 +1040,7 @@ pub fn admin_respawn_resources(ctx: &ReducerContext) {
 
 #[spacetimedb::reducer(client_connected)]
 pub fn client_connected(ctx: &ReducerContext) {
+    ensure_world_seed_synced(ctx);
     let sender = ctx.sender();
 
     let node_count = ctx.db.resource_node().iter().count();
@@ -1611,6 +1617,46 @@ pub fn admin_kill_all_npcs(ctx: &ReducerContext) -> Result<(), String> {
     Ok(())
 }
 
+#[reducer]
+pub fn admin_set_world_seed(ctx: &ReducerContext, seed: u32) -> Result<(), String> {
+    apply_world_seed(seed);
+    if let Some(mut state) = ctx.db.global_state().id().find(0) {
+        state.world_seed = seed;
+        ctx.db.global_state().id().update(state);
+    } else {
+        ctx.db.global_state().insert(GlobalState {
+            id: 0,
+            time_of_day: 8.0,
+            last_npc_check: 0,
+            world_seed: seed,
+        });
+    }
+
+    // Clear player-modified voxel chunks so excavations from previous seed don't hang in mid-air
+    let chunk_keys: Vec<u64> = ctx.db.voxel_chunk().iter().map(|c| c.chunk_key).collect();
+    for key in chunk_keys {
+        ctx.db.voxel_chunk().chunk_key().delete(key);
+    }
+
+    // Deterministically re-spawn resource nodes based on the new seed
+    spawn_world_resource_nodes(ctx);
+
+    // Re-snap existing NPCs to the new terrain surface
+    for mut transform in ctx.db.transform().iter() {
+        transform.y = get_terrain_height(transform.x, transform.z) + 1.05;
+        ctx.db.transform().entity_id().update(transform);
+    }
+
+    Ok(())
+}
+
+#[reducer]
+pub fn admin_randomize_world_seed(ctx: &ReducerContext) -> Result<(), String> {
+    let ts = ctx.timestamp.to_micros_since_unix_epoch() as u32;
+    let rand_seed = (ts.wrapping_mul(1664525).wrapping_add(1013904223)) % 999_999 + 1;
+    admin_set_world_seed(ctx, rand_seed)
+}
+
 // ----------------------------------------------------------------------------
 // PROGRESSION & INTERACTION REDUCERS
 // ----------------------------------------------------------------------------
@@ -2000,11 +2046,68 @@ pub fn swing_tool(ctx: &ReducerContext, px: f32, py: f32, pz: f32, dx: f32, dy: 
     Ok(())
 }
 
-static NOISE_ELEVATION: std::sync::OnceLock<Perlin> = std::sync::OnceLock::new();
+static ACTIVE_WORLD_SEED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(42);
+static NOISE_ELEVATION: std::sync::OnceLock<std::sync::RwLock<Perlin>> = std::sync::OnceLock::new();
 
 #[inline]
-pub fn get_noise_elevation() -> &'static Perlin {
-    NOISE_ELEVATION.get_or_init(|| Perlin::new(42))
+pub fn get_noise_elevation() -> Perlin {
+    *NOISE_ELEVATION.get_or_init(|| std::sync::RwLock::new(Perlin::new(42))).read().unwrap()
+}
+
+pub fn set_noise_elevation_seed(seed: u32) {
+    if let Ok(mut lock) = NOISE_ELEVATION.get_or_init(|| std::sync::RwLock::new(Perlin::new(42))).write() {
+        *lock = Perlin::new(seed);
+    }
+}
+
+pub fn get_active_world_seed() -> u32 {
+    ACTIVE_WORLD_SEED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn apply_world_seed(seed: u32) {
+    ACTIVE_WORLD_SEED.store(seed, std::sync::atomic::Ordering::Relaxed);
+    set_noise_elevation_seed(seed);
+    crate::voxel::set_subterrain_seeds(seed.wrapping_add(1296), seed.wrapping_add(1297));
+}
+
+pub fn ensure_world_seed_synced(ctx: &ReducerContext) -> u32 {
+    let seed = ctx.db.global_state().id().find(0).map(|s| s.world_seed).unwrap_or(42);
+    if get_active_world_seed() != seed {
+        apply_world_seed(seed);
+    }
+    seed
+}
+
+pub fn get_terrain_height_seeded(x: f32, z: f32, seed: u32) -> f32 {
+    let scale = 0.015;
+    let base_height_amp = 18.0;
+    let noise_elevation = Perlin::new(seed);
+
+    let nx = x as f64 * scale;
+    let nz = z as f64 * scale;
+
+    let mut elevation = noise_elevation.get([nx, nz]) * 0.6
+        + noise_elevation.get([nx * 2.0, nz * 2.0]) * 0.3
+        + noise_elevation.get([nx * 4.0, nz * 4.0]) * 0.1;
+
+    elevation = (elevation + 1.0) * 0.5;
+    elevation = elevation.max(0.001);
+
+    let mut y = (elevation.powf(1.4)) as f32 * base_height_amp;
+
+    let river_factor = (x * 0.04).cos().abs() * 3.5;
+    if river_factor < 2.0 {
+        y = (y - (2.0 - river_factor)).max(0.5);
+    }
+
+    let lake_dist = ((x + 35.0) * (x + 35.0) + (z + 35.0) * (z + 35.0)).sqrt();
+    if lake_dist < 25.0 {
+        let basin_depth = (1.0 - (lake_dist / 25.0)).max(0.0) * 4.0;
+        y = (y - basin_depth).max(0.2);
+    }
+
+    if y.is_nan() { y = 0.5; }
+    y
 }
 
 pub fn get_terrain_height(x: f32, z: f32) -> f32 {

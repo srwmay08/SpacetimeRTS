@@ -92,6 +92,7 @@ pub fn init_network_connection(
                 "SELECT * FROM door_state".to_string(),
                 "SELECT * FROM fall_hazard".to_string(),
                 "SELECT * FROM node_facing".to_string(),
+                "SELECT * FROM global_state".to_string(),
             ]);
 
             if let Ok(mut guard) = store_clone.lock() {

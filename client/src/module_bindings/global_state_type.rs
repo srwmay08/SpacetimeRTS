@@ -10,6 +10,7 @@ pub struct GlobalState {
     pub id: u32,
     pub time_of_day: f32,
     pub last_npc_check: u64,
+    pub world_seed: u32,
 }
 
 impl __sdk::InModule for GlobalState {
@@ -23,6 +24,7 @@ pub struct GlobalStateCols {
     pub id: __sdk::__query_builder::Col<GlobalState, u32>,
     pub time_of_day: __sdk::__query_builder::Col<GlobalState, f32>,
     pub last_npc_check: __sdk::__query_builder::Col<GlobalState, u64>,
+    pub world_seed: __sdk::__query_builder::Col<GlobalState, u32>,
 }
 
 impl __sdk::__query_builder::HasCols for GlobalState {
@@ -32,6 +34,7 @@ impl __sdk::__query_builder::HasCols for GlobalState {
             id: __sdk::__query_builder::Col::new(table_name, "id"),
             time_of_day: __sdk::__query_builder::Col::new(table_name, "time_of_day"),
             last_npc_check: __sdk::__query_builder::Col::new(table_name, "last_npc_check"),
+            world_seed: __sdk::__query_builder::Col::new(table_name, "world_seed"),
         }
     }
 }

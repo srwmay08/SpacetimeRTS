@@ -129,17 +129,26 @@ pub fn player_movement_system(
     // 2. STANDARD GROUND LOCOMOTION & COLLISION
     // ------------------------------------------------------------------------
     let ray_start = transform.translation; 
+    let ground_filter = SpatialQueryFilter::from_mask([
+        GameLayer::Terrain,
+        GameLayer::Environment,
+        GameLayer::Default,
+    ]).with_excluded_entities([entity]);
+
     let hit = spatial_query.cast_ray(
         ray_start, 
         Dir3::NEG_Y, 
         1.25, 
         true, 
-        SpatialQueryFilter::from_excluded_entities([entity])
+        ground_filter,
     );
     
+    // High-Frequency Ground State Oscillation Fix:
+    // Do not clear grounded state simply because lin_vel.y > 0.05 on slopes.
+    // Only clear grounded state if no surface is within contact range or player is actively jumping.
     kcc.is_grounded = false;
     if let Some(hit_data) = hit {
-        if hit_data.time_of_impact <= 1.20 && lin_vel.y <= 0.05 {
+        if hit_data.time_of_impact <= 1.25 && lin_vel.y < 4.0 {
             kcc.is_grounded = true;
         }
     }
@@ -158,8 +167,26 @@ pub fn player_movement_system(
     // Preserve active tactical Phase Dash momentum instead of clamping to walking speed
     let is_dashing = ability_state.as_ref().map_or(false, |s| s.is_dashing);
     if !is_dashing && *camera_mode.get() == CameraMode::FPS {
-        lin_vel.x = move_dir.x * locomotion_settings.horizontal_speed;
-        lin_vel.z = move_dir.z * locomotion_settings.horizontal_speed;
+        if move_dir == Vec3::ZERO {
+            lin_vel.x = 0.0;
+            lin_vel.z = 0.0;
+        } else if kcc.is_grounded {
+            // Slope Projection: project desired movement along surface tangent for smooth slope traversal
+            let normal = hit.map_or(Vec3::Y, |h| h.normal);
+            if normal.y > 0.4 {
+                let slope_dir = (move_dir - normal * move_dir.dot(normal)).normalize_or_zero();
+                let vel = slope_dir * locomotion_settings.horizontal_speed;
+                lin_vel.x = vel.x;
+                lin_vel.z = vel.z;
+                lin_vel.y = vel.y;
+            } else {
+                lin_vel.x = move_dir.x * locomotion_settings.horizontal_speed;
+                lin_vel.z = move_dir.z * locomotion_settings.horizontal_speed;
+            }
+        } else {
+            lin_vel.x = move_dir.x * locomotion_settings.horizontal_speed;
+            lin_vel.z = move_dir.z * locomotion_settings.horizontal_speed;
+        }
     }
 
     let dt = time.delta_seconds();
@@ -197,22 +224,14 @@ pub fn player_movement_system(
             loco.jump_buffered_timer = 0.0;
         } else if kcc.is_grounded {
             if move_dir == Vec3::ZERO {
-                // Standing still: zero downward acceleration to prevent Avian3D penetration chatter
-                lin_vel.y = 0.0;
+                // Transform Snapping Fighting Physics Fix:
+                // Zero downward/horizontal velocity and gravity to eliminate penetration chatter.
+                // Never manually overwrite transform.translation.y on a dynamic rigid body!
+                lin_vel.0 = Vec3::ZERO;
                 gravity.0 = 0.0;
-
-                if let Some(hit_data) = hit {
-                    if hit_data.time_of_impact < 0.98 {
-                        let surface_y = ray_start.y - hit_data.time_of_impact;
-                        transform.translation.y = surface_y + 1.0;
-                    }
-                }
             } else {
-                // Moving along slope: apply slight downward adhesion
-                gravity.0 = 2.0;
-                if lin_vel.y < 0.0 {
-                    lin_vel.y = -0.5;
-                }
+                // Moving along slope: velocity is already tangent to slope, neutralize gravity
+                gravity.0 = 0.0;
             }
         } else {
             gravity.0 = 8.0;
@@ -225,11 +244,10 @@ pub fn player_movement_system(
                 gravity.0 = 8.0;
                 kcc.is_grounded = false;
             } else if move_dir == Vec3::ZERO {
-                lin_vel.y = 0.0;
+                lin_vel.0 = Vec3::ZERO;
                 gravity.0 = 0.0;
             } else {
-                gravity.0 = 2.0;
-                if lin_vel.y < 0.0 { lin_vel.y = -0.5; }
+                gravity.0 = 0.0;
             }
         } else {
             gravity.0 = 8.0;

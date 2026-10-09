@@ -22,6 +22,8 @@ pub struct CharacterCameraSettings {
     pub target_distance: f32,
     /// Smoothed current boom distance in meters.
     pub current_distance: f32,
+    /// Actual obstacle-damped distance in meters (spring arm).
+    pub actual_distance: f32,
     /// Minimum allowed distance (0.0).
     pub min_distance: f32,
     /// Maximum allowed distance (7.5m).
@@ -43,6 +45,7 @@ impl Default for CharacterCameraSettings {
         Self {
             target_distance: 0.0,
             current_distance: 0.0,
+            actual_distance: 0.0,
             min_distance: 0.0,
             max_distance: 7.5,
             shoulder_offset: Vec3::new(0.35, 0.12, 0.0),
@@ -300,7 +303,7 @@ pub fn fps_look(
         return;
     }
 
-    if mouse_buttons.just_pressed(MouseButton::Left) {
+    if mouse_buttons.just_pressed(MouseButton::Left) && window.cursor.grab_mode != CursorGrabMode::Locked {
         window.cursor.grab_mode = CursorGrabMode::Locked;
         window.cursor.visible = false;
         let center = Vec2::new(window.width() / 2.0, window.height() / 2.0);
@@ -370,42 +373,60 @@ pub fn fps_look(
 
         if cam_settings.current_distance <= 0.001 {
             // Pure First-Person: Camera pinned at eye level
+            cam_settings.actual_distance = 0.0;
             head_transform.translation = head_base_local;
             head_transform.rotation = look_rot;
         } else {
-            // Third-Person Over-The-Shoulder Boom with Spring-Arm Raycast
+            // Third-Person Over-The-Shoulder Boom with Damped Spring-Arm Raycast
             let shoulder_blend = (cam_settings.current_distance / 1.5).min(1.0);
-            let shoulder = Vec3::new(
+            let unoccluded_shoulder = Vec3::new(
                 cam_settings.shoulder_offset.x * shoulder_blend,
                 cam_settings.shoulder_offset.y * shoulder_blend,
                 cam_settings.current_distance,
             );
-            let desired_local = head_base_local + look_rot * shoulder;
-
+            let desired_cam_world = body_transform.transform_point(head_base_local + look_rot * unoccluded_shoulder);
             let head_world = body_transform.transform_point(head_base_local);
-            let desired_cam_world = body_transform.transform_point(desired_local);
             let cast_vec = desired_cam_world - head_world;
             let cast_dist = cast_vec.length();
 
             let is_noclip = noclip.as_ref().map_or(false, |nc| nc.is_active);
-            let final_cam_world = if !is_noclip && cast_dist > 0.05 {
+            let target_distance = if !is_noclip && cast_dist > 0.05 {
                 let cast_dir = cast_vec / cast_dist;
-                let filter = SpatialQueryFilter::from_excluded_entities([player_entity]);
+                // AI_RULES.md: Camera obstruction ray must strictly collide with static world geometry
+                // (Terrain, Environment) and ignore Units, Items, Projectiles, and dynamic props.
+                let filter = SpatialQueryFilter::from_mask([
+                    GameLayer::Terrain,
+                    GameLayer::Environment,
+                ]).with_excluded_entities([player_entity]);
+
                 if let Ok(dir3) = Dir3::new(cast_dir) {
                     if let Some(hit) = spatial_query.cast_ray(head_world, dir3, cast_dist, true, filter) {
-                        let safe_dist = (hit.time_of_impact - 0.22).max(0.0);
-                        head_world + cast_dir * safe_dist
+                        (hit.time_of_impact - 0.25).max(0.0)
                     } else {
-                        desired_cam_world
+                        cam_settings.current_distance
                     }
                 } else {
-                    desired_cam_world
+                    cam_settings.current_distance
                 }
             } else {
-                desired_cam_world
+                cam_settings.current_distance
             };
 
-            head_transform.translation = body_transform.compute_matrix().inverse().transform_point3(final_cam_world);
+            // Spring-Arm Damping:
+            // Pull in quickly (rate 25.0) when entering tight spaces to avoid wall clipping.
+            // Push out smoothly (rate 10.0) when clearing obstacles to eliminate snapping / chatter.
+            if target_distance < cam_settings.actual_distance {
+                cam_settings.actual_distance = (cam_settings.actual_distance - (cam_settings.actual_distance - target_distance) * (25.0 * dt)).max(target_distance);
+            } else {
+                cam_settings.actual_distance += (target_distance - cam_settings.actual_distance) * (10.0 * dt).min(1.0);
+            }
+
+            let effective_shoulder = Vec3::new(
+                cam_settings.shoulder_offset.x * shoulder_blend,
+                cam_settings.shoulder_offset.y * shoulder_blend,
+                cam_settings.actual_distance,
+            );
+            head_transform.translation = head_base_local + look_rot * effective_shoulder;
             head_transform.rotation = look_rot;
         }
 

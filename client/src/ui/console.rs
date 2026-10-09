@@ -25,6 +25,9 @@ use crate::module_bindings::admin_spawn_npc_reducer::admin_spawn_npc;
 use crate::module_bindings::admin_detonate_reducer::admin_detonate;
 use crate::module_bindings::admin_kill_all_npcs_reducer::admin_kill_all_npcs;
 use crate::module_bindings::admin_spawn_building_reducer::admin_spawn_building;
+use crate::module_bindings::admin_set_world_seed_reducer::admin_set_world_seed;
+use crate::module_bindings::admin_randomize_world_seed_reducer::admin_randomize_world_seed;
+use crate::module_bindings::global_state_table::GlobalStateTableAccess;
 use crate::module_bindings::equip_weapon_reducer::equip_weapon;
 
 use super::types::*;
@@ -37,6 +40,7 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "teleport",
     "heal",
     "god",
+    "seed",
     "time",
     "settime",
     "spawn",
@@ -692,6 +696,27 @@ pub fn handle_console_input(
                     console.logs.push(format!("[Server Error] Killall failed: {:?}", e));
                 } else {
                     console.logs.push("[Admin] All non-player entities destroyed.".into());
+                }
+            }
+            "seed" => {
+                if tokens.len() == 1 {
+                    let cur_seed = conn.db.db.global_state().id().find(&0).map(|g| g.world_seed).unwrap_or(42);
+                    console.logs.push(format!("[World Seed] Current Authoritative World Seed: {}", cur_seed));
+                    console.logs.push("Usage: 'seed <number>' to configure a specific seed, or 'seed random' to generate a new random seed.".into());
+                } else if tokens[1].eq_ignore_ascii_case("random") || tokens[1].eq_ignore_ascii_case("new") {
+                    if let Err(e) = conn.db.reducers.admin_randomize_world_seed() {
+                        console.logs.push(format!("[Server Error] Failed to randomize world seed: {:?}", e));
+                    } else {
+                        console.logs.push("[Admin] Requested randomized world seed generation from server. Rebuilding world...".into());
+                    }
+                } else if let Ok(s) = tokens[1].parse::<u32>() {
+                    if let Err(e) = conn.db.reducers.admin_set_world_seed(s) {
+                        console.logs.push(format!("[Server Error] Failed to set world seed: {:?}", e));
+                    } else {
+                        console.logs.push(format!("[Admin] Set authoritative world seed to {}. Rebuilding world...", s));
+                    }
+                } else {
+                    console.logs.push(format!("[Syntax Error] Invalid seed argument '{}'. Must be an unsigned 32-bit integer or 'random'.", tokens[1]));
                 }
             }
             "tuner" | "weapontool" => {

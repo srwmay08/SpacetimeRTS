@@ -241,21 +241,6 @@ pub struct WeaponState {
     pub hand_crossbow_loaded: bool,
     pub hand_crossbow_reload_timer: Timer,
 
-    // Revolver Mechanics
-    pub revolver_ammo: u32,
-    pub revolver_max_ammo: u32,
-    pub revolver_cooldown: Timer,
-    pub revolver_reload_timer: Timer,
-    pub revolver_is_reloading: bool,
-
-    // Shotgun Mechanics
-    pub shotgun_ammo: u32,
-    pub shotgun_max_ammo: u32,
-    pub shotgun_pump_timer: Timer,
-    pub shotgun_is_pumping: bool,
-    pub shotgun_reload_timer: Timer,
-    pub shotgun_is_reloading: bool,
-
     // Viewmodel Physics (Recoil Kick & Sway)
     pub recoil_offset: Vec3,
     pub recoil_rot: Quat,
@@ -282,17 +267,6 @@ impl Default for WeaponState {
             crossbow_reload_timer: Timer::from_seconds(1.4, TimerMode::Once),
             hand_crossbow_loaded: true,
             hand_crossbow_reload_timer: Timer::from_seconds(0.65, TimerMode::Once),
-            revolver_ammo: 6,
-            revolver_max_ammo: 6,
-            revolver_cooldown: Timer::from_seconds(0.28, TimerMode::Once),
-            revolver_reload_timer: Timer::from_seconds(1.6, TimerMode::Once),
-            revolver_is_reloading: false,
-            shotgun_ammo: 4,
-            shotgun_max_ammo: 4,
-            shotgun_pump_timer: Timer::from_seconds(0.65, TimerMode::Once),
-            shotgun_is_pumping: false,
-            shotgun_reload_timer: Timer::from_seconds(1.8, TimerMode::Once),
-            shotgun_is_reloading: false,
             recoil_offset: Vec3::ZERO,
             recoil_rot: Quat::IDENTITY,
             offhand_recoil_offset: Vec3::ZERO,

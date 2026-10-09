@@ -34,8 +34,20 @@ spacetime publish spacetimerts
 ### 1.3 Generating Client Module Bindings
 If you modify types or tables in `backend/spacetimedb/src/lib.rs`:
 ```bash
-spacetime generate --lang rust --out-dir client/src/module_bindings --project-path backend/spacetimedb
+spacetime generate --lang rust --out-dir client/src/module_bindings --module-path backend/spacetimedb
 ```
+
+### 1.4 Setting or Randomizing World Seed
+The world terrain, resource nodes, caves, and ravines are generated deterministically from the authoritative `world_seed`:
+```bash
+# Generate a new randomized world seed on the server
+spacetime call spacetimerts admin_randomize_world_seed
+
+# Set an explicit world seed (e.g. 1337 or 42)
+spacetime call spacetimerts admin_set_world_seed 1337
+```
+When invoked, SpacetimeDB updates `global_state.world_seed`, respawns resource nodes, and automatically broadcasts the update to all connected Bevy clients, which rebuild terrain and colliders in real time.
+
 
 ---
 
@@ -147,6 +159,7 @@ Eliminates shadow acne (black self-shadowing patterns) and harsh cascade boundar
 | `spawnbuilding` | `<hut\|cottage\|guardpost> [rot (0-3)] [x] [z]` | Dispatches NPC building construction. |
 | `killall` | — | Destroys all active non-player entities in the server. |
 | `nuke` / `blast` | `[radius]` | Triggers a destructive spherical voxel demolition blast. |
+| `seed` | `[number\|random]` | Views current world seed, configures an explicit seed, or generates a new random seed. |
 
 ---
 

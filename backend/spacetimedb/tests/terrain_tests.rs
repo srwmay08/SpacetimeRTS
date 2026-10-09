@@ -65,3 +65,31 @@ fn test_terrain_height_lake_depression() {
     // Lake center should be lower than surrounding terrain
     assert!(lake_center < nearby, "Lake center ({}) should be lower than nearby ({})", lake_center, nearby);
 }
+
+#[test]
+fn test_terrain_height_seeded_variance() {
+    use backend::get_terrain_height_seeded;
+    let h_seed42 = get_terrain_height_seeded(120.0, -85.0, 42);
+    let h_seed99 = get_terrain_height_seeded(120.0, -85.0, 99);
+    let h_seed1337 = get_terrain_height_seeded(120.0, -85.0, 1337);
+
+    assert_ne!(h_seed42, h_seed99, "Different world seeds must generate different terrain heights");
+    assert_ne!(h_seed42, h_seed1337, "Different world seeds must generate different terrain heights");
+}
+
+#[test]
+fn test_apply_world_seed_updates_global_height() {
+    use backend::apply_world_seed;
+    apply_world_seed(42);
+    let base_h = get_terrain_height(75.0, 120.0);
+
+    apply_world_seed(9999);
+    let new_h = get_terrain_height(75.0, 120.0);
+    assert_ne!(base_h, new_h, "Changing active world seed must change global get_terrain_height output");
+
+    // Resetting back to 42 restores original height
+    apply_world_seed(42);
+    let restored_h = get_terrain_height(75.0, 120.0);
+    assert_eq!(base_h, restored_h, "Restoring world seed 42 must restore exact original height");
+}
+

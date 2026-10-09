@@ -1489,10 +1489,10 @@ pub fn create_weapon(name: &str) -> Option<WeaponDef> {
 // TERRAIN
 // ----------------------------------------------------------------------------
 
-pub fn get_terrain_height(x: f32, z: f32) -> f32 {
+pub fn get_terrain_height_seeded(x: f32, z: f32, seed: u32) -> f32 {
     let scale = 0.015;
     let base_height_amp = 18.0;
-    let noise_elevation = Perlin::new(42);
+    let noise_elevation = Perlin::new(seed);
 
     let nx = x as f64 * scale;
     let nz = z as f64 * scale;
@@ -1523,6 +1523,11 @@ pub fn get_terrain_height(x: f32, z: f32) -> f32 {
         y = 0.5;
     }
     y
+}
+
+#[inline]
+pub fn get_terrain_height(x: f32, z: f32) -> f32 {
+    get_terrain_height_seeded(x, z, 42)
 }
 
 pub fn world_to_chunk_coord(pos: f32, chunk_size: f32) -> i32 {

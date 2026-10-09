@@ -29,6 +29,7 @@ use crate::components::*;
 use crate::network::SpacetimeConnection;
 use crate::creatures::create_lowpoly_pet_mesh;
 use crate::module_bindings::voxel_chunk_table::VoxelChunkTableAccess;
+use crate::module_bindings::global_state_table::GlobalStateTableAccess;
 use crate::module_bindings::VoxelChunk;
 
 /// Feature flag allowing seamless toggling between bevy_voxel_world procedural terrain
@@ -273,12 +274,18 @@ pub const VOXEL_CHUNK_SIZE: usize = 16;
 pub const VOXEL_SIZE: f32 = 1.0;
 
 
-static PERLIN: OnceLock<Perlin> = OnceLock::new();
-static DEFAULT_TERRAIN_PARAMS: OnceLock<TerrainParams> = OnceLock::new();
+static PERLIN: OnceLock<std::sync::RwLock<Perlin>> = OnceLock::new();
+static DEFAULT_TERRAIN_PARAMS: OnceLock<std::sync::RwLock<TerrainParams>> = OnceLock::new();
 
 #[inline]
-pub fn get_default_terrain_params() -> &'static TerrainParams {
-    DEFAULT_TERRAIN_PARAMS.get_or_init(TerrainParams::default)
+pub fn get_default_terrain_params() -> TerrainParams {
+    DEFAULT_TERRAIN_PARAMS.get_or_init(|| std::sync::RwLock::new(TerrainParams::default())).read().unwrap().clone()
+}
+
+pub fn set_default_terrain_params_seed(seed: u32) {
+    if let Ok(mut p) = DEFAULT_TERRAIN_PARAMS.get_or_init(|| std::sync::RwLock::new(TerrainParams::default())).write() {
+        p.seed = seed;
+    }
 }
 
 // AI_RULES.md: BTreeMap ensures deterministic ordering and zero SipHash randomness
@@ -290,8 +297,14 @@ pub fn get_terrain_height_cache() -> &'static std::sync::RwLock<BTreeMap<(i32, i
 }
 
 #[inline]
-pub fn get_perlin() -> &'static Perlin {
-    PERLIN.get_or_init(|| Perlin::new(42))
+pub fn get_perlin() -> Perlin {
+    *PERLIN.get_or_init(|| std::sync::RwLock::new(Perlin::new(42))).read().unwrap()
+}
+
+pub fn set_perlin_seed(seed: u32) {
+    if let Ok(mut lock) = PERLIN.get_or_init(|| std::sync::RwLock::new(Perlin::new(42))).write() {
+        *lock = Perlin::new(seed);
+    }
 }
 
 // Cached terrain height lookup — quantizes to 0.25m grid for cache efficiency
@@ -330,7 +343,7 @@ pub fn get_terrain_height(x: f32, z: f32) -> f32 {
 // Terrain height computation: delegates to procedural voxel terrain or canonical height
 fn compute_terrain_height(x: f32, z: f32) -> f32 {
     if USE_VOXEL_WORLD_TERRAIN {
-        surface_height(get_default_terrain_params(), x as f64, z as f64) as f32
+        surface_height(&get_default_terrain_params(), x as f64, z as f64) as f32
     } else {
         compute_canonical_terrain_height(x, z)
     }
@@ -783,9 +796,36 @@ pub fn update_infinite_voxel_terrain(
     mut loaded_entities: Local<BTreeMap<u64, (Entity, u64, bool)>>,
     mut loaded_sub_entities: Local<BTreeMap<u64, (Entity, u64, bool)>>,
     mut last_player_chunk: Local<Option<(i32, i32)>>,
+    mut active_seed: Local<Option<u32>>,
 ) {
     if USE_VOXEL_WORLD_TERRAIN {
         return;
+    }
+
+    // Synchronize world seed with authoritative SpacetimeDB server state
+    if let Some(global_state) = conn.db.db.global_state().id().find(&0) {
+        let server_seed = global_state.world_seed;
+        if active_seed.map_or(true, |s| s != server_seed) {
+            info!("Received authoritative world seed from server: {}. Rebuilding world terrain.", server_seed);
+            *active_seed = Some(server_seed);
+            set_perlin_seed(server_seed);
+            set_default_terrain_params_seed(server_seed);
+            crate::subterrain::set_subterrain_seeds(server_seed.wrapping_add(1296), server_seed.wrapping_add(1297));
+            if let Ok(mut cache) = get_terrain_height_cache().write() {
+                cache.clear();
+            }
+
+            // Despawn all existing surface chunks and subterrain chunks to trigger clean rebuild
+            for (entity, _, _, _) in chunk_query.iter() {
+                commands.entity(entity).despawn_recursive();
+            }
+            for (entity, _, _, _) in sub_chunk_query.iter() {
+                commands.entity(entity).despawn_recursive();
+            }
+            loaded_entities.clear();
+            loaded_sub_entities.clear();
+            return;
+        }
     }
 
     let Ok(player_transform) = player_query.get_single() else { return; };
@@ -921,8 +961,12 @@ pub fn update_infinite_voxel_terrain(
         (LOW_POLY_RADIUS_CHUNKS, LOW_POLY_UNLOAD_RADIUS_CHUNKS, 6)
     };
 
+    // Player elevation check: determine if player is deep underground or on surface
+    let player_surface_h = get_terrain_height(p_pos.x, p_pos.z);
+    let is_player_underground = p_pos.y < (player_surface_h - 3.5);
+
     // 3. Collect candidate unspawned chunks within view radius
-    let mut candidates: Vec<(i32, i32, i32, u64)> = Vec::with_capacity(512);
+    let mut candidates: Vec<(i32, i32, i32, u64, bool, bool)> = Vec::with_capacity(512);
     let radius_sq = view_radius * view_radius;
 
     for cz in (p_cz - view_radius)..=(p_cz + view_radius) {
@@ -935,8 +979,13 @@ pub fn update_infinite_voxel_terrain(
             }
 
             let key = pack_chunk_key(cx, 0, cz);
-            if !loaded_entities.contains_key(&key) || !loaded_sub_entities.contains_key(&key) {
-                candidates.push((cx, cz, dist_sq, key));
+            let needs_surface = !loaded_entities.contains_key(&key);
+            let has_excavation = db_chunks.values().any(|c| c.chunk_x == cx && c.chunk_z == cz && c.voxels.iter().any(|&m| m == 0));
+            let should_spawn_sub = is_player_underground || has_excavation || dist_sq <= 4;
+            let needs_sub = !loaded_sub_entities.contains_key(&key) && should_spawn_sub;
+
+            if needs_surface || needs_sub {
+                candidates.push((cx, cz, dist_sq, key, needs_surface, needs_sub));
             }
         }
     }
@@ -946,11 +995,7 @@ pub fn update_infinite_voxel_terrain(
     let immediate_unspawned = candidates.iter().take_while(|c| c.2 <= 2).count();
     let max_spawn_this_frame = spawn_batch.max(immediate_unspawned);
 
-    // Player elevation check: determine if player is deep underground or on surface
-    let player_surface_h = get_terrain_height(p_pos.x, p_pos.z);
-    let is_player_underground = p_pos.y < (player_surface_h - 3.5);
-
-    for (cx, cz, dist_sq_chunks, key) in candidates.into_iter().take(max_spawn_this_frame) {
+    for (cx, cz, dist_sq_chunks, key, needs_surface, needs_sub) in candidates.into_iter().take(max_spawn_this_frame) {
         let db_mod_tick = db_chunks.values()
             .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
             .map(|c| c.last_modified_tick)
@@ -963,7 +1008,7 @@ pub fn update_infinite_voxel_terrain(
         let needs_collider = dist_world_sq <= LOW_POLY_NEAR_COLLIDER_DIST_SQ;
 
         // A. Spawn Surface Chunk Entity
-        if !loaded_entities.contains_key(&key) {
+        if needs_surface {
             if let Some(surface_mesh) = mesh_low_poly_surface_chunk(&db_chunks, cx, cz) {
                 let collider = if needs_collider {
                     Collider::trimesh_from_mesh(&surface_mesh)
@@ -1000,12 +1045,8 @@ pub fn update_infinite_voxel_terrain(
         // B. Spawn Subterrain Chunk Entity (bedrock floor, natural caves, and Voronoi strata)
         // Optimization: When the player is on the surface, only spawn subterranean chunks if they
         // contain player excavations or open cave/dungeon shafts. Solid enclosed earth is skipped.
-        if !loaded_sub_entities.contains_key(&key) {
-            let has_excavation = db_chunks.values().any(|c| c.chunk_x == cx && c.chunk_z == cz && c.voxels.iter().any(|&m| m == 0));
-            let should_spawn_sub = is_player_underground || has_excavation || dist_sq_chunks <= 4;
-
-            if should_spawn_sub {
-                if let Some(sub_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz) {
+        if needs_sub {
+            if let Some(sub_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz) {
                     let sub_collider = if needs_collider {
                         Collider::trimesh_from_mesh(&sub_mesh)
                     } else {
@@ -1041,7 +1082,6 @@ pub fn update_infinite_voxel_terrain(
                 }
             }
         }
-    }
 
     // 4. Despawn distant surface & subterrain chunks beyond fog visual limit efficiently
     let fog_visual_limit_meters = if let Some(ref rs) = render_settings {
@@ -1372,7 +1412,7 @@ mod tests {
     #[test]
     fn test_get_terrain_height_matches_surface_height() {
         let p = get_default_terrain_params();
-        let sh = surface_height(p, 16.0, 32.0) as f32;
+        let sh = surface_height(&p, 16.0, 32.0) as f32;
         let gh = get_terrain_height(16.0, 32.0);
         assert!((sh - gh).abs() < 1e-4, "get_terrain_height must match surface_height");
     }

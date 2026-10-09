@@ -15,7 +15,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use noise::{NoiseFn, Perlin};
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 use crate::module_bindings::VoxelChunk;
 
@@ -56,17 +56,26 @@ pub struct SubterrainChunkMarker {
 // STATIC NOISE SAMPLING (ZERO HEAP ALLOCATIONS IN INNER LOOPS)
 // ----------------------------------------------------------------------------
 
-static RAVINE_PERLIN: OnceLock<Perlin> = OnceLock::new();
-static CAVE_PERLIN: OnceLock<Perlin> = OnceLock::new();
+static RAVINE_PERLIN: OnceLock<RwLock<Perlin>> = OnceLock::new();
+static CAVE_PERLIN: OnceLock<RwLock<Perlin>> = OnceLock::new();
 
 #[inline]
-pub fn get_ravine_perlin() -> &'static Perlin {
-    RAVINE_PERLIN.get_or_init(|| Perlin::new(1339))
+pub fn get_ravine_perlin() -> Perlin {
+    *RAVINE_PERLIN.get_or_init(|| RwLock::new(Perlin::new(1339))).read().unwrap()
 }
 
 #[inline]
-pub fn get_cave_perlin() -> &'static Perlin {
-    CAVE_PERLIN.get_or_init(|| Perlin::new(1338))
+pub fn get_cave_perlin() -> Perlin {
+    *CAVE_PERLIN.get_or_init(|| RwLock::new(Perlin::new(1338))).read().unwrap()
+}
+
+pub fn set_subterrain_seeds(cave_seed: u32, ravine_seed: u32) {
+    if let Ok(mut lock) = RAVINE_PERLIN.get_or_init(|| RwLock::new(Perlin::new(1339))).write() {
+        *lock = Perlin::new(ravine_seed);
+    }
+    if let Ok(mut lock) = CAVE_PERLIN.get_or_init(|| RwLock::new(Perlin::new(1338))).write() {
+        *lock = Perlin::new(cave_seed);
+    }
 }
 
 /// Evaluates if 3D procedural coordinates carve out an ancient crypt / tomb dungeon chamber or entrance shaft.
