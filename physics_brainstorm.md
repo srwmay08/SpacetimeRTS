@@ -6,8 +6,8 @@ Developing a **Close Quarters Combat (CQC) Physics System** for both player move
 * **`rapier.rs`**: The higher-level spatial simulation engine built *on top of Parry* (`QueryPipeline`, broad-phase BVH trees, `ColliderSet`, `RigidBodySet`, and the Kinematic Character Controller).
 
 In **SpacetimeRTS**, this system bridges both ends of the wire:
-1. **Server (SpacetimeDB):** Authoritative hit verification, anti-tunneling swept projectile steps, and body-separation pushback inside deterministic reducers using `rapier3d`.
-2. **Client (Bevy + Avian3D):** Zero-latency client prediction, weapon swing trail colliders, and smooth camera/character responsiveness.
+1. **Server (SpacetimeDB):** Authoritative hit verification, anti-tunneling swept projectile steps, and body-separation pushback inside deterministic reducers using `rapier3d` and `parry3d`.
+2. **Client (Bevy + Parry3D/Rapier3D):** Zero-latency client prediction, swept hitboxes, and smooth camera/character responsiveness without Avian3D.
 
 ---
 
@@ -217,4 +217,4 @@ When a projectile or melee weapon impacts an entity, the contact normal $\vec{n}
 | **2** | **Ballistic CCD Tick** | Upgrade `ActiveProjectile` simulation in `process_projectiles_tick` to use swept sphere testing instead of discrete jumps. | `backend/spacetimedb/src/combat.rs` |
 | **3** | **CQC Player Separation** | In `process_movement`, query neighboring dynamic capsules in the spatial grid and push back penetrating players. | `backend/spacetimedb/src/movement.rs` |
 | **4** | **Swept Melee Arc Validation** | Replace single raycast checks in `swing_tool` with a 2-point hilt/tip swept arc check matched against `HitboxHistory`. | `backend/spacetimedb/src/combat.rs` |
-| **5** | **Client Prediction & Audio** | Leverage Avian3D's client-side collision events for immediate sword clangs, sparks, and blood impact gibs. | `client/src/weapons.rs`, `client/src/audio_feedback.rs` |
+| **5** | **Client Prediction & Audio** | Leverage Parry/Rapier client-side collision and contact events for immediate sword clangs, sparks, and blood impact gibs. | `client/src/weapons.rs`, `client/src/audio_feedback.rs` |

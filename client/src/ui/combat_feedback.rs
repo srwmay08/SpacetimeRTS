@@ -33,6 +33,7 @@ pub fn update_floating_health_bars(
     }
 
     let Ok((camera, cam_transform)) = camera_query.get_single() else { return; };
+    let cam_pos = cam_transform.translation();
     
     // AI_RULES.md Rule 2.1 #3: BTreeMap and BTreeSet guarantee deterministic ordering without randomized SipHash
     let health_map: std::collections::BTreeMap<u64, f32> = conn.db.db.health().iter()
@@ -40,60 +41,78 @@ pub fn update_floating_health_bars(
         .collect();
 
     let mut tracked_units = std::collections::BTreeSet::new();
+    let mut visible_units: std::collections::BTreeMap<u64, (Vec2, f32)> = std::collections::BTreeMap::new();
 
     for (net_id, transform) in unit_query.iter() {
         if let Some(&hp_percent) = health_map.get(&net_id.0) {
             tracked_units.insert(net_id.0);
 
-            if let Some(screen_pos) = camera.world_to_viewport(cam_transform, transform.translation() + Vec3::Y * 2.2) {
-                let color = if hp_percent > 0.5 { 
-                    Color::srgb(0.1, 0.8, 0.1) 
-                } else if hp_percent > 0.2 { 
-                    Color::srgb(0.8, 0.8, 0.1) 
-                } else { 
-                    Color::srgb(0.8, 0.1, 0.1) 
-                };
-
-                let mut found = false;
-                for (_, bar_ui, mut style, mut bg, mut vis) in bar_query.iter_mut() {
-                    if bar_ui.0 == net_id.0 {
-                        style.left = Val::Px(screen_pos.x - 25.0);
-                        style.top = Val::Px(screen_pos.y);
-                        style.width = Val::Px(50.0 * hp_percent);
-                        *bg = color.into();
-                        *vis = Visibility::Inherited;
-                        found = true;
-                        break;
-                    }
-                }
-
-                if !found {
-                    commands.spawn((
-                        NodeBundle {
-                            style: Style {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(screen_pos.x - 25.0),
-                                top: Val::Px(screen_pos.y),
-                                width: Val::Px(50.0 * hp_percent),
-                                height: Val::Px(5.0),
-                                border: UiRect::all(Val::Px(1.0)),
-                                ..default()
-                            },
-                            background_color: color.into(),
-                            border_color: Color::BLACK.into(),
-                            ..default()
-                        },
-                        HealthBarUI(net_id.0),
-                    ));
+            let unit_pos = transform.translation();
+            // Distance culling: do not render health bars for units further than 90m from camera
+            if unit_pos.distance_squared(cam_pos) <= 90.0 * 90.0 {
+                if let Some(screen_pos) = camera.world_to_viewport(cam_transform, unit_pos + Vec3::Y * 2.2) {
+                    visible_units.insert(net_id.0, (screen_pos, hp_percent));
                 }
             }
         }
     }
 
-    for (entity, bar_ui, _, _, _) in bar_query.iter() {
+    for (entity, bar_ui, mut style, mut bg, mut vis) in bar_query.iter_mut() {
         if !tracked_units.contains(&bar_ui.0) {
             commands.entity(entity).despawn_recursive();
+        } else if let Some(&(screen_pos, hp_percent)) = visible_units.get(&bar_ui.0) {
+            let color = if hp_percent > 0.5 { 
+                Color::srgb(0.1, 0.8, 0.1) 
+            } else if hp_percent > 0.2 { 
+                Color::srgb(0.8, 0.8, 0.1) 
+            } else { 
+                Color::srgb(0.8, 0.1, 0.1) 
+            };
+
+            style.left = Val::Px(screen_pos.x - 25.0);
+            style.top = Val::Px(screen_pos.y);
+            style.width = Val::Px(50.0 * hp_percent);
+            *bg = color.into();
+            if *vis != Visibility::Inherited {
+                *vis = Visibility::Inherited;
+            }
+            // Handled: remove so we know which units still need a newly spawned bar
+            visible_units.remove(&bar_ui.0);
+        } else {
+            // Unit is offscreen, behind camera, or beyond 90m distance cull: hide bar!
+            if *vis != Visibility::Hidden {
+                *vis = Visibility::Hidden;
+            }
         }
+    }
+
+    // Spawn bars for newly visible units that do not have a HealthBarUI entity yet
+    for (net_id, (screen_pos, hp_percent)) in visible_units {
+        let color = if hp_percent > 0.5 { 
+            Color::srgb(0.1, 0.8, 0.1) 
+        } else if hp_percent > 0.2 { 
+            Color::srgb(0.8, 0.8, 0.1) 
+        } else { 
+            Color::srgb(0.8, 0.1, 0.1) 
+        };
+
+        commands.spawn((
+            NodeBundle {
+                style: Style {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(screen_pos.x - 25.0),
+                    top: Val::Px(screen_pos.y),
+                    width: Val::Px(50.0 * hp_percent),
+                    height: Val::Px(5.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    ..default()
+                },
+                background_color: color.into(),
+                border_color: Color::BLACK.into(),
+                ..default()
+            },
+            HealthBarUI(net_id),
+        ));
     }
 }
 

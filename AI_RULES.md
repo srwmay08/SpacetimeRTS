@@ -8,8 +8,8 @@
 ## 1. Project Context & High-Level Architecture
 We are developing a multiplayer fantasy real-time strategy (RTS) and survival game. 
 - **Backend:** SpacetimeDB v2.7+ server module written in Rust (2024 edition). All world simulation, transactions, combat verification, building stability, and player persistence run server-authoritatively inside WebAssembly sandbox reducers.
-- **Client:** Bevy engine written in Rust, leveraging the official SpacetimeDB Rust SDK for real-time table replication, Avian3D (XPBD/Parry-based) for 3D client physics and character movement, and custom WGSL shaders for stylized low-poly PBR rendering.
-- **Physics Architecture:** Avian3D runs exclusively on the Bevy client for responsive character prediction; standalone Rapier3D runs headless inside SpacetimeDB server WebAssembly reducers for authoritative hit verification and swept raycasts. Both share the exact same underlying collision kernel (Parry3D), with zero conflict.
+- **Client:** Bevy engine written in Rust, leveraging the official SpacetimeDB Rust SDK for real-time table replication, Parry3D / Rapier3D geometry and character controllers for client prediction and interaction, and custom WGSL shaders for stylized low-poly PBR rendering.
+- **Physics Architecture:** **Unified around Parry3D and Rapier3D across both Client and Server.** Avian3D is strictly **BANNED**. Client and server share identical geometric collision representations and math kernels from Parry3D, eliminating simulation discrepancies, asymmetric collision volumes, and solver drift.
 - **Target Target:** Seamless, fluid 60 FPS (16.67ms frame budget) supporting up to 50 concurrent players on a shared 400m × 400m procedural world.
 
 ---
@@ -47,17 +47,31 @@ SpacetimeDB guarantees multi-node transaction consistency and rollback safety by
 
 ---
 
-## 4. Prefer Engine & Library Built-ins Over Manual Workarounds
-*The foundational rule for AI agents: "Homebrew your game, not your engine plumbing."*
+## 4. Physics Architecture & Library Invariants (Parry3D / Rapier3D Unified)
+*The foundational rule for physics: "Identical geometry kernels on client and server. Zero solver drift."*
 
-1. **Avian3D & Bevy Physics Built-ins:**
-   - Rely on Avian3D's built-in transform synchronization stages (`transform_to_position` in `PhysicsSet::Prepare` and `position_to_transform` in `PhysicsSet::Sync`).
-   - **Never cause `B0001` aliased query panics:** Bevy panics if a system queries a component mutably while another system parameter queries it immutably. For example, Avian's `SpatialQuery` internally reads `&Position`; requesting `&mut Position` in the same system will crash the game. Query `&mut Transform` or `&mut LinearVelocity` instead.
-   - Rely on Avian's built-in collision manifolds, contact resolvers, and gravity scales rather than writing manual per-frame height overrides that fight the physics solver.
-2. **Bevy Engine Built-ins:**
+1. **Avian3D Banned:**
+   - **Avian3D (`avian3d`) is strictly banned** from the codebase.
+   - Do not import or reintroduce `avian3d`.
+   - All physics simulation, geometry testing, character movement, and collision queries must use **Parry3D** (`parry3d`) and **Rapier3D** (`rapier3d`).
+
+2. **When to Prefer Parry (`parry3d` - Pure Computational Geometry):**
+   - **Direct Narrow-Phase Queries:** Use `parry3d::query::contact()` for microsecond contact manifold calculation and capsule-to-capsule de-penetration without broadphase/pipeline overhead.
+   - **Continuous Hitboxes & Sweeps (CCD):** Use `parry3d::query::cast_shapes()` (Time of Impact `toi`) for melee weapon arcs, lunges, and ballistic anti-tunneling sweeps.
+   - **Direct Distance & Proximity:** Use `parry3d::query::distance()` and `parry3d::bounding_volume::BoundingVolume` for zero-allocation geometric early-outs.
+   - **Terrain Elevation & Mesh Sampling:** Use `parry3d::shape::TriMesh` or `parry3d::shape::HeightField` for ray and point projection against ground surfaces.
+   - **Rule of Thumb:** If you already know which two entities or primitives are interacting (e.g. via spatial grid cell or targeted combat swing), **prefer Parry directly**; it executes pure mathematical algorithms without heap allocations or BVH traversal.
+
+3. **When to Prefer Rapier (`rapier3d` - Spatial Acceleration & Simulation):**
+   - **Scene-Wide Spatial Queries:** Use `rapier3d::pipeline::QueryPipeline` when querying rays, points, or volumes against a large collection of dynamic or static colliders.
+   - **Kinematic Character Controllers:** Use Rapier kinematic character movement conventions (swept-step and slide along contact plane tangents) for RTS units and characters, avoiding heavy rigid body PGS impulse explosions.
+   - **Incremental Refits Over Total Rebuilds:** In server/client caches, avoid allocating and destroying `ColliderSet` every frame. Maintain persistent collider handles and update transforms in-place (`collider.set_position(...)`), allowing `query_pipeline.update(&colliders)` to incrementally refit the BVH in $O(\log N)$ time.
+
+4. **Bevy Engine Built-ins:**
    - Utilize standard schedules (`Update`, `FixedUpdate`, `PostUpdate`), change detection (`Changed<T>`, `Added<T>`), and system parameters (`ParamSet`, `Local`, `EventReader`) rather than hand-rolling manual dirty flags or synchronization loops.
    - Use standard window cursor grab modes (`CursorGrabMode::Locked`) and Bevy mouse motion events rather than manual OS-level cursor coordinate warping.
-3. **SpacetimeDB SDK Built-ins:**
+
+5. **SpacetimeDB SDK Built-ins:**
    - Always utilize official generated table accessors (`ctx.db.*`, `conn.db.*`), lifecycle callbacks (`on_insert`, `on_delete`, `on_update`), and subscription filters rather than inventing manual out-of-band networking or ad-hoc client caches.
 
 ---

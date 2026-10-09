@@ -46,7 +46,7 @@ use crate::audio_feedback::*;
 use crate::tactical_abilities::*;
 use crate::tree_colors::*;
 use crate::resource_nodes::*;
-use crate::creatures::{setup_sparring_yard, update_training_dummy_wobble, update_sparring_goblin_ai};
+use crate::creatures::{setup_sparring_yard, update_training_dummy_wobble, update_sparring_goblin_ai, creature_shadow_culling_system};
 
 pub use crate::core::UpdateSet;
 
@@ -270,6 +270,7 @@ fn main() {
             update_floating_health_bars,
             update_drag_ghost_ui,
             update_marquee_ui.run_if(in_state(CameraMode::RTS)),
+            creature_shadow_culling_system,
         ).in_set(UpdateSet::Rendering))
 
         .add_systems(Update, (
@@ -445,6 +446,7 @@ mod tests {
         check_system!(update_floating_health_bars);
         check_system!(update_drag_ghost_ui);
         check_system!(update_marquee_ui);
+        check_system!(creature_shadow_culling_system);
         check_system!(update_console_ui);
         check_system!(update_tuner_ui_display);
         check_system!(update_hotbar_ui);

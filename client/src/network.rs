@@ -135,6 +135,12 @@ pub fn init_network_connection(
     )).with_children(|rig| {
         rig.spawn((
             Camera3dBundle {
+                projection: Projection::Perspective(PerspectiveProjection {
+                    fov: 45.0_f32.to_radians(),
+                    near: 0.1,
+                    far: 200.0,
+                    ..default()
+                }),
                 transform: BevyTransform::from_xyz(0.0, 40.0, 25.0).looking_at(Vec3::ZERO, Vec3::Y),
                 camera: Camera { is_active: false, ..default() },
                 ..default()
@@ -218,6 +224,7 @@ pub fn init_network_connection(
                 projection: Projection::Perspective(PerspectiveProjection {
                     fov: 65.0_f32.to_radians(),
                     near: 0.05,
+                    far: 500.0,
                     ..default()
                 }),
                 transform: BevyTransform::from_xyz(0.0, 0.5, 0.0), 
@@ -380,7 +387,7 @@ pub fn sync_transforms(
     let creature_load_radius_sq = creature_load_radius * creature_load_radius;
     let creature_unload_radius_sq = creature_unload_radius * creature_unload_radius;
 
-    let cache = creature_cache.get_or_insert_with(|| crate::creatures::CachedCreatureMeshes::new(&mut meshes));
+    let cache = creature_cache.get_or_insert_with(|| crate::creatures::CachedCreatureMeshes::new(&mut meshes, &mut materials));
 
     spawned_ids.clear();
 
@@ -444,8 +451,6 @@ pub fn sync_transforms(
             crate::creatures::spawn_corpse_visual_entity(
                 &mut commands,
                 cache,
-                &mut materials,
-                &mut meshes,
                 id,
                 &db_t,
             );
@@ -460,13 +465,12 @@ pub fn sync_transforms(
         crate::creatures::spawn_creature_visual_entity(
             &mut commands,
             cache,
-            &mut materials,
-            &mut meshes,
             id,
             &db_t,
             is_peasant,
             is_pet,
             npc_brain.as_ref(),
+            player_pos,
         );
 
         spawned_ids.insert(id);

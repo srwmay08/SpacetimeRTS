@@ -26,13 +26,16 @@ pub struct HitResult {
     pub user_data: u128,
 }
 
-/// Global cache for our purely stateless QueryPipeline
+/// Global cache for our QueryPipeline and ColliderSet.
+/// We reuse memory across ticks to avoid allocating a fresh BVH from scratch every frame,
+/// utilizing Rapier's incremental refit capability (`query_pipeline.update(&colliders)`).
 static PHYSICS_CACHE: RwLock<Option<(ColliderSet, QueryPipeline)>> = RwLock::new(None);
 
-/// Called at the start of `high_frequency_tick` to reconstruct the world state.
+/// Called at the start of `high_frequency_tick` to reconstruct or refit the world state.
 /// Because this constructs the physics tree deterministically entirely from the DB,
 /// it is completely rollback-safe and thread-safe.
 pub fn rebuild_physics_cache(ctx: &ReducerContext) {
+    let mut cache_guard = PHYSICS_CACHE.write().unwrap();
     let mut colliders = ColliderSet::new();
 
     // 1. Add all dynamic entities (Players, NPCs) using Bestiary archetypes
@@ -59,7 +62,8 @@ pub fn rebuild_physics_cache(ctx: &ReducerContext) {
                 }
             }
         } else {
-            // Humanoid shape: 1.8m height total (half-height 0.5, radius 0.4)
+            // Humanoid shape standardized to match Bestiary and client:
+            // half-height 0.5 (1.0m cylinder segment) + radius 0.4 (total 1.8m height)
             ColliderBuilder::capsule_y(0.5, 0.4)
                 .translation(Vector::new(t.x, t.y - 0.15, t.z)) 
                 .user_data(t.entity_id as u128) 
@@ -80,11 +84,20 @@ pub fn rebuild_physics_cache(ctx: &ReducerContext) {
         colliders.insert(collider);
     }
 
-    // 3. Update the Broad-Phase / BVH tree
-    let mut query_pipeline = QueryPipeline::new();
-    query_pipeline.update(&colliders);
+    // 3. Update the Broad-Phase / BVH tree (incremental update if existing, or fresh build)
+    let mut query_pipeline = match cache_guard.take() {
+        Some((_old_colliders, mut existing_pipeline)) => {
+            existing_pipeline.update(&colliders);
+            existing_pipeline
+        }
+        None => {
+            let mut qp = QueryPipeline::new();
+            qp.update(&colliders);
+            qp
+        }
+    };
 
-    *PHYSICS_CACHE.write().unwrap() = Some((colliders, query_pipeline));
+    *cache_guard = Some((colliders, query_pipeline));
 }
 
 /// Helper function to perform a raycast against the cached pipeline, returning a HitResult.

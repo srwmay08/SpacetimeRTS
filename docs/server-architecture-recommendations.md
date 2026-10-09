@@ -187,23 +187,23 @@ pub fn get_nearby_entities(x: f32, z: f32, radius: f32) -> Vec<u64> { ... }
 Currently, physics is **client-side only**:
 
 ```
-Client (Avian3D)          Server (SpacetimeDB)
-├─ Rigid bodies           ├─ NO physics world
-├─ Colliders              ├─ Manual ray-sphere math
-├─ Collision events       ├─ Distance checks
-└─ Visual only            └─ Speed validation only
+Client (Parry3D / Rapier3D) Server (SpacetimeDB / Rapier3D)
+├─ Kinematic characters      ├─ Authoritative QueryPipeline
+├─ Swept colliders           ├─ Swept CCD projectiles
+├─ Client prediction         ├─ Parry contact manifolds
+└─ Shared geometry kernels   └─ Incremental BVH refits
 ```
 
 This means:
 
-1. **No authoritative collision** — Server trusts client-reported positions. A hacked client could walk through walls.
-2. **Manual projectile math** — Ray-sphere intersection is approximate; no swept collision, no ricochets, no penetration handling.
-3. **No physical interactions** — Explosions don't apply impulses, falling objects are scripted, knockback is manual velocity assignment.
-4. **Desync potential** — Client physics and server state can diverge, causing rubber-banding.
+1. **Authoritative collision** — Server and client use identical Parry3D shapes and Rapier3D queries.
+2. **Continuous Collision Detection (CCD)** — Swept spheres and capsules eliminate projectile and melee tunneling.
+3. **De-penetration via Parry** — Dynamic capsule-to-capsule contact manifolds prevent body phasing.
+4. **Zero solver drift** — Client and server share the identical mathematical collision kernel.
 
 ### Solution
 
-Integrate **Rapier** (or avian3d) into the SpacetimeDB server module:
+Standardize on **Rapier3D and Parry3D** across both client and server (Avian3D is banned):
 
 ```
 ┌─────────────────────────────────────────┐

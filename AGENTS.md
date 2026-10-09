@@ -6,7 +6,7 @@
 
 # SpacetimeRTS Core Agent Instructions
 
-You are pair-programming on **SpacetimeRTS**, a 50-player multiplayer fantasy RTS & survival game built in Rust (2024 Edition) with **SpacetimeDB v2.7+** (server-authoritative WebAssembly reducers) and **Bevy 0.13** (client engine with Avian3D physics and custom WGSL shaders).
+You are pair-programming on **SpacetimeRTS**, a 50-player multiplayer fantasy RTS & survival game built in Rust (2024 Edition) with **SpacetimeDB v2.7+** (server-authoritative WebAssembly reducers) and **Bevy 0.13** (client engine with unified Parry3D/Rapier3D physics and custom WGSL shaders).
 
 You must strictly obey the following project expectations on every turn. Refer to [AI_RULES.md](file:///Users/k/Documents/GameDev/SpacetimeRTS/AI_RULES.md) for deep technical rationale and architecture specifications.
 
@@ -17,11 +17,13 @@ You must strictly obey the following project expectations on every turn. Refer t
 - **Zero Nondeterminism (Banned):** NEVER call OS clocks (`SystemTime`, `Instant`), OS entropy (`rand::thread_rng()`), I/O (`std::fs`, `std::net`), or threads inside reducers.
 - **Mandatory Replacements:** Use `ctx.timestamp` for time, deterministic PRNGs seeded by timestamp/IDs for randomness, and `BTreeMap`/`BTreeSet` for collections (standard `HashMap`/`HashSet` SipHash iteration order is randomized and will desync nodes).
 
-## 2. Prefer Engine & Library Built-ins Over Custom Workarounds
-*"Homebrew your game, not your engine plumbing."*
-- **Avian3D & Bevy Physics:** Rely on Avian's transform synchronization (`transform_to_position` / `position_to_transform`), collision solvers, and gravity scale. Never write manual height overrides that fight the solver.
-- **Prevent Bevy B0001 Panics:** Never query components mutably if built-in system parameters in the same system access them immutably (e.g. `SpatialQuery` reads `&Position`; requesting `&mut Position` panics the engine). Mutate `Transform` or `LinearVelocity` instead.
-- **Bevy Engine:** Rely on built-in schedules (`Update`, `FixedUpdate`), change detection (`Changed<T>`, `Added<T>`), and window events (`CursorGrabMode::Locked`) rather than manual per-frame polling loops or cursor warping.
+## 2. Physics & Engine Standards (Parry3D / Rapier3D Unified)
+*"Homebrew your game, not your engine plumbing. Unify geometry kernels across client and server."*
+- **Avian3D Banned:** `avian3d` is strictly banned. Do not reintroduce or import `avian3d`.
+- **Parry3D for Direct Geometry:** Prefer `parry3d` for direct pairwise queries (`parry3d::query::contact` for de-penetration, `cast_shapes` for swept blade/ballistic CCD, `distance` for proximity). Zero allocations, nanosecond execution.
+- **Rapier3D for Scene Queries & Character Movement:** Use Rapier's `QueryPipeline` for broad-phase world raycasting and swept kinematic character steps (tangent sliding on contact normals) rather than PGS dynamic rigid body impulses.
+- **Prevent Bevy B0001 Panics:** Never query components mutably if built-in system parameters in the same system access them immutably.
+- **Bevy Engine Built-ins:** Rely on built-in schedules (`Update`, `FixedUpdate`), change detection (`Changed<T>`, `Added<T>`), and window events (`CursorGrabMode::Locked`) rather than manual per-frame polling loops or cursor warping.
 - **SpacetimeDB SDK:** Always use generated table accessors (`conn.db.*`), lifecycle hooks (`on_insert`, `on_delete`), and connection callbacks.
 
 ## 3. Strict 60 FPS & 50-Player Performance Budgets

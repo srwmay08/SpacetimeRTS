@@ -50,6 +50,61 @@ pub const TREE_SHADOW_NEAR_DIST_SQ: f32 = TREE_SHADOW_NEAR_DIST * TREE_SHADOW_NE
 pub const TREE_SHADOW_FAR_DIST: f32 = 64.0;
 pub const TREE_SHADOW_FAR_DIST_SQ: f32 = TREE_SHADOW_FAR_DIST * TREE_SHADOW_FAR_DIST; // 4,096 m^2
 
+/// Small ground clutter load radius (m) (Flint, Branch, LooseStone)
+pub const SMALL_CLUTTER_LOAD_DIST: f32 = 36.0;
+pub const SMALL_CLUTTER_LOAD_DIST_SQ: f32 = SMALL_CLUTTER_LOAD_DIST * SMALL_CLUTTER_LOAD_DIST; // 1,296 m^2
+
+/// Small ground clutter unload radius (m) with 8m hysteresis
+pub const SMALL_CLUTTER_UNLOAD_DIST: f32 = 44.0;
+pub const SMALL_CLUTTER_UNLOAD_DIST_SQ: f32 = SMALL_CLUTTER_UNLOAD_DIST * SMALL_CLUTTER_UNLOAD_DIST; // 1,936 m^2
+
+/// Medium node load radius (m) (Bush, FallenLog)
+pub const MEDIUM_NODE_LOAD_DIST: f32 = 64.0;
+pub const MEDIUM_NODE_LOAD_DIST_SQ: f32 = MEDIUM_NODE_LOAD_DIST * MEDIUM_NODE_LOAD_DIST; // 4,096 m^2
+
+/// Medium node unload radius (m) with 8m hysteresis
+pub const MEDIUM_NODE_UNLOAD_DIST: f32 = 72.0;
+pub const MEDIUM_NODE_UNLOAD_DIST_SQ: f32 = MEDIUM_NODE_UNLOAD_DIST * MEDIUM_NODE_UNLOAD_DIST; // 5,184 m^2
+
+#[inline]
+pub fn is_small_clutter(node_type: &str) -> bool {
+    let clean = node_type.trim();
+    clean == "Branch" || clean == "Flint" || clean == "LooseStone"
+}
+
+#[inline]
+pub fn is_medium_node(node_type: &str) -> bool {
+    let clean = node_type.trim();
+    clean == "Bush" || clean == "FallenLog"
+}
+
+#[inline]
+pub fn get_node_load_radius_sq(node_type: &str, max_load_radius_sq: f32) -> f32 {
+    if is_small_clutter(node_type) {
+        SMALL_CLUTTER_LOAD_DIST_SQ.min(max_load_radius_sq)
+    } else if is_medium_node(node_type) {
+        MEDIUM_NODE_LOAD_DIST_SQ.min(max_load_radius_sq)
+    } else {
+        max_load_radius_sq
+    }
+}
+
+#[inline]
+pub fn get_node_unload_radius_sq(node_type: &str, max_unload_radius_sq: f32) -> f32 {
+    if is_small_clutter(node_type) {
+        SMALL_CLUTTER_UNLOAD_DIST_SQ.min(max_unload_radius_sq)
+    } else if is_medium_node(node_type) {
+        MEDIUM_NODE_UNLOAD_DIST_SQ.min(max_unload_radius_sq)
+    } else {
+        max_unload_radius_sq
+    }
+}
+
+/// Stores the original collider definition for dynamic physics distance culling.
+/// Prevents distant static nodes (>56m) from populating Avian3D's broadphase spatial hash.
+#[derive(Component, Clone)]
+pub struct NodeCollider(pub Collider);
+
 /// Identifies whether a resource node is a tree species or bush foliage eligible for distance shadow culling.
 #[inline]
 pub fn is_tree_or_bush_type(node_type: &str) -> bool {
@@ -67,7 +122,7 @@ pub fn is_tree_or_bush_type(node_type: &str) -> bool {
         || clean.ends_with(":Round")
 }
 
-/// Cached GPU mesh handles for harvestable resource nodes and environment clutter.
+/// Cached GPU mesh and material handles for harvestable resource nodes and environment clutter.
 pub struct CachedResourceMeshes {
     pub tree_cache: TreeMeshCache,
     pub fallen_log: Handle<Mesh>,
@@ -80,10 +135,14 @@ pub struct CachedResourceMeshes {
     pub branch: Handle<Mesh>,
     pub flint: Handle<Mesh>,
     pub stone: Handle<Mesh>,
+    pub default_mat: Handle<StandardMaterial>,
+    pub iron_mat: Handle<StandardMaterial>,
+    pub ruby_mat: Handle<StandardMaterial>,
+    pub rubble_mat: Handle<StandardMaterial>,
 }
 
 impl CachedResourceMeshes {
-    pub fn new(meshes: &mut Assets<Mesh>) -> Self {
+    pub fn new(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> Self {
         let tree_cache = TreeMeshCache::new(meshes);
         let fallen_log = meshes.add(create_lowpoly_fallen_log_mesh(5050));
 
@@ -115,6 +174,35 @@ impl CachedResourceMeshes {
         ];
         let bush = bush_variants[0].clone();
 
+        let default_mat = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            perceptual_roughness: 0.85,
+            reflectance: 0.1,
+            ..default()
+        });
+        let iron_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.65, 0.38, 0.22),
+            metallic: 0.75,
+            perceptual_roughness: 0.40,
+            reflectance: 0.5,
+            ..default()
+        });
+        let ruby_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.95, 0.05, 0.15),
+            metallic: 0.2,
+            perceptual_roughness: 0.15,
+            reflectance: 0.8,
+            emissive: Color::srgb(0.40, 0.02, 0.05).into(),
+            ..default()
+        });
+        let rubble_mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.48, 0.46, 0.44),
+            metallic: 0.05,
+            perceptual_roughness: 0.90,
+            reflectance: 0.1,
+            ..default()
+        });
+
         Self {
             tree_cache,
             fallen_log,
@@ -127,6 +215,10 @@ impl CachedResourceMeshes {
             branch: meshes.add(create_lowpoly_branch_mesh(1337)),
             flint: meshes.add(create_lowpoly_flint_mesh(1337)),
             stone: meshes.add(create_lowpoly_stone_mesh(1337)),
+            default_mat,
+            iron_mat,
+            ruby_mat,
+            rubble_mat,
         }
     }
 }
@@ -136,12 +228,11 @@ pub fn sync_resource_nodes(
     time: Res<Time>,
     mut meshes: ResMut<Assets<Mesh>>, 
     mut materials: ResMut<Assets<StandardMaterial>>,
-    node_query: Query<(Entity, &ResourceNodeItem, &BevyTransform, Has<NotShadowCaster>)>, 
+    node_query: Query<(Entity, &ResourceNodeItem, &BevyTransform, Has<NotShadowCaster>, Has<Collider>, Option<&NodeCollider>)>, 
     player_query: Query<&BevyTransform, With<PlayerBody>>,
     conn: Res<SpacetimeConnection>,
     tree_mats: Option<Res<crate::tree_colors::TreeMaterialHandles>>,
     render_settings: Option<Res<crate::spellbook::TerrainRenderSettings>>,
-    mut default_node_mat: Local<Option<Handle<StandardMaterial>>>,
     mut local_nodes: Local<BTreeSet<u64>>,
     mut scan_timer: Local<Option<Timer>>,
     mut model_cache: Local<Option<CachedResourceMeshes>>,
@@ -154,16 +245,8 @@ pub fn sync_resource_nodes(
         return;
     }
 
-    let cache = model_cache.get_or_insert_with(|| CachedResourceMeshes::new(&mut meshes));
-
-    let node_mat = default_node_mat.get_or_insert_with(|| {
-        materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            perceptual_roughness: 0.85,
-            reflectance: 0.1,
-            ..default()
-        })
-    }).clone();
+    let cache = model_cache.get_or_insert_with(|| CachedResourceMeshes::new(&mut meshes, &mut materials));
+    let node_mat = cache.default_mat.clone();
 
     // Synchronize resource node load/unload distance with performance budget (128m load / 144m unload)
     let (node_load_radius, node_unload_radius) = if let Some(ref rs) = render_settings {
@@ -184,7 +267,7 @@ pub fn sync_resource_nodes(
 
     local_nodes.clear();
 
-    for (entity, node_item, transform, has_not_shadow) in node_query.iter() {
+    for (entity, node_item, transform, has_not_shadow, has_collider, maybe_node_collider) in node_query.iter() {
         let origin = transform.translation;
         let dist_sq = (origin.x - player_pos.x).powi(2) + (origin.z - player_pos.z).powi(2);
 
@@ -320,21 +403,30 @@ pub fn sync_resource_nodes(
                 }
             }
             commands.entity(entity).despawn_recursive();
-        } else if dist_sq > node_unload_radius_sq {
+        } else if dist_sq > get_node_unload_radius_sq(&node_item.node_type, node_unload_radius_sq) {
             commands.entity(entity).despawn_recursive();
         } else {
             local_nodes.insert(node_item.node_id);
 
             // Dynamic shadow caster distance culling with 8m hysteresis (56m near / 64m far):
-            // Trees and bushes beyond 64m are stripped of shadow casting to eliminate thousands
-            // of redundant draw calls from cascaded shadow map passes.
+            // Trees, bushes, rocks, ore, and rubble beyond 64m are stripped of shadow casting.
             // When moving closer (<56m), shadow casting is restored.
             // Small ground clutter (Branch, Flint, LooseStone) permanently retains NotShadowCaster.
-            if is_tree_or_bush_type(&node_item.node_type) {
+            if !is_small_clutter(&node_item.node_type) {
                 if !has_not_shadow && dist_sq > TREE_SHADOW_FAR_DIST_SQ {
                     commands.entity(entity).insert(NotShadowCaster);
                 } else if has_not_shadow && dist_sq < TREE_SHADOW_NEAR_DIST_SQ {
                     commands.entity(entity).remove::<NotShadowCaster>();
+                }
+            }
+
+            // Dynamic physics collider culling with 8m hysteresis (48m near / 56m far):
+            // Strips Avian3D colliders on distant static resource nodes to relieve broadphase spatial hash.
+            if let Some(nc) = maybe_node_collider {
+                if has_collider && dist_sq > crate::terrain::LOW_POLY_FAR_COLLIDER_UNLOAD_SQ {
+                    commands.entity(entity).remove::<Collider>();
+                } else if !has_collider && dist_sq <= crate::terrain::LOW_POLY_NEAR_COLLIDER_DIST_SQ {
+                    commands.entity(entity).insert(nc.0.clone());
                 }
             }
         }
@@ -343,7 +435,9 @@ pub fn sync_resource_nodes(
     let mut spawned_this_tick = 0;
     for node in conn.db.db.resource_node().iter() {
         let dist_sq = (node.x - player_pos.x).powi(2) + (node.z - player_pos.z).powi(2);
-        if dist_sq > node_load_radius_sq || local_nodes.contains(&node.node_id) {
+        let clean_type = node.node_type.trim();
+        let req_load_sq = get_node_load_radius_sq(clean_type, node_load_radius_sq);
+        if dist_sq > req_load_sq || local_nodes.contains(&node.node_id) {
             continue;
         }
 
@@ -457,32 +551,13 @@ pub fn sync_resource_nodes(
                 node_mat.clone()
             }
         } else if clean_type == "Ore:Iron" {
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.65, 0.38, 0.22),
-                metallic: 0.75,
-                perceptual_roughness: 0.40,
-                reflectance: 0.5,
-                ..default()
-            })
+            cache.iron_mat.clone()
         } else if clean_type == "Gem:Ruby" {
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.95, 0.05, 0.15),
-                metallic: 0.2,
-                perceptual_roughness: 0.15,
-                reflectance: 0.8,
-                emissive: Color::srgb(0.40, 0.02, 0.05).into(),
-                ..default()
-            })
+            cache.ruby_mat.clone()
         } else if clean_type == "CollapsedRubble" || clean_type == "Rubble" {
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(0.48, 0.46, 0.44),
-                metallic: 0.05,
-                perceptual_roughness: 0.90,
-                reflectance: 0.1,
-                ..default()
-            })
+            cache.rubble_mat.clone()
         } else {
-            node_mat.clone()
+            cache.default_mat.clone()
         };
 
         let is_rock_or_ore = clean_type == "Rock"
@@ -538,32 +613,36 @@ pub fn sync_resource_nodes(
                 node_id: node.node_id,
                 node_type: clean_type.to_string(),
             },
+            NodeCollider(collider.clone()),
         ));
+
+        let needs_near_collider = dist_sq <= crate::terrain::LOW_POLY_NEAR_COLLIDER_DIST_SQ;
 
         if is_solid {
             entity_cmd.insert((
                 RigidBody::Static,
-                collider,
                 CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
             ));
+            if needs_near_collider {
+                entity_cmd.insert(collider);
+            }
         } else {
             entity_cmd.insert((
-                collider,
                 Sensor,
                 CollisionLayers::new([GameLayer::Environment], [GameLayer::Default, GameLayer::Unit]),
             ));
+            if needs_near_collider {
+                entity_cmd.insert(collider);
+            }
         }
 
         if let Some(tc) = tree_comp_opt {
             entity_cmd.insert(tc);
         }
 
-        // Performance Optimization: Exclude small ground clutter (twigs, stones, flint)
-        // from directional cascaded shadow passes to prevent shadow rasterization bottlenecking.
-        if matches!(clean_type, "Branch" | "Flint" | "LooseStone") {
-            entity_cmd.insert(NotShadowCaster);
-        } else if is_tree_or_bush_type(clean_type) && dist_sq > TREE_SHADOW_NEAR_DIST_SQ {
-            // Cull distant tree and bush shadows at spawn time (>56m)
+        // Performance Optimization: Exclude small ground clutter permanently and cull distant
+        // tree, bush, and rock shadows beyond 56m at spawn time.
+        if is_small_clutter(clean_type) || dist_sq > TREE_SHADOW_NEAR_DIST_SQ {
             entity_cmd.insert(NotShadowCaster);
         }
 
@@ -665,12 +744,9 @@ mod tests {
 
     #[test]
     fn test_cached_resource_meshes_initialization() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<Assets<Mesh>>();
-
-        let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
-        let cache = CachedResourceMeshes::new(&mut meshes);
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let cache = CachedResourceMeshes::new(&mut meshes, &mut materials);
 
         assert_eq!(cache.bush_variants.len(), 4);
         assert_eq!(cache.bush_foliage_variants.len(), 4);
@@ -684,6 +760,10 @@ mod tests {
         assert!(meshes.get(&cache.branch).is_some());
         assert!(meshes.get(&cache.flint).is_some());
         assert!(meshes.get(&cache.stone).is_some());
+        assert!(materials.get(&cache.default_mat).is_some());
+        assert!(materials.get(&cache.iron_mat).is_some());
+        assert!(materials.get(&cache.ruby_mat).is_some());
+        assert!(materials.get(&cache.rubble_mat).is_some());
     }
 
     #[test]
@@ -704,6 +784,31 @@ mod tests {
         assert!(!is_tree_or_bush_type("Flint"));
         assert!(!is_tree_or_bush_type("LooseStone"));
         assert!(!is_tree_or_bush_type("Rock"));
+    }
+
+    #[test]
+    fn test_tiered_culling_distances_and_classification() {
+        assert!(is_small_clutter("Branch"));
+        assert!(is_small_clutter("Flint"));
+        assert!(is_small_clutter("LooseStone"));
+        assert!(!is_small_clutter("Bush"));
+        assert!(!is_small_clutter("Tree"));
+        assert!(!is_small_clutter("Rock"));
+
+        assert!(is_medium_node("Bush"));
+        assert!(is_medium_node("FallenLog"));
+        assert!(!is_medium_node("Branch"));
+        assert!(!is_medium_node("Oak"));
+
+        assert_eq!(SMALL_CLUTTER_LOAD_DIST, 36.0);
+        assert_eq!(SMALL_CLUTTER_UNLOAD_DIST, 44.0);
+        assert_eq!(MEDIUM_NODE_LOAD_DIST, 64.0);
+        assert_eq!(MEDIUM_NODE_UNLOAD_DIST, 72.0);
+
+        let default_load_sq = RESOURCE_NODE_LOAD_RADIUS_SQ;
+        assert_eq!(get_node_load_radius_sq("Flint", default_load_sq), SMALL_CLUTTER_LOAD_DIST_SQ);
+        assert_eq!(get_node_load_radius_sq("Bush", default_load_sq), MEDIUM_NODE_LOAD_DIST_SQ);
+        assert_eq!(get_node_load_radius_sq("Oak", default_load_sq), default_load_sq);
     }
 
     #[test]

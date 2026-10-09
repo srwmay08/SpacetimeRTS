@@ -650,7 +650,8 @@ use bevy::pbr::NotShadowCaster;
 use crate::components::{NetworkEntity, LogicalPosition, LogicalRotation, Selectable, PeasantUnit, SelectionRing, RTSProxy};
 use crate::core::{GameState, GameLayer};
 
-/// Cached GPU mesh handles for fauna, humanoid NPCs, and world objects.
+/// Cached GPU mesh and material handles for fauna, humanoid NPCs, and world objects.
+/// Reusing materials and ring meshes enables Bevy's GPU instancing and render batching.
 pub struct CachedCreatureMeshes {
     pub deer: Handle<Mesh>,
     pub boar: Handle<Mesh>,
@@ -659,10 +660,15 @@ pub struct CachedCreatureMeshes {
     pub pet: Handle<Mesh>,
     pub dummy: Handle<Mesh>,
     pub corpse: Handle<Mesh>,
+    pub selection_ring_mesh: Handle<Mesh>,
+    pub corpse_ring_mesh: Handle<Mesh>,
+    pub creature_material: Handle<StandardMaterial>,
+    pub selection_ring_material: Handle<StandardMaterial>,
+    pub corpse_ring_material: Handle<StandardMaterial>,
 }
 
 impl CachedCreatureMeshes {
-    pub fn new(meshes: &mut Assets<Mesh>) -> Self {
+    pub fn new(meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>) -> Self {
         Self {
             deer: meshes.add(create_lowpoly_deer_mesh()),
             boar: meshes.add(create_lowpoly_boar_mesh()),
@@ -671,6 +677,23 @@ impl CachedCreatureMeshes {
             pet: meshes.add(create_lowpoly_pet_mesh()),
             dummy: meshes.add(create_lowpoly_dummy_mesh()),
             corpse: meshes.add(create_lowpoly_corpse_mesh()),
+            selection_ring_mesh: meshes.add(bevy::math::primitives::Torus::new(0.6, 0.05)),
+            corpse_ring_mesh: meshes.add(bevy::math::primitives::Torus::new(0.5, 0.04)),
+            creature_material: materials.add(StandardMaterial {
+                base_color: Color::WHITE,
+                perceptual_roughness: 0.85,
+                ..default()
+            }),
+            selection_ring_material: materials.add(StandardMaterial {
+                base_color: Color::srgb(0.0, 1.0, 0.0),
+                unlit: true,
+                ..default()
+            }),
+            corpse_ring_material: materials.add(StandardMaterial {
+                base_color: Color::srgb(0.9, 0.75, 0.2),
+                unlit: true,
+                ..default()
+            }),
         }
     }
 }
@@ -679,8 +702,6 @@ impl CachedCreatureMeshes {
 pub fn spawn_corpse_visual_entity(
     commands: &mut Commands,
     cache: &CachedCreatureMeshes,
-    materials: &mut Assets<StandardMaterial>,
-    meshes: &mut Assets<Mesh>,
     id: u64,
     db_t: &crate::module_bindings::Transform,
 ) -> Entity {
@@ -702,11 +723,7 @@ pub fn spawn_corpse_visual_entity(
         parent.spawn((
             PbrBundle {
                 mesh: cache.corpse.clone(),
-                material: materials.add(StandardMaterial {
-                    base_color: Color::WHITE,
-                    perceptual_roughness: 0.85,
-                    ..default()
-                }),
+                material: cache.creature_material.clone(),
                 transform: Transform::from_xyz(0.0, 0.0, 0.0),
                 ..default()
             },
@@ -714,12 +731,8 @@ pub fn spawn_corpse_visual_entity(
         ));
         parent.spawn((
             PbrBundle {
-                mesh: meshes.add(bevy::math::primitives::Torus::new(0.5, 0.04)),
-                material: materials.add(StandardMaterial { 
-                    base_color: Color::srgb(0.9, 0.75, 0.2), 
-                    unlit: true, 
-                    ..default() 
-                }),
+                mesh: cache.corpse_ring_mesh.clone(),
+                material: cache.corpse_ring_material.clone(),
                 transform: Transform::from_xyz(0.0, 0.05, 0.0), 
                 visibility: Visibility::Hidden, 
                 ..default()
@@ -736,13 +749,12 @@ pub fn spawn_corpse_visual_entity(
 pub fn spawn_creature_visual_entity(
     commands: &mut Commands,
     cache: &CachedCreatureMeshes,
-    materials: &mut Assets<StandardMaterial>,
-    meshes: &mut Assets<Mesh>,
     id: u64,
     db_t: &crate::module_bindings::Transform,
     is_peasant: bool,
     is_pet: bool,
     npc_brain: Option<&crate::module_bindings::NpcBrain>,
+    player_pos: Vec3,
 ) -> Entity {
     let mut visual_transform = Transform::from_xyz(0.0, -1.05, 0.0);
 
@@ -814,24 +826,27 @@ pub fn spawn_creature_visual_entity(
         entity_cmds.insert(PeasantUnit { entity_id: id });
     }
 
+    let dist_sq = (db_t.x - player_pos.x).powi(2) + (db_t.z - player_pos.z).powi(2);
+    let is_shadow_culled = dist_sq > crate::resource_nodes::TREE_SHADOW_NEAR_DIST_SQ;
+
     entity_cmds.with_children(|parent| {
-        parent.spawn((
+        let mut visual_cmds = parent.spawn((
             PbrBundle {
                 mesh: mesh_handle,
-                material: materials.add(StandardMaterial {
-                    base_color: Color::WHITE,
-                    perceptual_roughness: 0.85,
-                    ..default()
-                }),
+                material: cache.creature_material.clone(),
                 transform: visual_transform,
                 ..default()
             },
             RenderLayers::from_layers(&[0, 1, 2]), RTSProxy,
         ));
+        if is_shadow_culled {
+            visual_cmds.insert(NotShadowCaster);
+        }
+
         parent.spawn((
             PbrBundle {
-                mesh: meshes.add(bevy::math::primitives::Torus::new(0.6, 0.05)),
-                material: materials.add(StandardMaterial { base_color: Color::srgb(0.0, 1.0, 0.0), unlit: true, ..default() }),
+                mesh: cache.selection_ring_mesh.clone(),
+                material: cache.selection_ring_material.clone(),
                 transform: Transform::from_xyz(0.0, -0.4, 0.0), visibility: Visibility::Hidden, ..default()
             },
             RenderLayers::layer(2), SelectionRing,
@@ -840,6 +855,26 @@ pub fn spawn_creature_visual_entity(
     });
 
     entity_cmds.id()
+}
+
+/// Dynamically toggles `NotShadowCaster` on creature and NPC visual meshes
+/// based on distance from the local player with 8m hysteresis (56m near / 64m far).
+pub fn creature_shadow_culling_system(
+    mut commands: Commands,
+    player_query: Query<&Transform, With<crate::components::PlayerBody>>,
+    creature_query: Query<(Entity, &GlobalTransform, Has<NotShadowCaster>), With<RTSProxy>>,
+) {
+    let Ok(player_tf) = player_query.get_single() else { return; };
+    let player_pos = player_tf.translation;
+
+    for (entity, tf, has_not_shadow) in creature_query.iter() {
+        let dist_sq = tf.translation().distance_squared(player_pos);
+        if !has_not_shadow && dist_sq > crate::resource_nodes::TREE_SHADOW_FAR_DIST_SQ {
+            commands.entity(entity).insert(NotShadowCaster);
+        } else if has_not_shadow && dist_sq < crate::resource_nodes::TREE_SHADOW_NEAR_DIST_SQ {
+            commands.entity(entity).remove::<NotShadowCaster>();
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -1118,12 +1153,9 @@ mod tests {
 
     #[test]
     fn test_cached_creature_meshes_initialization() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        app.init_resource::<Assets<Mesh>>();
-
-        let mut meshes = app.world_mut().resource_mut::<Assets<Mesh>>();
-        let cache = CachedCreatureMeshes::new(&mut meshes);
+        let mut meshes = Assets::<Mesh>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let cache = CachedCreatureMeshes::new(&mut meshes, &mut materials);
 
         assert!(meshes.get(&cache.deer).is_some());
         assert!(meshes.get(&cache.boar).is_some());
@@ -1132,6 +1164,11 @@ mod tests {
         assert!(meshes.get(&cache.pet).is_some());
         assert!(meshes.get(&cache.dummy).is_some());
         assert!(meshes.get(&cache.corpse).is_some());
+        assert!(meshes.get(&cache.selection_ring_mesh).is_some());
+        assert!(meshes.get(&cache.corpse_ring_mesh).is_some());
+        assert!(materials.get(&cache.creature_material).is_some());
+        assert!(materials.get(&cache.selection_ring_material).is_some());
+        assert!(materials.get(&cache.corpse_ring_material).is_some());
 
         // Verify low-poly vertex budgets (each creature between 40 and 1200 vertices / <400 triangles, ~95% fewer than micro-voxels)
         let deer_mesh = meshes.get(&cache.deer).unwrap();
