@@ -123,9 +123,9 @@ pub fn reconcile_server_state(
     // Architectural Note: 0.35m threshold (0.1225m^2) absorbs natural slope elevation
     // clamping and network packet timing jitter without false rollback loops.
     const TOLERANCE_SQ: f32 = 0.35 * 0.35;
-    // Hard teleport / death respawn threshold: 4.0m (16.0m^2).
-    // Single-tick discontinuity beyond 4m or authoritative tick leap indicates a death respawn / teleport.
-    const TELEPORT_THRESHOLD_SQ: f32 = 4.0 * 4.0;
+    // Hard teleport / death respawn threshold: 3.0m (9.0m^2).
+    // Discontinuity beyond 3m or authoritative tick leap indicates a death respawn / teleport.
+    const TELEPORT_THRESHOLD_SQ: f32 = 3.0 * 3.0;
 
     for (mut transform, maybe_physics_pos, maybe_lin_vel, mut buffer, auth_state, mut tracker, mut maybe_log_pos) in query.iter_mut() {
         // 1. Discard acknowledged inputs
@@ -143,14 +143,14 @@ pub fn reconcile_server_state(
 
         // 4. Divergence validation against predicted expected live position
         let divergence_sq = transform.translation.distance_squared(expected_live_pos);
-        let direct_dist_sq = transform.translation.distance_squared(auth_state.position);
 
         // Check for server-authoritative leap or distance discontinuity:
-        // - Server tick is ahead of local client tick (death respawn tick jump of 100,000)
-        // - Direct distance from raw server position exceeds teleport threshold (4m)
-        // - Divergence from expected live position exceeds teleport threshold (4m)
-        let is_tick_leap = client_tick.as_ref().map_or(false, |ct| auth_state.last_processed_tick > ct.0);
-        let is_hard_teleport = is_tick_leap || divergence_sq > TELEPORT_THRESHOLD_SQ || direct_dist_sq > TELEPORT_THRESHOLD_SQ;
+        // - Server tick is ahead by +100,000 (death respawn / admin teleport leap)
+        // - Divergence from expected live position exceeds teleport threshold (3m)
+        let is_tick_leap = client_tick.as_ref().map_or(false, |ct| {
+            auth_state.last_processed_tick.saturating_sub(ct.0) > 10_000
+        });
+        let is_hard_teleport = is_tick_leap || divergence_sq > TELEPORT_THRESHOLD_SQ;
 
         if is_hard_teleport {
             // Hard teleport / death respawn detected: Flush all pre-death movement deltas,

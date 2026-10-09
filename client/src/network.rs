@@ -497,6 +497,7 @@ pub fn sync_transforms(
                 &mut materials,
                 &default_preset.anatomy,
                 &default_preset.face,
+                RenderLayers::from_layers(&[0, 1, 2]),
             );
 
             spawned_ids.insert(id);

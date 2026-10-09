@@ -337,6 +337,10 @@ pub enum JointType {
     FootR,
 }
 
+/// Identifies the owning character entity for an articulated joint.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JointOwner(pub Entity);
+
 /// Identifies the root container for the procedural character hierarchy.
 #[derive(Component)]
 pub struct CharacterModelRoot;
@@ -517,6 +521,7 @@ pub fn spawn_procedural_character_hierarchy(
     materials: &mut Assets<StandardMaterial>,
     race: &RaceAnatomyProfile,
     face: &FaceProfile,
+    render_layers: RenderLayers,
 ) -> Entity {
     // Generate mesh assets
     let face_mesh = meshes.add(generate_custom_face(face));
@@ -594,7 +599,7 @@ pub fn spawn_procedural_character_hierarchy(
         ..default()
     });
 
-    let layer2 = RenderLayers::layer(2);
+    let layers = render_layers;
     let mut model_root_id = Entity::PLACEHOLDER;
 
     commands.entity(parent_entity).with_children(|root| {
@@ -615,7 +620,8 @@ pub fn spawn_procedural_character_hierarchy(
                             ..default()
                         },
                         JointType::Torso,
-                        layer2.clone(),
+                        JointOwner(parent_entity),
+                        layers.clone(),
                     ))
                     .with_children(|torso| {
                         // 2. HEAD PIVOT
@@ -624,6 +630,7 @@ pub fn spawn_procedural_character_hierarchy(
                             .spawn((
                                 SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, head_pivot_y, 0.0)),
                                 JointType::Head,
+                                JointOwner(parent_entity),
                             ))
                             .with_children(|head_pivot| {
                                 // Skull Base
@@ -634,7 +641,7 @@ pub fn spawn_procedural_character_hierarchy(
                                         transform: BevyTransform::from_xyz(0.0, 0.08 * race.head_scale, 0.0),
                                         ..default()
                                     },
-                                    layer2.clone(),
+                                    layers.clone(),
                                 ));
                                 // Raw Procedural Face (Pinned to anterior face: -Z)
                                 head_pivot.spawn((
@@ -649,7 +656,7 @@ pub fn spawn_procedural_character_hierarchy(
                                         ..default()
                                     },
                                     ProceduralFaceMesh,
-                                    layer2.clone(),
+                                    layers.clone(),
                                 ));
                             });
 
@@ -663,6 +670,7 @@ pub fn spawn_procedural_character_hierarchy(
                                     0.0,
                                 )),
                                 JointType::ShoulderL,
+                                JointOwner(parent_entity),
                             ))
                             .with_children(|shoulder_l| {
                                 // Upper Arm mesh
@@ -673,7 +681,7 @@ pub fn spawn_procedural_character_hierarchy(
                                         transform: BevyTransform::from_xyz(0.0, -race.upper_arm_length * 0.5, 0.0),
                                         ..default()
                                     },
-                                    layer2.clone(),
+                                    layers.clone(),
                                 ));
                                 // Pauldron / Spikes
                                 if race.pauldron_size > 0.01 {
@@ -684,7 +692,7 @@ pub fn spawn_procedural_character_hierarchy(
                                             transform: BevyTransform::from_xyz(-0.02, 0.04, 0.0),
                                             ..default()
                                         },
-                                        layer2.clone(),
+                                        layers.clone(),
                                     ));
                                     if race.has_shoulder_spikes {
                                         shoulder_l.spawn((
@@ -694,7 +702,7 @@ pub fn spawn_procedural_character_hierarchy(
                                                 transform: BevyTransform::from_xyz(-0.02, 0.08 + race.pauldron_size * 0.35, 0.0),
                                                 ..default()
                                             },
-                                            layer2.clone(),
+                                            layers.clone(),
                                         ));
                                     }
                                 }
@@ -707,6 +715,7 @@ pub fn spawn_procedural_character_hierarchy(
                                             0.0,
                                         )),
                                         JointType::ElbowL,
+                                        JointOwner(parent_entity),
                                     ))
                                     .with_children(|elbow_l| {
                                         // Forearm mesh
@@ -717,7 +726,7 @@ pub fn spawn_procedural_character_hierarchy(
                                                 transform: BevyTransform::from_xyz(0.0, -race.forearm_length * 0.5, 0.0),
                                                 ..default()
                                             },
-                                            layer2.clone(),
+                                            layers.clone(),
                                         ));
                                         // Hand L (Socket)
                                         elbow_l.spawn((
@@ -728,7 +737,8 @@ pub fn spawn_procedural_character_hierarchy(
                                                 ..default()
                                             },
                                             JointType::HandL,
-                                            layer2.clone(),
+                                            JointOwner(parent_entity),
+                                            layers.clone(),
                                         ));
                                     });
                             });
@@ -742,6 +752,7 @@ pub fn spawn_procedural_character_hierarchy(
                                     0.0,
                                 )),
                                 JointType::ShoulderR,
+                                JointOwner(parent_entity),
                             ))
                             .with_children(|shoulder_r| {
                                 // Upper Arm mesh
@@ -752,7 +763,7 @@ pub fn spawn_procedural_character_hierarchy(
                                         transform: BevyTransform::from_xyz(0.0, -race.upper_arm_length * 0.5, 0.0),
                                         ..default()
                                     },
-                                    layer2.clone(),
+                                    layers.clone(),
                                 ));
                                 // Pauldron / Spikes
                                 if race.pauldron_size > 0.01 {
@@ -763,7 +774,7 @@ pub fn spawn_procedural_character_hierarchy(
                                             transform: BevyTransform::from_xyz(0.02, 0.04, 0.0),
                                             ..default()
                                         },
-                                        layer2.clone(),
+                                        layers.clone(),
                                     ));
                                     if race.has_shoulder_spikes {
                                         shoulder_r.spawn((
@@ -773,7 +784,7 @@ pub fn spawn_procedural_character_hierarchy(
                                                 transform: BevyTransform::from_xyz(0.02, 0.08 + race.pauldron_size * 0.35, 0.0),
                                                 ..default()
                                             },
-                                            layer2.clone(),
+                                            layers.clone(),
                                         ));
                                     }
                                 }
@@ -786,6 +797,7 @@ pub fn spawn_procedural_character_hierarchy(
                                             0.0,
                                         )),
                                         JointType::ElbowR,
+                                        JointOwner(parent_entity),
                                     ))
                                     .with_children(|elbow_r| {
                                         // Forearm mesh
@@ -796,7 +808,7 @@ pub fn spawn_procedural_character_hierarchy(
                                                 transform: BevyTransform::from_xyz(0.0, -race.forearm_length * 0.5, 0.0),
                                                 ..default()
                                             },
-                                            layer2.clone(),
+                                            layers.clone(),
                                         ));
                                         // Hand R (Weapon Socket)
                                         elbow_r.spawn((
@@ -807,7 +819,8 @@ pub fn spawn_procedural_character_hierarchy(
                                                 ..default()
                                             },
                                             JointType::HandR,
-                                            layer2.clone(),
+                                            JointOwner(parent_entity),
+                                            layers.clone(),
                                         ));
                                     });
                             });
@@ -822,6 +835,7 @@ pub fn spawn_procedural_character_hierarchy(
                                     0.0,
                                 )),
                                 JointType::HipL,
+                                JointOwner(parent_entity),
                             ))
                             .with_children(|hip_l| {
                                 hip_l.spawn((
@@ -831,7 +845,7 @@ pub fn spawn_procedural_character_hierarchy(
                                         transform: BevyTransform::from_xyz(0.0, -race.upper_leg_length * 0.5, 0.0),
                                         ..default()
                                     },
-                                    layer2.clone(),
+                                    layers.clone(),
                                 ));
                                 hip_l
                                     .spawn((
@@ -841,6 +855,7 @@ pub fn spawn_procedural_character_hierarchy(
                                             0.0,
                                         )),
                                         JointType::KneeL,
+                                        JointOwner(parent_entity),
                                     ))
                                     .with_children(|knee_l| {
                                         knee_l.spawn((
@@ -850,7 +865,7 @@ pub fn spawn_procedural_character_hierarchy(
                                                 transform: BevyTransform::from_xyz(0.0, -race.lower_leg_length * 0.5, 0.0),
                                                 ..default()
                                             },
-                                            layer2.clone(),
+                                            layers.clone(),
                                         ));
                                         knee_l.spawn((
                                             PbrBundle {
@@ -860,7 +875,8 @@ pub fn spawn_procedural_character_hierarchy(
                                                 ..default()
                                             },
                                             JointType::FootL,
-                                            layer2.clone(),
+                                            JointOwner(parent_entity),
+                                            layers.clone(),
                                         ));
                                     });
                             });
@@ -874,6 +890,7 @@ pub fn spawn_procedural_character_hierarchy(
                                     0.0,
                                 )),
                                 JointType::HipR,
+                                JointOwner(parent_entity),
                             ))
                             .with_children(|hip_r| {
                                 hip_r.spawn((
@@ -883,7 +900,7 @@ pub fn spawn_procedural_character_hierarchy(
                                         transform: BevyTransform::from_xyz(0.0, -race.upper_leg_length * 0.5, 0.0),
                                         ..default()
                                     },
-                                    layer2.clone(),
+                                    layers.clone(),
                                 ));
                                 hip_r
                                     .spawn((
@@ -893,6 +910,7 @@ pub fn spawn_procedural_character_hierarchy(
                                             0.0,
                                         )),
                                         JointType::KneeR,
+                                        JointOwner(parent_entity),
                                     ))
                                     .with_children(|knee_r| {
                                         knee_r.spawn((
@@ -902,7 +920,7 @@ pub fn spawn_procedural_character_hierarchy(
                                                 transform: BevyTransform::from_xyz(0.0, -race.lower_leg_length * 0.5, 0.0),
                                                 ..default()
                                             },
-                                            layer2.clone(),
+                                            layers.clone(),
                                         ));
                                         knee_r.spawn((
                                             PbrBundle {
@@ -912,7 +930,8 @@ pub fn spawn_procedural_character_hierarchy(
                                                 ..default()
                                             },
                                             JointType::FootR,
-                                            layer2.clone(),
+                                            JointOwner(parent_entity),
+                                            layers.clone(),
                                         ));
                                     });
                             });
@@ -936,7 +955,7 @@ pub fn procedural_animator_system(
     time: Res<Time>,
     mut character_q: Query<(&mut AnimationState, Option<&LinearVelocity>)>,
     editor_state: Res<CharacterEditorState>,
-    mut joint_q: Query<(&JointType, &mut BevyTransform)>,
+    mut joint_q: Query<(&JointType, &JointOwner, &mut BevyTransform)>,
 ) {
     let dt = time.delta_seconds();
 
@@ -987,13 +1006,25 @@ pub fn procedural_animator_system(
         if state.hit_react_timer > 0.0 {
             state.hit_react_timer = (state.hit_react_timer - dt * 5.0).max(0.0);
         }
+    }
 
-        // Apply joint rotations based on compiled mathematical models
+    for (joint, owner, mut tf) in joint_q.iter_mut() {
+        let Ok((state, linvel_opt)) = character_q.get(owner.0) else { continue; };
+        let speed = if editor_state.is_open && editor_state.studio_preview_mode != StudioPreviewMode::LiveGameplay {
+            match editor_state.studio_preview_mode {
+                StudioPreviewMode::Walk => 2.2,
+                StudioPreviewMode::Run => 5.5,
+                StudioPreviewMode::JumpAscend | StudioPreviewMode::JumpFall => 0.5,
+                _ => 0.0,
+            }
+        } else {
+            let vel = linvel_opt.map_or(Vec3::ZERO, |v| v.0);
+            Vec2::new(vel.x, vel.z).length()
+        };
+
         let phase = state.gait_phase;
         let walk_run_blend = ((speed - 0.5) / 3.5).clamp(0.0, 1.0);
         let amplitude = 0.35 + 0.35 * walk_run_blend; // 0.35 rad (walk) -> 0.70 rad (sprint)
-
-        for (joint, mut tf) in joint_q.iter_mut() {
             match joint {
                 // TORSO: Forward lean during sprints + Hit reaction snap
                 JointType::Torso => {
@@ -1153,7 +1184,6 @@ pub fn procedural_animator_system(
                 _ => {}
             }
         }
-    }
 }
 
 /// Synchronizes gameplay combat states (melee swing, bow drawing, grounded state)
@@ -2158,6 +2188,7 @@ pub fn sync_player_model_rebuild_system(
             &mut materials,
             &custom.anatomy,
             &custom.face,
+            RenderLayers::layer(2),
         );
 
         info!("🎭 Rebuilt procedural character model for player (Race: {})", custom.anatomy.race_name);
