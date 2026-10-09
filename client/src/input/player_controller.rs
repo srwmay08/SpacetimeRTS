@@ -5,7 +5,7 @@
 // PLAYER LOCOMOTION & RTS NAVMESH MOVEMENT SYSTEMS
 // ----------------------------------------------------------------------------
 
-use avian3d::prelude::*;
+use crate::physics::*;
 use bevy::prelude::{Transform as BevyTransform, *};
 
 use crate::components::*;
@@ -256,13 +256,15 @@ pub fn player_movement_system(
 
     // Bedrock & void safety net: permits 3D subterranean exploration down to BEDROCK_ELEVATION (-120.0m)
     // while catching players falling through unloaded chunks into the abyss.
-    let bedrock_safe_y = -120.0_f32 + 1.05;
-    if transform.translation.y < bedrock_safe_y {
-        transform.translation.y = bedrock_safe_y;
-        if lin_vel.y < 0.0 { 
-            lin_vel.y = 0.0; 
+    if crate::subterrain::is_bedrock_enabled() {
+        let bedrock_safe_y = -120.0_f32 + 1.05;
+        if transform.translation.y < bedrock_safe_y {
+            transform.translation.y = bedrock_safe_y;
+            if lin_vel.y < 0.0 { 
+                lin_vel.y = 0.0; 
+            }
+            kcc.is_grounded = true;
         }
-        kcc.is_grounded = true;
     }
 }
 

@@ -108,6 +108,8 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "noclip",
     "fly",
     "flyspeed",
+    "bedrock",
+    "terrain",
 ];
 
 
@@ -156,6 +158,7 @@ pub fn handle_console_input(
     mut foliage_config: Option<ResMut<crate::tree_colors::TreeFoliageConfig>>,
     mut noclip_toggle: EventWriter<ToggleNoClipEvent>,
     mut noclip_state: Option<ResMut<NoClipState>>,
+    mut render_settings: Option<ResMut<crate::spellbook::TerrainRenderSettings>>,
 ) {
     if !console.is_open {
         return;
@@ -1190,6 +1193,7 @@ pub fn handle_console_input(
                 console.logs.push("fullscreen / windowed  : Toggles or sets fullscreen / windowed display mode".into());
                 console.logs.push("maxfps <fps|0|off>     : Sets frame rate cap (0 or off = uncapped)".into());
                 console.logs.push("vsync <on|off>         : Toggles vertical sync (AutoNoVsync default)".into());
+                console.logs.push("bedrock <on|off|toggle>: Toggles -120m bedrock floor & collision".into());
                 console.logs.push("abilities              : Displays tactical abilities directory".into());
             }
             "resolution" | "res" => {
@@ -1260,6 +1264,78 @@ pub fn handle_console_input(
                     console.logs.push("[Window] Display mode set to Windowed.".into());
                 } else {
                     console.logs.push("[Window Error] Primary window not found.".into());
+                }
+            }
+            "bedrock" => {
+                let sub = tokens.get(1).map(|s| s.to_lowercase());
+                let current = crate::subterrain::is_bedrock_enabled();
+                let new_state = match sub.as_deref() {
+                    Some("off") | Some("disable") | Some("disabled") | Some("false") | Some("0") => Some(false),
+                    Some("on") | Some("enable") | Some("enabled") | Some("true") | Some("1") => Some(true),
+                    Some("toggle") => Some(!current),
+                    None | Some("status") => None,
+                    Some(other) => {
+                        console.logs.push(format!("[Syntax Error] Unknown bedrock argument '{}'. Usage: bedrock <on|off|toggle>", other));
+                        return;
+                    }
+                };
+
+                if let Some(target) = new_state {
+                    crate::subterrain::set_bedrock_enabled(target);
+                    if let Some(ref mut rs) = render_settings {
+                        rs.bedrock_enabled = target;
+                    }
+                    if target {
+                        console.logs.push("[Bedrock] Bedrock foundation ENABLED (-120.0m floor, Rapier3D collision).".into());
+                        console.logs.push("  - Subterranean chunks rebuilding with indestructible bedrock floor.".into());
+                    } else {
+                        console.logs.push("[Bedrock] Bedrock foundation DISABLED (-120.0m floor removed).".into());
+                        console.logs.push("  - Subterranean chunks rebuilding without bedrock floor. Void boundary open beneath -120.0m.".into());
+                    }
+                } else {
+                    console.logs.push(format!(
+                        "[Bedrock Status] Bedrock foundation: {} (-120.0m floor, Rapier3D collision)",
+                        if current { "ENABLED" } else { "DISABLED" }
+                    ));
+                    console.logs.push("Usage: bedrock <on|off|toggle> | bedrock <1|0>".into());
+                }
+            }
+            "terrain" => {
+                let sub = tokens.get(1).map(|s| s.to_lowercase());
+                match sub.as_deref() {
+                    Some("bedrock") => {
+                        let arg = tokens.get(2).map(|s| s.to_lowercase());
+                        let current = crate::subterrain::is_bedrock_enabled();
+                        let new_state = match arg.as_deref() {
+                            Some("off") | Some("disable") | Some("disabled") | Some("false") | Some("0") => Some(false),
+                            Some("on") | Some("enable") | Some("enabled") | Some("true") | Some("1") => Some(true),
+                            Some("toggle") => Some(!current),
+                            None | Some("status") => None,
+                            Some(other) => {
+                                console.logs.push(format!("[Syntax Error] Unknown terrain bedrock argument '{}'. Usage: terrain bedrock <on|off|toggle>", other));
+                                return;
+                            }
+                        };
+                        if let Some(target) = new_state {
+                            crate::subterrain::set_bedrock_enabled(target);
+                            if let Some(ref mut rs) = render_settings {
+                                rs.bedrock_enabled = target;
+                            }
+                            if target {
+                                console.logs.push("[Terrain] Bedrock foundation ENABLED (-120.0m floor, Rapier3D collision).".into());
+                            } else {
+                                console.logs.push("[Terrain] Bedrock foundation DISABLED (-120.0m floor removed).".into());
+                            }
+                        } else {
+                            console.logs.push(format!("[Terrain] Bedrock: {}", if current { "ENABLED" } else { "DISABLED" }));
+                            console.logs.push("Usage: terrain bedrock <on|off|toggle>".into());
+                        }
+                    }
+                    _ => {
+                        let cur_bedrock = crate::subterrain::is_bedrock_enabled();
+                        console.logs.push(format!("[Terrain Status] Bedrock: {}", if cur_bedrock { "ENABLED" } else { "DISABLED" }));
+                        console.logs.push("Commands: bedrock <on|off|toggle> | terrain bedrock <on|off|toggle>".into());
+                    }
                 }
             }
             _ => {
@@ -1417,5 +1493,11 @@ mod tests {
         assert!(CONSOLE_COMMANDS.contains(&"noclip"), "CONSOLE_COMMANDS must contain 'noclip'");
         assert!(CONSOLE_COMMANDS.contains(&"fly"), "CONSOLE_COMMANDS must contain 'fly'");
         assert!(CONSOLE_COMMANDS.contains(&"flyspeed"), "CONSOLE_COMMANDS must contain 'flyspeed'");
+    }
+
+    #[test]
+    fn test_console_commands_contains_bedrock() {
+        assert!(CONSOLE_COMMANDS.contains(&"bedrock"), "CONSOLE_COMMANDS must contain 'bedrock'");
+        assert!(CONSOLE_COMMANDS.contains(&"terrain"), "CONSOLE_COMMANDS must contain 'terrain'");
     }
 }

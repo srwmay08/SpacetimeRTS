@@ -5,6 +5,7 @@
 // and graphics pipelines.
 
 pub mod module_bindings;
+pub mod physics;
 pub mod core;
 pub mod components;
 pub mod network;
@@ -23,6 +24,7 @@ pub mod binary_sky;
 pub mod tree_colors;
 pub mod zone_editor;
 pub mod spellbook;
+pub mod spells;
 pub mod voxel_mesh;
 pub mod prng;
 pub mod trees;

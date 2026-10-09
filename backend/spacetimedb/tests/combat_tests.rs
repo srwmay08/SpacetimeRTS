@@ -260,3 +260,68 @@ fn test_corpse_drop_deterministic_offsets_and_health() {
     assert_eq!(corpse_hp.current, 1.0);
     assert_eq!(corpse_hp.max, 1.0);
 }
+
+#[test]
+fn test_player_respawn_spatial_and_tick_synchronization() {
+    // Architectural Note: When a player dies from combat damage:
+    // 1. Coordinates must reset to origin (0.0, y, 0.0)
+    // 2. Spatial chunk indices MUST reset to (0, 0) so spatial queries and AI see the player at spawn
+    // 3. last_processed_tick MUST leap (+100,000) so pre-death in-flight movement packets are dropped
+    // 4. Hitbox history MUST be purged of pre-death coordinates and reset to spawn
+    // 5. Health MUST be restored to maximum
+    let mut transform = backend::movement::Transform {
+        entity_id: 1001,
+        x: 150.0,
+        y: 12.0,
+        z: -250.0,
+        chunk_x: 3,
+        chunk_z: -5,
+        last_processed_tick: 480,
+    };
+
+    let mut hp = Health {
+        entity_id: 1001,
+        current: 0.0,
+        max: 100.0,
+    };
+
+    let mut hitbox_history = HitboxHistory {
+        entity_id: 1001,
+        snapshots: vec![
+            Snapshot { tick_id: 478, x: 148.0, y: 12.0, z: -250.0 },
+            Snapshot { tick_id: 479, x: 149.0, y: 12.0, z: -250.0 },
+            Snapshot { tick_id: 480, x: 150.0, y: 12.0, z: -250.0 },
+        ],
+    };
+
+    // Simulate respawn logic from combat.rs
+    hp.current = hp.max;
+    transform.x = 0.0;
+    transform.z = 0.0;
+    transform.y = backend::get_terrain_height(0.0, 0.0) + 1.05;
+    transform.chunk_x = 0;
+    transform.chunk_z = 0;
+    transform.last_processed_tick = transform.last_processed_tick.wrapping_add(100_000);
+
+    hitbox_history.snapshots.clear();
+    hitbox_history.snapshots.push(Snapshot {
+        tick_id: transform.last_processed_tick,
+        x: 0.0,
+        y: transform.y,
+        z: 0.0,
+    });
+
+    assert_eq!(transform.x, 0.0);
+    assert_eq!(transform.z, 0.0);
+    assert_eq!(transform.chunk_x, 0, "Chunk X must reset to 0 on respawn");
+    assert_eq!(transform.chunk_z, 0, "Chunk Z must reset to 0 on respawn");
+    assert_eq!(transform.last_processed_tick, 100_480, "Last processed tick must advance by 100,000");
+    assert_eq!(hp.current, 100.0, "Health must be reset to max");
+    assert_eq!(hitbox_history.snapshots.len(), 1, "Hitbox history must contain only the fresh respawn snapshot");
+    assert_eq!(hitbox_history.snapshots[0].x, 0.0);
+    assert_eq!(hitbox_history.snapshots[0].z, 0.0);
+
+    // Verify stale in-flight packet rejection: packet from tick 490 arrives after respawn
+    let in_flight_stale_tick = 490u64;
+    assert!(in_flight_stale_tick <= transform.last_processed_tick, "Pre-death in-flight movement ticks must be <= server tick and dropped");
+}

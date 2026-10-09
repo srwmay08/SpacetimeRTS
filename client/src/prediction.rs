@@ -9,7 +9,7 @@
 // displacement, applying smooth correction without false snapping or physics desyncs.
 
 use bevy::prelude::*;
-use avian3d::prelude::{Position as PhysicsPosition, LinearVelocity};
+use crate::physics::{PhysicsPosition, LinearVelocity};
 use std::collections::VecDeque;
 use crate::network::SpacetimeConnection;
 use crate::core::{NetworkTickTimer, NoClipState};
@@ -105,14 +105,16 @@ pub fn reconcile_server_state(
         &mut InputBuffer,
         &AuthoritativeState,
         &mut LocalMovementTracker,
+        Option<&mut crate::components::LogicalPosition>,
     ), Changed<AuthoritativeState>>,
+    mut client_tick: Option<ResMut<ClientTick>>,
     mut cam_settings: Option<ResMut<CharacterCameraSettings>>,
     mut transition_state: Option<ResMut<CameraTransitionState>>,
     mut rts_rig_query: Query<&mut Transform, (With<RtsCameraRig>, Without<AuthoritativeState>)>,
     noclip: Option<Res<NoClipState>>,
 ) {
     if noclip.as_ref().map_or(false, |nc| nc.is_active) {
-        for (transform, _, _, mut buffer, _, mut tracker) in query.iter_mut() {
+        for (transform, _, _, mut buffer, _, mut tracker, _) in query.iter_mut() {
             buffer.queue.clear();
             tracker.last_position = transform.translation;
         }
@@ -121,11 +123,11 @@ pub fn reconcile_server_state(
     // Architectural Note: 0.35m threshold (0.1225m^2) absorbs natural slope elevation
     // clamping and network packet timing jitter without false rollback loops.
     const TOLERANCE_SQ: f32 = 0.35 * 0.35;
-    // Hard teleport / death respawn threshold: 12.0m (144.0m^2).
-    // Prevents false positives during high-speed sprints or intra-tick prediction buffers.
-    const TELEPORT_THRESHOLD_SQ: f32 = 12.0 * 12.0;
+    // Hard teleport / death respawn threshold: 4.0m (16.0m^2).
+    // Single-tick discontinuity beyond 4m or authoritative tick leap indicates a death respawn / teleport.
+    const TELEPORT_THRESHOLD_SQ: f32 = 4.0 * 4.0;
 
-    for (mut transform, maybe_physics_pos, maybe_lin_vel, mut buffer, auth_state, mut tracker) in query.iter_mut() {
+    for (mut transform, maybe_physics_pos, maybe_lin_vel, mut buffer, auth_state, mut tracker, mut maybe_log_pos) in query.iter_mut() {
         // 1. Discard acknowledged inputs
         buffer.queue.retain(|input| input.tick_id > auth_state.last_processed_tick);
 
@@ -143,9 +145,14 @@ pub fn reconcile_server_state(
         let divergence_sq = transform.translation.distance_squared(expected_live_pos);
         let direct_dist_sq = transform.translation.distance_squared(auth_state.position);
 
-        // True hard teleport / death respawn: divergence exceeds 12m from expected live position
-        // AND the raw server distance exceeds 12m.
-        if divergence_sq > TELEPORT_THRESHOLD_SQ && direct_dist_sq > TELEPORT_THRESHOLD_SQ {
+        // Check for server-authoritative leap or distance discontinuity:
+        // - Server tick is ahead of local client tick (death respawn tick jump of 100,000)
+        // - Direct distance from raw server position exceeds teleport threshold (4m)
+        // - Divergence from expected live position exceeds teleport threshold (4m)
+        let is_tick_leap = client_tick.as_ref().map_or(false, |ct| auth_state.last_processed_tick > ct.0);
+        let is_hard_teleport = is_tick_leap || divergence_sq > TELEPORT_THRESHOLD_SQ || direct_dist_sq > TELEPORT_THRESHOLD_SQ;
+
+        if is_hard_teleport {
             // Hard teleport / death respawn detected: Flush all pre-death movement deltas,
             // zero residual physics momentum, and align player body & camera horizontally.
             buffer.queue.clear();
@@ -159,6 +166,14 @@ pub fn reconcile_server_state(
                 lin_vel.0 = Vec3::ZERO;
             }
             tracker.last_position = auth_state.position;
+
+            if let Some(ref mut log_pos) = maybe_log_pos {
+                log_pos.0 = auth_state.position;
+            }
+
+            if let Some(ref mut ct) = client_tick {
+                ct.0 = auth_state.last_processed_tick;
+            }
 
             // Level camera pitch, yaw, and reset free-look offsets
             if let Some(ref mut settings) = cam_settings {
@@ -196,10 +211,13 @@ pub fn reconcile_server_state(
 
             transform.translation = correction;
             if let Some(mut phys_pos) = maybe_physics_pos {
-                // Synchronize Avian3D PhysicsPosition so physics engine does not revert transform
+                // Synchronize Rapier3D PhysicsPosition so physics engine does not revert transform
                 phys_pos.0 = correction;
             }
             tracker.last_position = correction;
+            if let Some(ref mut log_pos) = maybe_log_pos {
+                log_pos.0 = correction;
+            }
 
             tracing::debug!(
                 "Reconciliation Rollback triggered! Corrected divergence of {:.4} units.",
@@ -274,5 +292,71 @@ pub mod tests {
 
         let rig_transform = app.world().get::<Transform>(rig_id).unwrap();
         assert_eq!(rig_transform.translation, Vec3::new(0.0, 2.0, 0.0), "RTS camera rig must snap to respawn coordinates");
+    }
+
+    #[test]
+    fn test_respawn_near_origin_reconciles_cleanly() {
+        let mut app = App::new();
+        app.add_systems(Update, reconcile_server_state);
+
+        // Player died at (3.0, 2.0, 3.0), which is < 5m from spawn (0.0, 2.0, 0.0)
+        let mut buffer = InputBuffer::default();
+        buffer.queue.push_back(BufferedInput {
+            tick_id: 50,
+            delta: Vec3::new(0.5, 0.0, 0.5),
+        });
+
+        let player_id = app.world_mut().spawn((
+            Transform::from_xyz(3.0, 2.0, 3.0).with_rotation(Quat::from_rotation_y(0.8)),
+            buffer,
+            AuthoritativeState {
+                position: Vec3::new(0.0, 2.0, 0.0),
+                last_processed_tick: 51,
+            },
+            LocalMovementTracker {
+                last_position: Vec3::new(3.0, 2.0, 3.0),
+            },
+            crate::components::LogicalPosition(Vec3::new(3.0, 2.0, 3.0)),
+        )).id();
+
+        app.update();
+
+        let player_transform = app.world().get::<Transform>(player_id).unwrap();
+        assert_eq!(player_transform.translation, Vec3::new(0.0, 2.0, 0.0), "Player must snap to spawn even if dying near origin");
+        assert_eq!(player_transform.rotation, Quat::IDENTITY);
+
+        let input_buffer = app.world().get::<InputBuffer>(player_id).unwrap();
+        assert!(input_buffer.queue.is_empty(), "Prediction queue must be cleared on near-origin respawn");
+
+        let log_pos = app.world().get::<crate::components::LogicalPosition>(player_id).unwrap();
+        assert_eq!(log_pos.0, Vec3::new(0.0, 2.0, 0.0), "LogicalPosition must be kept in sync with respawn");
+    }
+
+    #[test]
+    fn test_respawn_tick_leap_synchronizes_client_tick() {
+        let mut app = App::new();
+        app.insert_resource(ClientTick(500));
+        app.add_systems(Update, reconcile_server_state);
+
+        let player_id = app.world_mut().spawn((
+            Transform::from_xyz(50.0, 5.0, 50.0),
+            InputBuffer::default(),
+            AuthoritativeState {
+                position: Vec3::new(0.0, 2.0, 0.0),
+                // Server tick leap of +100,000 on death
+                last_processed_tick: 100_500,
+            },
+            LocalMovementTracker {
+                last_position: Vec3::new(50.0, 5.0, 50.0),
+            },
+        )).id();
+
+        app.update();
+
+        let player_transform = app.world().get::<Transform>(player_id).unwrap();
+        assert_eq!(player_transform.translation, Vec3::new(0.0, 2.0, 0.0));
+
+        let client_tick = app.world().resource::<ClientTick>();
+        assert_eq!(client_tick.0, 100_500, "ClientTick must jump to authoritative server tick on respawn leap");
     }
 }

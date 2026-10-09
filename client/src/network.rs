@@ -17,7 +17,7 @@
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::pbr::{FogFalloff, FogSettings, NotShadowCaster};
 use bevy::render::view::RenderLayers;
-use avian3d::prelude::*;
+use crate::physics::*;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
@@ -246,7 +246,7 @@ pub fn wait_for_connection(
     mut connection: ResMut<SpacetimeConnection>,
     mut player_query: Query<(
         &mut BevyTransform, 
-        Option<&mut avian3d::prelude::Position>,
+        Option<&mut PhysicsPosition>,
         &mut LinearVelocity, 
         &mut GravityScale, 
         &mut crate::prediction::LocalMovementTracker,
@@ -294,18 +294,18 @@ pub fn wait_for_connection(
 }
 
 pub fn update_spatial_subscriptions(
-    player_query: Query<&LogicalPosition, With<PlayerBody>>,
+    player_query: Query<&BevyTransform, With<PlayerBody>>,
     mut culling_state: ResMut<NetworkCullingState>,
 ) {
-    if let Ok(pos) = player_query.get_single() {
-        let current_x = (pos.0.x / 50.0).floor() as i32;
-        let current_z = (pos.0.z / 50.0).floor() as i32;
+    if let Ok(transform) = player_query.get_single() {
+        let current_x = (transform.translation.x / 50.0).floor() as i32;
+        let current_z = (transform.translation.z / 50.0).floor() as i32;
 
         if culling_state.current_chunk.0 != current_x || culling_state.current_chunk.1 != current_z {
             let center_x = (culling_state.current_chunk.0 as f32 * 50.0) + 25.0;
             let center_z = (culling_state.current_chunk.1 as f32 * 50.0) + 25.0;
             
-            if (pos.0.x - center_x).abs() > 27.0 || (pos.0.z - center_z).abs() > 27.0 {
+            if (transform.translation.x - center_x).abs() > 27.0 || (transform.translation.z - center_z).abs() > 27.0 {
                 culling_state.current_chunk = (current_x, current_z);
                 culling_state.needs_rebuild = true;
             }
@@ -323,21 +323,21 @@ pub fn sync_logical_components(
         &LogicalPosition,
         &LogicalRotation,
         &mut BevyTransform,
-        Option<&mut avian3d::prelude::Position>,
-        Option<&mut avian3d::prelude::Rotation>,
+        Option<&mut PhysicsPosition>,
+        Option<&mut PhysicsRotation>,
     ), (Without<PlayerBody>, With<NetworkEntity>)>,
 ) {
     let decay_factor = 1.0 - (-18.0_f32 * time.delta_seconds()).exp(); 
     
     for (log_pos, log_rot, mut transform, maybe_phys_pos, maybe_phys_rot) in query.iter_mut() {
-        if transform.translation.distance_squared(log_pos.0) > 36.0 { 
+        if transform.translation.distance_squared(log_pos.0) > 16.0 { 
             transform.translation = log_pos.0; 
         } else { 
             transform.translation = transform.translation.lerp(log_pos.0, decay_factor); 
         }
         transform.rotation = transform.rotation.slerp(log_rot.0, decay_factor);
 
-        // Crucial: Synchronize Avian3D kinematic position so physics engine does not fight transform
+        // Crucial: Synchronize Rapier3D kinematic position so physics engine does not fight transform
         if let Some(mut phys_pos) = maybe_phys_pos {
             phys_pos.0 = transform.translation;
         }

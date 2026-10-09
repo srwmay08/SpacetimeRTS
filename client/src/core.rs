@@ -9,7 +9,6 @@
 
 use std::collections::BTreeSet;
 use bevy::prelude::*;
-use avian3d::prelude::*;
 
 // ----------------------------------------------------------------------------
 // GAME STATES
@@ -54,7 +53,7 @@ pub enum UpdateSet {
 // PHYSICS LAYERS & COLLISION GROUPS
 // ----------------------------------------------------------------------------
 
-#[derive(PhysicsLayer, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GameLayer {
     #[default]
     Default,
@@ -64,6 +63,18 @@ pub enum GameLayer {
     /// Selective permeability layer: blocks physical movement (Units, Default),
     /// but transparent to vision raycasts / LoS queries.
     Glass,
+}
+
+impl GameLayer {
+    pub const fn bit(&self) -> u32 {
+        match self {
+            Self::Default => 1 << 0,
+            Self::Terrain => 1 << 1,
+            Self::Unit => 1 << 2,
+            Self::Environment => 1 << 3,
+            Self::Glass => 1 << 4,
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------

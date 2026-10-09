@@ -20,6 +20,7 @@ pub mod binary_sky;
 pub mod tree_colors;
 pub mod zone_editor;
 pub mod spellbook;
+pub mod spells;
 pub mod voxel_mesh;
 pub mod prng;
 pub mod trees;
@@ -27,10 +28,10 @@ pub mod props;
 pub mod creatures;
 pub mod resource_nodes;
 pub mod grass;
+pub mod physics;
 pub mod templates;
 pub mod character_customizer;
 
-use avian3d::prelude::*;
 use bevy::prelude::*;
 
 use crate::core::*;
@@ -73,7 +74,7 @@ fn main() {
                 }),
                 ..default()
             }),
-            PhysicsPlugins::default(),
+            crate::physics::ClientRapierPhysicsPlugin,
             bevy::diagnostic::FrameTimeDiagnosticsPlugin,
             bevy::diagnostic::EntityCountDiagnosticsPlugin,
             bevy::diagnostic::SystemInformationDiagnosticsPlugin,
@@ -193,10 +194,12 @@ fn main() {
         // SpacetimeDB table sync and subscription streams
         // ==========================================
         .add_systems(Update, (
-            sync_transforms,
-            crate::prediction::reconcile_server_state,
-            update_spatial_subscriptions,
-            sync_logical_components,
+            (
+                sync_transforms,
+                crate::prediction::reconcile_server_state,
+                sync_logical_components,
+                update_spatial_subscriptions,
+            ).chain(),
             sync_resource_nodes,
             sync_structures,
             sync_door_states,
@@ -216,6 +219,7 @@ fn main() {
             update_arrow_projectiles,
             interior_occlusion_culling_system,
             update_infinite_voxel_terrain,
+            update_terrain_perimeter_skirt_system,
             spawn_modular_building_system,
             handle_building_destruction,
             spawn_or_update_view_model_weapon,
@@ -238,9 +242,11 @@ fn main() {
         // Locomotion and navmesh movement
         // ==========================================
         .add_systems(Update, (
-            player_movement_system,
-            rts_navmesh_movement_system,
-            crate::prediction::buffer_and_send_movement,
+            (
+                player_movement_system,
+                rts_navmesh_movement_system,
+                crate::prediction::buffer_and_send_movement,
+            ).chain(),
         ).in_set(UpdateSet::Physics))
 
         // ==========================================
@@ -417,6 +423,7 @@ mod tests {
         check_system!(update_arrow_projectiles);
         check_system!(interior_occlusion_culling_system);
         check_system!(update_infinite_voxel_terrain);
+        check_system!(update_terrain_perimeter_skirt_system);
         check_system!(spawn_modular_building_system);
         check_system!(handle_building_destruction);
         check_system!(spawn_or_update_view_model_weapon);

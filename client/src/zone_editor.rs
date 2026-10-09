@@ -15,7 +15,7 @@
 
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::window::PrimaryWindow;
-use avian3d::prelude::*;
+use crate::physics::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{OnceLock, RwLock};
 use tracing::info;
@@ -608,7 +608,7 @@ pub fn handle_editor_brush_painting(
                                 ..default()
                             },
                             RigidBody::Dynamic,
-                            Collider::cylinder(0.9, 0.35),
+                            Collider::cylinder(0.40, 1.8),
                             ColliderDensity(1.0),
                             StampedUnit,
                         ));
@@ -622,7 +622,7 @@ pub fn handle_editor_brush_painting(
                                 ..default()
                             },
                             RigidBody::Dynamic,
-                            Collider::cylinder(0.9, 0.35),
+                            Collider::cylinder(0.35, 1.4),
                             ColliderDensity(1.0),
                             StampedUnit,
                         ));
@@ -636,7 +636,7 @@ pub fn handle_editor_brush_painting(
                                 ..default()
                             },
                             RigidBody::Dynamic,
-                            Collider::cylinder(0.9, 0.5),
+                            Collider::cylinder(0.45, 1.8),
                             ColliderDensity(1.0),
                             StampedUnit,
                         ));
@@ -650,7 +650,7 @@ pub fn handle_editor_brush_painting(
                                 ..default()
                             },
                             RigidBody::Dynamic,
-                            Collider::cylinder(0.8, 0.45),
+                            Collider::cylinder(0.45, 0.9),
                             ColliderDensity(1.0),
                             StampedUnit,
                         ));

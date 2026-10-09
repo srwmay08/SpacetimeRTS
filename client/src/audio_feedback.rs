@@ -298,7 +298,7 @@ pub fn play_sound(commands: &mut Commands, handle: &Handle<AudioSource>) {
 // COMBAT EVENT DISPATCHER & SENSORY FEEDBACK SYSTEM
 // ----------------------------------------------------------------------------
 
-use avian3d::prelude::{LinearVelocity, RigidBody};
+use crate::physics::{LinearVelocity, RigidBody};
 use spacetimedb_sdk::Table;
 use crate::network::SpacetimeConnection;
 use crate::core::EventTracker;

@@ -160,6 +160,8 @@ Eliminates shadow acne (black self-shadowing patterns) and harsh cascade boundar
 | `killall` | — | Destroys all active non-player entities in the server. |
 | `nuke` / `blast` | `[radius]` | Triggers a destructive spherical voxel demolition blast. |
 | `seed` | `[number\|random]` | Views current world seed, configures an explicit seed, or generates a new random seed. |
+| `bedrock` | `[on\|off\|toggle]` | **Toggles Bedrock Foundation**: Enables or disables the -120.0m indestructible magma floor and Rapier3D collision (e.g. `bedrock off`, `bedrock on`). When disabled, subterranean chunks rebuild without the floor and the void safety clamp is bypassed. |
+| `terrain bedrock` | `[on\|off\|toggle]` | Alias for `bedrock` command. |
 
 ---
 

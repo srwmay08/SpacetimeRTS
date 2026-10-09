@@ -13,6 +13,9 @@ pub mod crafting;
 pub mod console;
 pub mod combat_feedback;
 pub mod skills;
+pub mod options;
+pub mod spellbook;
+pub mod hotbar;
 
 pub use types::*;
 pub use setup::*;

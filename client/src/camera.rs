@@ -2,7 +2,7 @@ use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::window::{CursorGrabMode, PrimaryWindow};
 use bevy::render::view::RenderLayers;
-use avian3d::prelude::*;
+use crate::physics::*;
 use tracing::info; 
 
 use crate::core::*;

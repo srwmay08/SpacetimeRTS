@@ -2,7 +2,7 @@
 // File: client/src/subterrain.rs
 // ============================================================================
 // ----------------------------------------------------------------------------
-// SUBTERRANEAN VORONOI STRATA & TUNNEL ENGINE (Bevy / SpacetimeDB / Avian3D)
+// SUBTERRANEAN VORONOI STRATA & TUNNEL ENGINE (Bevy / SpacetimeDB / Rapier3D)
 // ----------------------------------------------------------------------------
 // Architectural Note: Implements deterministic smashed-cuboid Voronoi cell
 // excavation and vertical windowing. Decoupled from surface terrain streaming
@@ -35,6 +35,18 @@ pub const BEDROCK_ELEVATION: f32 = -120.0;
 pub const VOXEL_SIZE: f32 = 1.0;
 pub const LOW_POLY_CHUNK_SPAN: f32 = 16.0;
 pub const LOW_POLY_QUAD_SIZE: f32 = 1.0;
+
+static BEDROCK_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+#[inline]
+pub fn is_bedrock_enabled() -> bool {
+    BEDROCK_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[inline]
+pub fn set_bedrock_enabled(enabled: bool) {
+    BEDROCK_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
 
 // Subterranean ECS Components
 #[derive(Component)]
@@ -324,7 +336,7 @@ fn push_unshared_face(
 // ----------------------------------------------------------------------------
 // Architectural Note:
 // 1. Bedrock Foundation: Always generated at y = -120.0m with glowing magma cracks
-//    and Avian3D trimesh collision. Prevents any entity from falling into the void.
+//    and Rapier3D trimesh collision. Prevents any entity from falling into the void.
 // 2. Natural Caves: Generates smooth, organic, faceted low-poly surfaces (Surface Nets)
 //    without 1x1 stepped voxel staircases. Caves have complete, solid floors and ceilings.
 // 3. Player Excavations: Generates conformal Voronoi smashed cuboids revealing the
@@ -340,6 +352,15 @@ pub fn mesh_subterrain_chunk(
     cx: i32,
     cz: i32,
 ) -> Option<Mesh> {
+    mesh_subterrain_chunk_ex(db_chunks, cx, cz, is_bedrock_enabled())
+}
+
+pub fn mesh_subterrain_chunk_ex(
+    db_chunks: &BTreeMap<u64, VoxelChunk>,
+    cx: i32,
+    cz: i32,
+    bedrock_enabled: bool,
+) -> Option<Mesh> {
     let chunk_base_x = cx as f32 * LOW_POLY_CHUNK_SPAN;
     let chunk_base_z = cz as f32 * LOW_POLY_CHUNK_SPAN;
 
@@ -352,31 +373,33 @@ pub fn mesh_subterrain_chunk(
 
     // 1. Indestructible Bedrock Foundation (-120.0m)
     // Spans the full 16x16 chunk. Guaranteed solid floor that catches falling players.
-    let by = BEDROCK_ELEVATION; // -120.0
-    for bz in 0..16 {
-        for bx in 0..16 {
-            let x0 = bx as f32 * LOW_POLY_QUAD_SIZE;
-            let x1 = (bx + 1) as f32 * LOW_POLY_QUAD_SIZE;
-            let z0 = bz as f32 * LOW_POLY_QUAD_SIZE;
-            let z1 = (bz + 1) as f32 * LOW_POLY_QUAD_SIZE;
+    if bedrock_enabled {
+        let by = BEDROCK_ELEVATION; // -120.0
+        for bz in 0..16 {
+            for bx in 0..16 {
+                let x0 = bx as f32 * LOW_POLY_QUAD_SIZE;
+                let x1 = (bx + 1) as f32 * LOW_POLY_QUAD_SIZE;
+                let z0 = bz as f32 * LOW_POLY_QUAD_SIZE;
+                let z1 = (bz + 1) as f32 * LOW_POLY_QUAD_SIZE;
 
-            let world_bx = (cx * 16 + bx as i32) as f32 + 0.5;
-            let world_bz = (cz * 16 + bz as i32) as f32 + 0.5;
-            let magma_seed = ((world_bx * 0.28).sin() * (world_bz * 0.28).cos()).abs();
-            let col = if magma_seed > 0.65 {
-                [2.2, 0.45, 0.08, 1.0] // Glowing magma crack (HDR emissive bloom)
-            } else {
-                [0.10, 0.10, 0.13, 1.0] // Dark obsidian / basalt
-            };
+                let world_bx = (cx * 16 + bx as i32) as f32 + 0.5;
+                let world_bz = (cz * 16 + bz as i32) as f32 + 0.5;
+                let magma_seed = ((world_bx * 0.28).sin() * (world_bz * 0.28).cos()).abs();
+                let col = if magma_seed > 0.65 {
+                    [2.2, 0.45, 0.08, 1.0] // Glowing magma crack (HDR emissive bloom)
+                } else {
+                    [0.10, 0.10, 0.13, 1.0] // Dark obsidian / basalt
+                };
 
-            let v0 = Vec3::new(x0, by, z0);
-            let v1 = Vec3::new(x0, by, z1);
-            let v2 = Vec3::new(x1, by, z1);
-            let v3 = Vec3::new(x1, by, z0);
-            push_unshared_face(
-                &mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx,
-                v0, v1, v2, v3, col, chunk_base_x, chunk_base_z
-            );
+                let v0 = Vec3::new(x0, by, z0);
+                let v1 = Vec3::new(x0, by, z1);
+                let v2 = Vec3::new(x1, by, z1);
+                let v3 = Vec3::new(x1, by, z0);
+                push_unshared_face(
+                    &mut positions, &mut normals, &mut colors, &mut uvs, &mut indices, &mut curr_idx,
+                    v0, v1, v2, v3, col, chunk_base_x, chunk_base_z
+                );
+            }
         }
     }
 
@@ -426,6 +449,9 @@ pub fn mesh_subterrain_chunk(
     // Optimization: Solid stone chunk without cavities returns immediately with bedrock floor.
     // Skips allocating the 50,000-voxel grid and evaluating thousands of 3D noise calls!
     if !has_excavation && !has_cave {
+        if positions.is_empty() {
+            return None;
+        }
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
@@ -744,6 +770,10 @@ pub fn mesh_subterrain_chunk(
         }
     }
 
+    if positions.is_empty() {
+        return None;
+    }
+
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
@@ -844,5 +874,20 @@ mod tests {
         assert!(!positions.is_empty());
         assert_eq!(normals.len(), positions.len());
         assert_eq!(colors.len(), positions.len());
+    }
+
+    #[test]
+    fn test_subterrain_mesh_disabled_bedrock() {
+        let db_chunks = BTreeMap::new();
+        let mesh = mesh_subterrain_chunk_ex(&db_chunks, 0, 0, false);
+        if let Some(ref m) = mesh {
+            if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) = m.attribute(Mesh::ATTRIBUTE_POSITION) {
+                for pos in positions {
+                    assert!((pos[1] - BEDROCK_ELEVATION).abs() >= 1e-3, "Bedrock floor at y = -120.0m must not be generated when bedrock is disabled");
+                }
+            }
+        }
+        let mesh_enabled = mesh_subterrain_chunk_ex(&db_chunks, 0, 0, true);
+        assert!(mesh_enabled.is_some(), "When bedrock is enabled, bedrock floor mesh is generated");
     }
 }

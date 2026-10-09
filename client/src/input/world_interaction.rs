@@ -5,7 +5,7 @@
 // WORLD INTERACTION PROMPT & IDENTIFIER RESOLUTION HELPERS
 // ----------------------------------------------------------------------------
 
-use avian3d::prelude::*;
+use crate::physics::*;
 use bevy::prelude::*;
 
 use crate::components::*;
@@ -71,7 +71,7 @@ pub fn update_interaction_prompt(
     let dir = cam_transform.forward();
 
     let hit = spatial_query.cast_ray(
-        origin, dir.into(), 7.0, true,
+        origin, *dir, 7.0, true,
         SpatialQueryFilter::from_mask([GameLayer::Environment, GameLayer::Default])
             .with_excluded_entities([player_entity]),
     );

@@ -168,7 +168,7 @@ pub struct Door {
 pub struct GlassPane;
 
 /// Client-side purely visual entity animating a server-scheduled lethal fall.
-/// Has no Rapier / Avian rigid body; simply animates the fall vector over duration.
+/// Has no Rapier rigid body; simply animates the fall vector over duration.
 #[derive(Component, Clone, Debug)]
 pub struct VisualFallHazard {
     pub hazard_id: u64,

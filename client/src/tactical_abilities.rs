@@ -12,7 +12,7 @@
 // 3. Movement Synergy: Phase Dash and Grav-Lift directly multiply FPS gunplay mobility,
 //    forcing opponents to adjust aim rather than just absorbing damage.
 
-use avian3d::prelude::*;
+use crate::physics::*;
 use bevy::prelude::{Transform as BevyTransform, *};
 use tracing::info;
 

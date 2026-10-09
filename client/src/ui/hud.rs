@@ -282,7 +282,7 @@ pub fn update_reticle_crosshair_ui(
     settings: Res<CrosshairSettings>,
     weapon_state: Res<crate::weapons::WeaponState>,
     camera_mode: Res<State<CameraMode>>,
-    player_q: Query<&avian3d::prelude::LinearVelocity, With<PlayerBody>>,
+    player_q: Query<&crate::physics::LinearVelocity, With<PlayerBody>>,
     mut root_q: Query<&mut Visibility, With<ReticleHudRoot>>,
     mut arms_q: Query<(&ReticleCrosshairArm, &mut Style, &mut BackgroundColor, &mut BorderColor), Without<ReticleCrosshairDot>>,
     mut dot_q: Query<(&mut Style, &mut BackgroundColor), (With<ReticleCrosshairDot>, Without<ReticleCrosshairArm>)>,

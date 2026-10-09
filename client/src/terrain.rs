@@ -2,7 +2,7 @@
 // File: terrain.rs
 // ============================================================================
 // ----------------------------------------------------------------------------
-// PROCEDURAL VOXEL & CONTINUOUS TERRAIN SYSTEM (Bevy Engine / SpacetimeDB / Avian3D)
+// PROCEDURAL VOXEL & CONTINUOUS TERRAIN SYSTEM (Bevy Engine / SpacetimeDB / Rapier3D)
 // ----------------------------------------------------------------------------
 // Architectural Note: Implements noise-driven procedural voxel terrain streaming
 // via `bevy_voxel_world` while preserving full deterministic synchronization with
@@ -14,12 +14,12 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
 use bevy::pbr::NotShadowCaster;
-use avian3d::prelude::*;
+use crate::physics::*;
 use bevy_voxel_world::prelude::{
     ChunkDespawnStrategy, ChunkSpawnStrategy, VoxelLookupDelegate, VoxelWorldCamera, VoxelWorldConfig, VoxelWorldPlugin, WorldVoxel,
 };
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use spacetimedb_sdk::Table;
@@ -42,7 +42,7 @@ pub const LOW_POLY_QUADS_PER_AXIS: usize = 16; // 16 quads per chunk
 pub const LOW_POLY_QUAD_SIZE: f32 = LOW_POLY_CHUNK_SPAN / LOW_POLY_QUADS_PER_AXIS as f32; // 1.0m low-poly facet scale
 pub const LOW_POLY_RADIUS_CHUNKS: i32 = 14; // 224m radius (reduced by 20% from 288m for performance optimization)
 pub const LOW_POLY_UNLOAD_RADIUS_CHUNKS: i32 = 15; // 240m radius (immediately beyond 230.4m fog visual limit)
-pub const LOW_POLY_NEAR_COLLIDER_DIST_SQ: f32 = 48.0 * 48.0; // 48m radius for Avian3D physics colliders
+pub const LOW_POLY_NEAR_COLLIDER_DIST_SQ: f32 = 48.0 * 48.0; // 48m radius for Rapier3D physics colliders
 pub const LOW_POLY_FAR_COLLIDER_UNLOAD_SQ: f32 = 56.0 * 56.0; // 56m radius hysteresis for collider unloading
 
 // Material constants & procedural noise evaluators re-exported from subterrain module
@@ -53,7 +53,7 @@ pub use crate::subterrain::{
     MAT_BEDROCK, MAT_IRON_ORE, MAT_RUBY, MAT_COLLAPSED_RUBBLE, BEDROCK_ELEVATION,
     is_dungeon_cavity_at, is_cave_air_at, procedural_stone_or_ore,
     SubterrainChunkVisual, SubterrainChunkHasCollider, SubterrainChunkMarker,
-    mesh_subterrain_chunk,
+    mesh_subterrain_chunk, mesh_subterrain_chunk_ex, is_bedrock_enabled, set_bedrock_enabled,
 };
 
 // ----------------------------------------------------------------------------
@@ -781,6 +781,9 @@ pub fn mesh_voxel_chunk_surface_nets(
 pub struct TerrainChunkVisual;
 
 #[derive(Component)]
+pub struct TerrainPerimeterSkirt;
+
+#[derive(Component)]
 pub struct TerrainChunkHasCollider;
 
 pub fn update_infinite_voxel_terrain(
@@ -797,6 +800,8 @@ pub fn update_infinite_voxel_terrain(
     mut loaded_sub_entities: Local<BTreeMap<u64, (Entity, u64, bool)>>,
     mut last_player_chunk: Local<Option<(i32, i32)>>,
     mut active_seed: Local<Option<u32>>,
+    mut last_bedrock_state: Local<Option<bool>>,
+    mut empty_sub_chunks: Local<BTreeSet<u64>>,
 ) {
     if USE_VOXEL_WORLD_TERRAIN {
         return;
@@ -824,9 +829,29 @@ pub fn update_infinite_voxel_terrain(
             }
             loaded_entities.clear();
             loaded_sub_entities.clear();
+            empty_sub_chunks.clear();
             return;
         }
     }
+
+    // Synchronize bedrock state with TerrainRenderSettings / Subterrain atomic
+    let cur_bedrock = if let Some(ref rs) = render_settings {
+        rs.bedrock_enabled
+    } else {
+        crate::subterrain::is_bedrock_enabled()
+    };
+    if crate::subterrain::is_bedrock_enabled() != cur_bedrock {
+        crate::subterrain::set_bedrock_enabled(cur_bedrock);
+    }
+    if last_bedrock_state.map_or(false, |b| b != cur_bedrock) {
+        info!("Bedrock state changed to {}. Rebuilding subterranean chunks.", cur_bedrock);
+        for (entity, _, _, _) in sub_chunk_query.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
+        loaded_sub_entities.clear();
+        empty_sub_chunks.clear();
+    }
+    *last_bedrock_state = Some(cur_bedrock);
 
     let Ok(player_transform) = player_query.get_single() else { return; };
 
@@ -851,6 +876,17 @@ pub fn update_infinite_voxel_terrain(
         .map(|c| (c.chunk_key, c))
         .collect();
 
+    let mut chunk_max_mod_ticks: BTreeMap<(i32, i32), u64> = BTreeMap::new();
+    let mut excavated_chunks: BTreeSet<(i32, i32)> = BTreeSet::new();
+    for c in db_chunks.values() {
+        let coord = (c.chunk_x, c.chunk_z);
+        let entry = chunk_max_mod_ticks.entry(coord).or_insert(0);
+        *entry = (*entry).max(c.last_modified_tick);
+        if c.voxels.iter().any(|&m| m == 0) {
+            excavated_chunks.insert(coord);
+        }
+    }
+
     loaded_entities.clear();
     for (entity, marker, _, has_col) in chunk_query.iter() {
         loaded_entities.insert(marker.chunk_key, (entity, marker.last_modified_tick, has_col.is_some()));
@@ -868,11 +904,7 @@ pub fn update_infinite_voxel_terrain(
         let chunk_center_z = (cz as f32 + 0.5) * chunk_world_span;
         let dist_sq = (chunk_center_x - p_pos.x).powi(2) + (chunk_center_z - p_pos.z).powi(2);
 
-        let server_mod_tick = db_chunks.values()
-            .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
-            .map(|c| c.last_modified_tick)
-            .max()
-            .unwrap_or(0);
+        let server_mod_tick = chunk_max_mod_ticks.get(&(cx, cz)).copied().unwrap_or(0);
 
         let editor_dirty = crate::zone_editor::consume_chunk_dirty(cx, cz);
         if server_mod_tick > last_tick || editor_dirty {
@@ -913,14 +945,11 @@ pub fn update_infinite_voxel_terrain(
         let chunk_center_z = (cz as f32 + 0.5) * chunk_world_span;
         let dist_sq = (chunk_center_x - p_pos.x).powi(2) + (chunk_center_z - p_pos.z).powi(2);
 
-        let server_mod_tick = db_chunks.values()
-            .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
-            .map(|c| c.last_modified_tick)
-            .max()
-            .unwrap_or(0);
+        let server_mod_tick = chunk_max_mod_ticks.get(&(cx, cz)).copied().unwrap_or(0);
 
         if server_mod_tick > last_tick {
-            if let Some(new_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz) {
+            empty_sub_chunks.remove(&key);
+            if let Some(new_mesh) = mesh_subterrain_chunk_ex(&db_chunks, cx, cz, cur_bedrock) {
                 let mesh_handle = meshes.add(new_mesh.clone());
                 let mut entity_cmds = commands.entity(existing_entity);
                 entity_cmds.insert(mesh_handle);
@@ -980,9 +1009,9 @@ pub fn update_infinite_voxel_terrain(
 
             let key = pack_chunk_key(cx, 0, cz);
             let needs_surface = !loaded_entities.contains_key(&key);
-            let has_excavation = db_chunks.values().any(|c| c.chunk_x == cx && c.chunk_z == cz && c.voxels.iter().any(|&m| m == 0));
+            let has_excavation = excavated_chunks.contains(&(cx, cz));
             let should_spawn_sub = is_player_underground || has_excavation || dist_sq <= 4;
-            let needs_sub = !loaded_sub_entities.contains_key(&key) && should_spawn_sub;
+            let needs_sub = !loaded_sub_entities.contains_key(&key) && !empty_sub_chunks.contains(&key) && should_spawn_sub;
 
             if needs_surface || needs_sub {
                 candidates.push((cx, cz, dist_sq, key, needs_surface, needs_sub));
@@ -996,11 +1025,7 @@ pub fn update_infinite_voxel_terrain(
     let max_spawn_this_frame = spawn_batch.max(immediate_unspawned);
 
     for (cx, cz, dist_sq_chunks, key, needs_surface, needs_sub) in candidates.into_iter().take(max_spawn_this_frame) {
-        let db_mod_tick = db_chunks.values()
-            .filter(|c| c.chunk_x == cx && c.chunk_z == cz)
-            .map(|c| c.last_modified_tick)
-            .max()
-            .unwrap_or(0);
+        let db_mod_tick = chunk_max_mod_ticks.get(&(cx, cz)).copied().unwrap_or(0);
 
         let chunk_world_x = cx as f32 * chunk_world_span;
         let chunk_world_z = cz as f32 * chunk_world_span;
@@ -1046,41 +1071,43 @@ pub fn update_infinite_voxel_terrain(
         // Optimization: When the player is on the surface, only spawn subterranean chunks if they
         // contain player excavations or open cave/dungeon shafts. Solid enclosed earth is skipped.
         if needs_sub {
-            if let Some(sub_mesh) = mesh_subterrain_chunk(&db_chunks, cx, cz) {
-                    let sub_collider = if needs_collider {
-                        Collider::trimesh_from_mesh(&sub_mesh)
-                    } else {
-                        None
-                    };
+            if let Some(sub_mesh) = mesh_subterrain_chunk_ex(&db_chunks, cx, cz, cur_bedrock) {
+                let sub_collider = if needs_collider {
+                    Collider::trimesh_from_mesh(&sub_mesh)
+                } else {
+                    None
+                };
 
-                    let sub_mesh_handle = meshes.add(sub_mesh);
-                    let mut sub_entity_cmds = commands.spawn((
-                        PbrBundle {
-                            mesh: sub_mesh_handle,
-                            material: mat_handle.clone(),
-                            transform: BevyTransform::from_xyz(chunk_world_x, 0.0, chunk_world_z),
-                            ..default()
-                        },
-                        // AI_RULES.md Directive 5.2: Subterranean chunks are deep underground or enclosed.
-                        // Tagging with NotShadowCaster eliminates thousands of redundant shadow cascade raster passes!
-                        NotShadowCaster,
-                        RigidBody::Static,
-                        CollisionLayers::new([GameLayer::Terrain], [GameLayer::Default, GameLayer::Unit, GameLayer::Environment]),
-                        SubterrainChunkMarker {
-                            chunk_key: key,
-                            chunk_x: cx,
-                            chunk_z: cz,
-                            last_modified_tick: db_mod_tick,
-                            center_window_y: 0,
-                        },
-                        SubterrainChunkVisual,
-                    ));
+                let sub_mesh_handle = meshes.add(sub_mesh);
+                let mut sub_entity_cmds = commands.spawn((
+                    PbrBundle {
+                        mesh: sub_mesh_handle,
+                        material: mat_handle.clone(),
+                        transform: BevyTransform::from_xyz(chunk_world_x, 0.0, chunk_world_z),
+                        ..default()
+                    },
+                    // AI_RULES.md Directive 5.2: Subterranean chunks are deep underground or enclosed.
+                    // Tagging with NotShadowCaster eliminates thousands of redundant shadow cascade raster passes!
+                    NotShadowCaster,
+                    RigidBody::Static,
+                    CollisionLayers::new([GameLayer::Terrain], [GameLayer::Default, GameLayer::Unit, GameLayer::Environment]),
+                    SubterrainChunkMarker {
+                        chunk_key: key,
+                        chunk_x: cx,
+                        chunk_z: cz,
+                        last_modified_tick: db_mod_tick,
+                        center_window_y: 0,
+                    },
+                    SubterrainChunkVisual,
+                ));
 
-                    if let Some(col) = sub_collider {
-                        sub_entity_cmds.insert((col, SubterrainChunkHasCollider));
-                    }
+                if let Some(col) = sub_collider {
+                    sub_entity_cmds.insert((col, SubterrainChunkHasCollider));
                 }
+            } else {
+                empty_sub_chunks.insert(key);
             }
+        }
         }
 
     // 4. Despawn distant surface & subterrain chunks beyond fog visual limit efficiently
@@ -1142,6 +1169,215 @@ pub fn update_infinite_voxel_terrain(
     }
 }
 
+/// Builds a perimeter skirt mesh enclosing the outer boundary of all currently loaded terrain chunks.
+/// Extends from surface terrain height down to `BEDROCK_ELEVATION` (-120.0m) with outward-facing normals,
+/// casting directional shadows to prevent low-angle sunlight from slipping under the world into subterranean caverns.
+pub fn build_terrain_perimeter_skirt_mesh(loaded_chunks: &BTreeSet<(i32, i32)>) -> Option<Mesh> {
+    if loaded_chunks.is_empty() {
+        return None;
+    }
+
+    let chunk_world_span = LOW_POLY_CHUNK_SPAN; // 16.0
+    let segments_per_edge = 4;
+    let bedrock_y = crate::subterrain::BEDROCK_ELEVATION; // -120.0
+
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut uvs: Vec<[f32; 2]> = Vec::new();
+    let mut colors: Vec<[f32; 4]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut curr_idx = 0u32;
+
+    let skirt_color = [0.12, 0.12, 0.15, 1.0];
+
+    // Cardinal perimeter directions: (dcx, dcz, normal, start_corner, end_corner)
+    // Corners relative to chunk (0.0 .. chunk_world_span):
+    let directions = [
+        // North (+Z edge): neighbor (cx, cz + 1). Normal: +Z. Edge from (0, span) to (span, span).
+        (0, 1, [0.0, 0.0, 1.0], [0.0, chunk_world_span], [chunk_world_span, chunk_world_span]),
+        // South (-Z edge): neighbor (cx, cz - 1). Normal: -Z. Edge from (span, 0) to (0, 0).
+        (0, -1, [0.0, 0.0, -1.0], [chunk_world_span, 0.0], [0.0, 0.0]),
+        // East (+X edge): neighbor (cx + 1, cz). Normal: +X. Edge from (span, span) to (span, 0).
+        (1, 0, [1.0, 0.0, 0.0], [chunk_world_span, chunk_world_span], [chunk_world_span, 0.0]),
+        // West (-X edge): neighbor (cx - 1, cz). Normal: -X. Edge from (0, 0) to (0, span).
+        (-1, 0, [-1.0, 0.0, 0.0], [0.0, 0.0], [0.0, chunk_world_span]),
+    ];
+
+    for &(cx, cz) in loaded_chunks {
+        let chunk_base_x = cx as f32 * chunk_world_span;
+        let chunk_base_z = cz as f32 * chunk_world_span;
+
+        for &(dcx, dcz, normal, [sx, sz], [ex, ez]) in &directions {
+            let neighbor = (cx + dcx, cz + dcz);
+            if loaded_chunks.contains(&neighbor) {
+                continue; // Shared internal edge between loaded chunks
+            }
+
+            let start_x = chunk_base_x + sx;
+            let start_z = chunk_base_z + sz;
+            let end_x = chunk_base_x + ex;
+            let end_z = chunk_base_z + ez;
+
+            for s in 0..segments_per_edge {
+                let t0 = s as f32 / segments_per_edge as f32;
+                let t1 = (s + 1) as f32 / segments_per_edge as f32;
+
+                let x_a = start_x + (end_x - start_x) * t0;
+                let z_a = start_z + (end_z - start_z) * t0;
+                let x_b = start_x + (end_x - start_x) * t1;
+                let z_b = start_z + (end_z - start_z) * t1;
+
+                let y_top_a = get_terrain_height(x_a, z_a);
+                let y_top_b = get_terrain_height(x_b, z_b);
+
+                let v_bot_a = [x_a, bedrock_y, z_a];
+                let v_bot_b = [x_b, bedrock_y, z_b];
+                let v_top_b = [x_b, y_top_b, z_b];
+                let v_top_a = [x_a, y_top_a, z_a];
+
+                positions.extend_from_slice(&[v_bot_a, v_bot_b, v_top_b, v_top_a]);
+                normals.extend_from_slice(&[normal, normal, normal, normal]);
+                colors.extend_from_slice(&[skirt_color, skirt_color, skirt_color, skirt_color]);
+                uvs.extend_from_slice(&[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+
+                indices.extend_from_slice(&[
+                    curr_idx,
+                    curr_idx + 1,
+                    curr_idx + 2,
+                    curr_idx,
+                    curr_idx + 2,
+                    curr_idx + 3,
+                ]);
+                curr_idx += 4;
+            }
+        }
+    }
+
+    if positions.is_empty() {
+        return None;
+    }
+
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
+    Some(mesh)
+}
+
+/// System that tracks the active loaded surface chunk perimeter and updates/spawns
+/// the single `TerrainPerimeterSkirt` shadow-casting boundary mesh.
+pub fn update_terrain_perimeter_skirt_system(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    chunk_query: Query<&VoxelChunkMarker, With<TerrainChunkVisual>>,
+    mut skirt_query: Query<(Entity, &Handle<Mesh>, &mut Visibility), With<TerrainPerimeterSkirt>>,
+    player_query: Query<&BevyTransform, With<PlayerBody>>,
+    ephemeris: Option<Res<crate::binary_sky::BinaryEphemerisState>>,
+    mut last_chunk_set: Local<BTreeSet<(i32, i32)>>,
+    mut last_chunk_count: Local<usize>,
+    mut last_player_chunk: Local<Option<(i32, i32)>>,
+    mut skirt_material: Local<Option<Handle<StandardMaterial>>>,
+    mut last_night_state: Local<Option<bool>>,
+) {
+    let is_night = ephemeris.as_ref().map_or(false, |e| e.star_a_elevation < -0.05 && e.star_b_elevation < -0.05);
+
+    // Update visibility if day/night transition occurred
+    if last_night_state.map_or(true, |n| n != is_night) {
+        *last_night_state = Some(is_night);
+        for (_, _, mut vis) in skirt_query.iter_mut() {
+            *vis = if is_night { Visibility::Hidden } else { Visibility::Inherited };
+        }
+    }
+
+    let p_chunk = player_query.get_single().ok().map(|t| {
+        let chunk_world_span = LOW_POLY_CHUNK_SPAN;
+        (
+            (t.translation.x / chunk_world_span).floor() as i32,
+            (t.translation.z / chunk_world_span).floor() as i32,
+        )
+    });
+
+    let chunk_count = chunk_query.iter().count();
+
+    // Fast path: if chunk count and player chunk haven't changed and we already have a mesh, skip rebuilding
+    if !last_chunk_set.is_empty()
+        && chunk_count == *last_chunk_count
+        && p_chunk == *last_player_chunk
+    {
+        return;
+    }
+
+    *last_chunk_count = chunk_count;
+    *last_player_chunk = p_chunk;
+
+    let current_chunks: BTreeSet<(i32, i32)> = chunk_query
+        .iter()
+        .map(|marker| {
+            let (cx, _, cz) = unpack_chunk_key(marker.chunk_key);
+            (cx, cz)
+        })
+        .collect();
+
+    if current_chunks == *last_chunk_set {
+        return;
+    }
+
+    if current_chunks.is_empty() {
+        for (entity, _, _) in skirt_query.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
+        last_chunk_set.clear();
+        return;
+    }
+
+    if let Some(new_mesh) = build_terrain_perimeter_skirt_mesh(&current_chunks) {
+        if let Ok((_entity, mesh_handle, mut vis)) = skirt_query.get_single_mut() {
+            if let Some(mesh) = meshes.get_mut(mesh_handle) {
+                *mesh = new_mesh;
+            }
+            *vis = if is_night { Visibility::Hidden } else { Visibility::Inherited };
+        } else {
+            // Despawn any duplicate skirt entities if present
+            for (entity, _, _) in skirt_query.iter() {
+                commands.entity(entity).despawn_recursive();
+            }
+
+            let mat = skirt_material
+                .get_or_insert_with(|| {
+                    materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.08, 0.08, 0.10),
+                        perceptual_roughness: 0.95,
+                        reflectance: 0.1,
+                        cull_mode: None,
+                        ..default()
+                    })
+                })
+                .clone();
+
+            commands.spawn((
+                PbrBundle {
+                    mesh: meshes.add(new_mesh),
+                    material: mat,
+                    transform: BevyTransform::IDENTITY,
+                    visibility: if is_night { Visibility::Hidden } else { Visibility::Inherited },
+                    ..default()
+                },
+                TerrainPerimeterSkirt,
+                // Skirt intentionally casts shadows (no NotShadowCaster) to block subterranean sunlight leaking!
+            ));
+        }
+    } else {
+        for (entity, _, _) in skirt_query.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+
+    *last_chunk_set = current_chunks;
+}
+
 pub fn spawn_initial_world(
     mut commands: Commands, 
     mut meshes: ResMut<Assets<Mesh>>, 
@@ -1163,7 +1399,11 @@ pub fn spawn_initial_world(
             ..default()
         },
         RigidBody::Dynamic, 
-        Collider::cuboid(0.5, 0.8, 0.9), 
+        Collider::compound(vec![(
+            Vec3::new(0.0, 0.29, 0.0),
+            Quat::IDENTITY,
+            Collider::cuboid(0.35, 0.58, 0.65),
+        )]), 
         ColliderDensity(1.0),
         LockedAxes::ROTATION_LOCKED, 
         GravityScale(4.5),
@@ -1551,5 +1791,35 @@ mod tests {
         assert_ne!(k_base, k_adj_x);
         assert_ne!(k_base, k_adj_y);
         assert_ne!(k_base, k_adj_z);
+    }
+
+    #[test]
+    fn test_terrain_perimeter_skirt_mesh_generation() {
+        let mut loaded = BTreeSet::new();
+
+        // 1. Empty loaded set returns None
+        assert!(build_terrain_perimeter_skirt_mesh(&loaded).is_none());
+
+        // 2. Single isolated chunk (0, 0): all 4 edges are perimeter
+        loaded.insert((0, 0));
+        let mesh_single = build_terrain_perimeter_skirt_mesh(&loaded).expect("Single chunk must produce skirt");
+        let positions = mesh_single.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
+        // 4 edges * 4 segments * 4 vertices = 64 vertices
+        assert_eq!(positions.len(), 64);
+        let normals = mesh_single.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap().as_float3().unwrap();
+        assert_eq!(normals.len(), 64);
+
+        // Verify bottom vertices reach BEDROCK_ELEVATION (-120.0)
+        let has_bedrock_v = positions.iter().any(|p| (p[1] - crate::subterrain::BEDROCK_ELEVATION).abs() < 1e-3);
+        assert!(has_bedrock_v, "Skirt must anchor to bedrock elevation (-120.0m)");
+
+        // 3. 2x2 contiguous block of chunks: 8 perimeter edges (interior edges skipped)
+        loaded.insert((1, 0));
+        loaded.insert((0, 1));
+        loaded.insert((1, 1));
+        let mesh_block = build_terrain_perimeter_skirt_mesh(&loaded).expect("2x2 chunk block must produce skirt");
+        let block_positions = mesh_block.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
+        // 8 outer edges * 4 segments * 4 vertices = 128 vertices
+        assert_eq!(block_positions.len(), 128);
     }
 }

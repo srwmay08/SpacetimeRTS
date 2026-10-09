@@ -16,7 +16,7 @@
 // ----------------------------------------------------------------------------
 
 use bevy::prelude::{Transform as BevyTransform, *};
-use avian3d::prelude::*;
+use crate::physics::*;
 use crate::trees::LowPolyMeshBuilder;
 use crate::components::*;
 use crate::core::*;
@@ -714,7 +714,11 @@ pub fn spawn_corpse_visual_entity(
         LogicalRotation(Quat::IDENTITY),
         Selectable, 
         RigidBody::Kinematic, 
-        Collider::cylinder(0.2, 0.45),
+        Collider::compound(vec![(
+            Vec3::new(0.0, -0.15, 0.0),
+            Quat::IDENTITY,
+            Collider::cylinder(0.45, 0.40),
+        )]),
         Sensor,
         CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Environment, GameLayer::Glass]),
     ));
@@ -724,7 +728,7 @@ pub fn spawn_corpse_visual_entity(
             PbrBundle {
                 mesh: cache.corpse.clone(),
                 material: cache.creature_material.clone(),
-                transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                transform: Transform::from_xyz(0.0, -0.35, 0.0),
                 ..default()
             },
             RenderLayers::from_layers(&[0, 1, 2]), RTSProxy,
@@ -733,7 +737,7 @@ pub fn spawn_corpse_visual_entity(
             PbrBundle {
                 mesh: cache.corpse_ring_mesh.clone(),
                 material: cache.corpse_ring_material.clone(),
-                transform: Transform::from_xyz(0.0, 0.05, 0.0), 
+                transform: Transform::from_xyz(0.0, -0.30, 0.0), 
                 visibility: Visibility::Hidden, 
                 ..default()
             },
@@ -759,25 +763,60 @@ pub fn spawn_creature_visual_entity(
     let mut visual_transform = Transform::from_xyz(0.0, -1.05, 0.0);
 
     let (mesh_handle, root_collider) = if is_pet {
-        visual_transform.translation.y = -0.45;
-        (cache.pet.clone(), Collider::cuboid(0.5, 0.8, 0.9))
+        visual_transform.translation.y = -1.05;
+        (
+            cache.pet.clone(),
+            Collider::compound(vec![(
+                Vec3::new(0.0, -0.76, 0.0),
+                Quat::IDENTITY,
+                Collider::cuboid(0.35, 0.58, 0.65),
+            )]),
+        )
     } else if let Some(ref brain) = npc_brain {
         let m = match brain.ai_type {
             crate::module_bindings::AiType::Boar => {
                 visual_transform.translation.y = -1.05;
-                (cache.boar.clone(), Collider::cuboid(0.8, 0.8, 1.4))
+                (
+                    cache.boar.clone(),
+                    Collider::compound(vec![(
+                        Vec3::new(0.0, -0.58, 0.0),
+                        Quat::IDENTITY,
+                        Collider::cuboid(0.90, 0.96, 1.44),
+                    )]),
+                )
             }
             crate::module_bindings::AiType::Deer => {
                 visual_transform.translation.y = -1.05;
-                (cache.deer.clone(), Collider::cuboid(0.6, 1.8, 1.2))
+                (
+                    cache.deer.clone(),
+                    Collider::compound(vec![(
+                        Vec3::new(0.0, -0.15, 0.0),
+                        Quat::IDENTITY,
+                        Collider::cuboid(0.70, 1.80, 1.20),
+                    )]),
+                )
             }
             crate::module_bindings::AiType::Goblin => {
                 visual_transform.translation.y = -1.05;
-                (cache.goblin.clone(), Collider::capsule(0.4, 1.3))
+                (
+                    cache.goblin.clone(),
+                    Collider::compound(vec![(
+                        Vec3::new(0.0, -0.35, 0.0),
+                        Quat::IDENTITY,
+                        Collider::capsule(0.35, 0.80),
+                    )]),
+                )
             }
             crate::module_bindings::AiType::Friendly | crate::module_bindings::AiType::Peasant => {
                 visual_transform.translation.y = -1.05;
-                (cache.peasant.clone(), Collider::capsule(0.4, 1.8))
+                (
+                    cache.peasant.clone(),
+                    Collider::compound(vec![(
+                        Vec3::new(0.0, -0.15, 0.0),
+                        Quat::IDENTITY,
+                        Collider::capsule(0.40, 1.00),
+                    )]),
+                )
             }
         };
 
@@ -788,10 +827,25 @@ pub fn spawn_creature_visual_entity(
         m
     } else if is_peasant {
         visual_transform.translation.y = -1.05;
-        (cache.peasant.clone(), Collider::capsule(0.4, 1.8))
+        (
+            cache.peasant.clone(),
+            Collider::compound(vec![(
+                Vec3::new(0.0, -0.15, 0.0),
+                Quat::IDENTITY,
+                Collider::capsule(0.40, 1.00),
+            )]),
+        )
     } else {
+        // Humanoid / Remote Player
         visual_transform.translation.y = -1.05;
-        (cache.peasant.clone(), Collider::capsule(0.4, 1.8))
+        (
+            cache.peasant.clone(),
+            Collider::compound(vec![(
+                Vec3::new(0.0, -0.15, 0.0),
+                Quat::IDENTITY,
+                Collider::capsule(0.40, 1.00),
+            )]),
+        )
     };
 
     let npc_type_name = if is_pet {
@@ -936,16 +990,16 @@ pub fn setup_sparring_yard(
             base_rotation: Quat::IDENTITY,
         },
         RigidBody::Kinematic,
-    )).with_children(|parent| {
-        parent.spawn((
-            SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 1.15, 0.0)),
+        Collider::compound(vec![(
+            Vec3::new(0.0, 1.15, 0.0),
+            Quat::IDENTITY,
             Collider::capsule(0.35, 1.6),
-            CollisionLayers::new(
-                [GameLayer::Unit],
-                [GameLayer::Default, GameLayer::Environment, GameLayer::Terrain],
-            ),
-        ));
-    });
+        )]),
+        CollisionLayers::new(
+            [GameLayer::Unit],
+            [GameLayer::Default, GameLayer::Environment, GameLayer::Terrain],
+        ),
+    ));
 
     // 2. Spawning the Sparring Goblin Raider (3.0m forward-right, facing player)
     let goblin_pos = Vec3::new(spawn_x + 2.8, terrain_y + 1.08, spawn_z - 2.6);
@@ -973,7 +1027,11 @@ pub fn setup_sparring_yard(
             home_pos: goblin_pos,
         },
         RigidBody::Dynamic,
-        Collider::capsule(0.35, 1.2),
+        Collider::compound(vec![(
+            Vec3::new(0.0, -0.35, 0.0),
+            Quat::IDENTITY,
+            Collider::capsule(0.35, 0.80),
+        )]),
         ColliderDensity(1.0),
         LockedAxes::ROTATION_LOCKED,
         LinearVelocity::ZERO,
@@ -1150,6 +1208,64 @@ pub fn update_sparring_goblin_ai(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_creature_and_humanoid_hitbox_alignment() {
+        // 1. Boar compound collider (offset Y -0.58, size 0.90x0.96x1.44)
+        let boar_col = Collider::compound(vec![(
+            Vec3::new(0.0, -0.58, 0.0),
+            Quat::IDENTITY,
+            Collider::cuboid(0.90, 0.96, 1.44),
+        )]);
+        let boar_aabb = boar_col.aabb(Vec3::ZERO, Quat::IDENTITY);
+        assert!((boar_aabb.min.y - (-1.06)).abs() < 0.01, "Boar min Y: {}", boar_aabb.min.y);
+        assert!((boar_aabb.max.y - (-0.10)).abs() < 0.01, "Boar max Y: {}", boar_aabb.max.y);
+        // At root Y = ground + 1.05: bottom is ground - 0.01, top is ground + 0.95 (matches 0.85m boar)
+
+        // 2. Goblin compound collider (offset Y -0.35, radius 0.35, cylinder height 0.80)
+        let goblin_col = Collider::compound(vec![(
+            Vec3::new(0.0, -0.35, 0.0),
+            Quat::IDENTITY,
+            Collider::capsule(0.35, 0.80),
+        )]);
+        let goblin_aabb = goblin_col.aabb(Vec3::ZERO, Quat::IDENTITY);
+        assert!((goblin_aabb.min.y - (-1.10)).abs() < 0.01, "Goblin min Y: {}", goblin_aabb.min.y);
+        assert!((goblin_aabb.max.y - 0.40).abs() < 0.01, "Goblin max Y: {}", goblin_aabb.max.y);
+        // At root Y = ground + 1.05: bottom is ground - 0.05, top is ground + 1.45 (matches 1.38m goblin)
+
+        // 3. Humanoid / Peasant compound collider (offset Y -0.15, radius 0.40, cylinder height 1.00)
+        let human_col = Collider::compound(vec![(
+            Vec3::new(0.0, -0.15, 0.0),
+            Quat::IDENTITY,
+            Collider::capsule(0.40, 1.00),
+        )]);
+        let human_aabb = human_col.aabb(Vec3::ZERO, Quat::IDENTITY);
+        assert!((human_aabb.min.y - (-1.05)).abs() < 0.01, "Human min Y: {}", human_aabb.min.y);
+        assert!((human_aabb.max.y - 0.75).abs() < 0.01, "Human max Y: {}", human_aabb.max.y);
+        // At root Y = ground + 1.05: bottom is ground + 0.00, top is ground + 1.80 (matches 1.80m human)
+
+        // 4. Deer compound collider (offset Y -0.15, size 0.70x1.80x1.20)
+        let deer_col = Collider::compound(vec![(
+            Vec3::new(0.0, -0.15, 0.0),
+            Quat::IDENTITY,
+            Collider::cuboid(0.70, 1.80, 1.20),
+        )]);
+        let deer_aabb = deer_col.aabb(Vec3::ZERO, Quat::IDENTITY);
+        assert!((deer_aabb.min.y - (-1.05)).abs() < 0.01, "Deer min Y: {}", deer_aabb.min.y);
+        assert!((deer_aabb.max.y - 0.75).abs() < 0.01, "Deer max Y: {}", deer_aabb.max.y);
+        // At root Y = ground + 1.05: bottom is ground + 0.00, top is ground + 1.80 (matches 1.80m deer)
+
+        // 5. Pet compound collider (offset Y -0.76, size 0.35x0.58x0.65)
+        let pet_col = Collider::compound(vec![(
+            Vec3::new(0.0, -0.76, 0.0),
+            Quat::IDENTITY,
+            Collider::cuboid(0.35, 0.58, 0.65),
+        )]);
+        let pet_aabb = pet_col.aabb(Vec3::ZERO, Quat::IDENTITY);
+        assert!((pet_aabb.min.y - (-1.05)).abs() < 0.01, "Pet min Y: {}", pet_aabb.min.y);
+        assert!((pet_aabb.max.y - (-0.47)).abs() < 0.01, "Pet max Y: {}", pet_aabb.max.y);
+        // At root Y = ground + 1.05: bottom is ground + 0.00, top is ground + 0.58 (matches 0.58m pet)
+    }
 
     #[test]
     fn test_cached_creature_meshes_initialization() {

@@ -5,7 +5,7 @@
 // CONTEXT-AWARE COMBAT & ACTION DISPATCHER
 // ----------------------------------------------------------------------------
 
-use avian3d::prelude::*;
+use crate::physics::*;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::window::{CursorGrabMode, PrimaryWindow};
@@ -784,7 +784,7 @@ pub fn context_aware_action_dispatcher(
                                 let dir = cam_transform.forward();
                                 
                                 let hit = spatial_query.cast_ray(
-                                    origin, dir.into(), 7.0, true,
+                                    origin, *dir, 7.0, true,
                                     SpatialQueryFilter::from_mask([GameLayer::Environment, GameLayer::Default])
                                         .with_excluded_entities([player_entity]),
                                 );

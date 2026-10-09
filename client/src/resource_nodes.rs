@@ -17,7 +17,7 @@
 
 use bevy::prelude::{Transform as BevyTransform, *};
 use bevy::pbr::NotShadowCaster;
-use avian3d::prelude::*;
+use crate::physics::*;
 use std::collections::BTreeSet;
 
 use spacetimedb_sdk::Table;
@@ -101,7 +101,7 @@ pub fn get_node_unload_radius_sq(node_type: &str, max_unload_radius_sq: f32) -> 
 }
 
 /// Stores the original collider definition for dynamic physics distance culling.
-/// Prevents distant static nodes (>56m) from populating Avian3D's broadphase spatial hash.
+/// Prevents distant static nodes (>56m) from populating Rapier3D's broadphase BVH.
 #[derive(Component, Clone)]
 pub struct NodeCollider(pub Collider);
 
@@ -421,7 +421,7 @@ pub fn sync_resource_nodes(
             }
 
             // Dynamic physics collider culling with 8m hysteresis (48m near / 56m far):
-            // Strips Avian3D colliders on distant static resource nodes to relieve broadphase spatial hash.
+            // Strips Rapier3D colliders on distant static resource nodes to relieve broadphase BVH.
             if let Some(nc) = maybe_node_collider {
                 if has_collider && dist_sq > crate::terrain::LOW_POLY_FAR_COLLIDER_UNLOAD_SQ {
                     commands.entity(entity).remove::<Collider>();

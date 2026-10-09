@@ -18,6 +18,7 @@ use crate::ai::{npc_brain, pet_component, peasant, harvestable_corpse};
 use crate::building::structure;
 use crate::voxel;
 use crate::player;
+use crate::armory::WeaponCategory;
 use spacetime_rts_logic::{EquipmentSlot, ItemKind};
 
 // ----------------------------------------------------------------------------
@@ -180,10 +181,6 @@ pub fn is_weapon_two_handed(weapon_name: &str) -> bool {
             | "2h Ranged Long Bow"
             | "Crude Bow"
             | "Bow"
-            | "Shotgun"
-            | "2h Ranged Shotgun"
-            | "Sniper Rifle"
-            | "2h Ranged Sniper Rifle"
             | "Runestaff"
             | "2h Ranged Runestaff"
             | "Bouncy Bomb Launcher"
@@ -258,7 +255,21 @@ pub fn apply_damage(ctx: &ReducerContext, target_id: u64, amount: f32) {
                 transform.x = 0.0;
                 transform.z = 0.0;
                 transform.y = crate::get_terrain_height(0.0, 0.0) + 1.05;
-                transform.last_processed_tick = transform.last_processed_tick.wrapping_add(1);
+                transform.chunk_x = 0;
+                transform.chunk_z = 0;
+                transform.last_processed_tick = transform.last_processed_tick.wrapping_add(100_000);
+
+                if let Some(mut history) = ctx.db.hitbox_history().entity_id().find(target_id) {
+                    history.snapshots.clear();
+                    history.snapshots.push(Snapshot {
+                        tick_id: transform.last_processed_tick,
+                        x: 0.0,
+                        y: transform.y,
+                        z: 0.0,
+                    });
+                    ctx.db.hitbox_history().entity_id().update(history);
+                }
+
                 ctx.db.transform().entity_id().update(transform);
             }
 
@@ -529,25 +540,8 @@ pub fn fire_ranged_weapon(
     let (ndx, ndy, ndz) = (dir_x * inv_len, dir_y * inv_len, dir_z * inv_len);
 
     match weapon_name.as_str() {
-        "Revolver" | "1h Ranged Revolver" => {
-            ctx.db.active_projectile().insert(ActiveProjectile {
-                projectile_id: 0,
-                shooter_id: session.entity_id,
-                kind: ProjectileKind::RevolverBullet,
-                pos_x: origin_x + ndx * 0.6,
-                pos_y: origin_y + ndy * 0.6,
-                pos_z: origin_z + ndz * 0.6,
-                vel_x: ndx * 180.0,
-                vel_y: ndy * 180.0,
-                vel_z: ndz * 180.0,
-                gravity: 2.0,
-                drag: 0.0005,
-                damage: 46.0,
-                blast_radius: 0.0,
-                start_tick: client_tick,
-                lifetime: 2.0,
-            });
-            award_combat_xp(ctx, session.entity_id, "Firearm", 25);
+        "Revolver" | "1h Ranged Revolver" | "Shotgun" | "2h Ranged Shotgun" | "Sniper Rifle" | "2h Ranged Sniper Rifle" => {
+            return Err("Firearms have been archived from active combat.".to_string());
         }
         "Hand Crossbow" | "1h Ranged Hand Crossbow" | "Crossbow" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
@@ -567,58 +561,7 @@ pub fn fire_ranged_weapon(
                 start_tick: client_tick,
                 lifetime: 3.0,
             });
-            award_combat_xp(ctx, session.entity_id, "Missile", 20);
-        }
-        "Shotgun" | "2h Ranged Shotgun" => {
-            let pellet_spread = [
-                (0.0, 0.0), (-0.03, 0.02), (0.03, 0.02), (-0.02, -0.03), (0.02, -0.03),
-                (0.05, 0.0), (-0.05, 0.0), (0.0, 0.04), (0.0, -0.04), (0.04, 0.04),
-                (-0.04, -0.04), (0.03, -0.02)
-            ];
-            for (sx, sy) in pellet_spread {
-                let px = ndx + sx;
-                let py = ndy + sy;
-                let pz = ndz;
-                let plen = (px * px + py * py + pz * pz).sqrt();
-                ctx.db.active_projectile().insert(ActiveProjectile {
-                    projectile_id: 0,
-                    shooter_id: session.entity_id,
-                    kind: ProjectileKind::ShotgunPellet,
-                    pos_x: origin_x + px * 0.5,
-                    pos_y: origin_y + py * 0.5,
-                    pos_z: origin_z + pz * 0.5,
-                    vel_x: (px / plen) * 120.0,
-                    vel_y: (py / plen) * 120.0,
-                    vel_z: (pz / plen) * 120.0,
-                    gravity: 3.5,
-                    drag: 0.004,
-                    damage: 18.0,
-                    blast_radius: 0.0,
-                    start_tick: client_tick,
-                    lifetime: 1.0,
-                });
-            }
-            award_combat_xp(ctx, session.entity_id, "Firearm", 30);
-        }
-        "Sniper Rifle" | "2h Ranged Sniper Rifle" => {
-            ctx.db.active_projectile().insert(ActiveProjectile {
-                projectile_id: 0,
-                shooter_id: session.entity_id,
-                kind: ProjectileKind::SniperBullet,
-                pos_x: origin_x + ndx * 0.9,
-                pos_y: origin_y + ndy * 0.9,
-                pos_z: origin_z + ndz * 0.9,
-                vel_x: ndx * 820.0,
-                vel_y: ndy * 820.0,
-                vel_z: ndz * 820.0,
-                gravity: 0.8,
-                drag: 0.0001,
-                damage: 160.0,
-                blast_radius: 0.0,
-                start_tick: client_tick,
-                lifetime: 4.0,
-            });
-            award_combat_xp(ctx, session.entity_id, "Firearm", 45);
+            award_combat_xp(ctx, session.entity_id, WeaponCategory::Missile, 20);
         }
         "Runestaff" | "2h Ranged Runestaff" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
@@ -638,7 +581,7 @@ pub fn fire_ranged_weapon(
                 start_tick: client_tick,
                 lifetime: 4.0,
             });
-            award_combat_xp(ctx, session.entity_id, "Runestaff", 25);
+            award_combat_xp(ctx, session.entity_id, WeaponCategory::Runestaff, 25);
         }
         "Crude Bow" | "Longbow" | "Long Bow" | "2h Ranged Long Bow" | "Bow" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
@@ -658,7 +601,7 @@ pub fn fire_ranged_weapon(
                 start_tick: client_tick,
                 lifetime: 5.0,
             });
-            award_combat_xp(ctx, session.entity_id, "Missile", 20);
+            award_combat_xp(ctx, session.entity_id, WeaponCategory::Missile, 20);
         }
         "Wand" | "1h Ranged Wand" | "Arcane Wand" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
@@ -678,7 +621,7 @@ pub fn fire_ranged_weapon(
                 start_tick: client_tick,
                 lifetime: 3.5,
             });
-            award_combat_xp(ctx, session.entity_id, "Runestaff", 20);
+            award_combat_xp(ctx, session.entity_id, WeaponCategory::Runestaff, 20);
         }
         "Orb" | "1h Ranged Orb" | "Mystic Orb" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
@@ -698,7 +641,7 @@ pub fn fire_ranged_weapon(
                 start_tick: client_tick,
                 lifetime: 4.0,
             });
-            award_combat_xp(ctx, session.entity_id, "Runestaff", 25);
+            award_combat_xp(ctx, session.entity_id, WeaponCategory::Runestaff, 25);
         }
         "Polearm Javelin - Thrown" | "Polearm Javelin" | "Javelin" | "Thrown Javelin" => {
             ctx.db.active_projectile().insert(ActiveProjectile {
@@ -718,7 +661,7 @@ pub fn fire_ranged_weapon(
                 start_tick: client_tick,
                 lifetime: 4.0,
             });
-            award_combat_xp(ctx, session.entity_id, "Missile", 25);
+            award_combat_xp(ctx, session.entity_id, WeaponCategory::Missile, 25);
         }
         _ => return Err(format!("Weapon '{}' in {} cannot fire ranged projectiles.", weapon_name, slot)),
     }
@@ -726,19 +669,18 @@ pub fn fire_ranged_weapon(
     Ok(())
 }
 
-fn award_combat_xp(ctx: &ReducerContext, entity_id: u64, category: &str, amount: u32) {
+fn award_combat_xp(ctx: &ReducerContext, entity_id: u64, category: WeaponCategory, amount: u32) {
     if let Some(mut skill) = ctx.db.weapon_skill().entity_id().find(entity_id) {
         match category {
-            "Edged" => skill.edged_xp = skill.edged_xp.saturating_add(amount),
-            "Pointed" => skill.pointed_xp = skill.pointed_xp.saturating_add(amount),
-            "Blunt" => skill.blunt_xp = skill.blunt_xp.saturating_add(amount),
-            "TwoHanded" => skill.two_handed_xp = skill.two_handed_xp.saturating_add(amount),
-            "Polearm" => skill.polearm_xp = skill.polearm_xp.saturating_add(amount),
-            "Brawling" => skill.brawling_xp = skill.brawling_xp.saturating_add(amount),
-            "Missile" => skill.missile_xp = skill.missile_xp.saturating_add(amount),
-            "Firearm" => skill.firearm_xp = skill.firearm_xp.saturating_add(amount),
-            "Runestaff" => skill.runestaff_xp = skill.runestaff_xp.saturating_add(amount),
-            _ => {}
+            WeaponCategory::Edged => skill.edged_xp = skill.edged_xp.saturating_add(amount),
+            WeaponCategory::Pointed => skill.pointed_xp = skill.pointed_xp.saturating_add(amount),
+            WeaponCategory::Blunt => skill.blunt_xp = skill.blunt_xp.saturating_add(amount),
+            WeaponCategory::TwoHanded => skill.two_handed_xp = skill.two_handed_xp.saturating_add(amount),
+            WeaponCategory::Polearm => skill.polearm_xp = skill.polearm_xp.saturating_add(amount),
+            WeaponCategory::Brawling => skill.brawling_xp = skill.brawling_xp.saturating_add(amount),
+            WeaponCategory::Missile => skill.missile_xp = skill.missile_xp.saturating_add(amount),
+            WeaponCategory::Firearm => skill.firearm_xp = skill.firearm_xp.saturating_add(amount),
+            WeaponCategory::Runestaff => skill.runestaff_xp = skill.runestaff_xp.saturating_add(amount),
         }
         skill.generic_physical = (skill.generic_physical + (amount / 10)).min(100);
         ctx.db.weapon_skill().entity_id().update(skill);
@@ -768,7 +710,7 @@ pub fn fire_weapon(
     };
     let weapon_def = crate::armory::get_weapon_def(active_weapon_name);
     let weapon_damage = weapon_def.base_damage;
-    let skill_category = weapon_def.skill_category;
+    let skill_category = weapon_def.category;
     let xp_amount = weapon_def.xp_yield;
     let max_range = weapon_def.attack_range.max(2.0);
 
@@ -868,7 +810,12 @@ pub fn fire_weapon(
 
     let is_melee = matches!(
         skill_category,
-        "Edged" | "Blunt" | "Pointed" | "TwoHanded" | "Brawling" | "Polearm"
+        WeaponCategory::Edged
+            | WeaponCategory::Blunt
+            | WeaponCategory::Pointed
+            | WeaponCategory::TwoHanded
+            | WeaponCategory::Brawling
+            | WeaponCategory::Polearm
     );
 
     let rigid_bodies = rapier3d::prelude::RigidBodySet::new();
@@ -940,7 +887,7 @@ pub fn fire_weapon(
 
         award_combat_xp(ctx, session.entity_id, skill_category, xp_amount);
         log::debug!(
-            "Hit validated: Entity {} hit {} for {:.1} damage ({})",
+            "Hit validated: Entity {} hit {} for {:.1} damage ({:?})",
             session.entity_id, target_id, weapon_damage, skill_category
         );
     }
@@ -1006,7 +953,7 @@ pub fn fire_bow(
         lifetime: 5.0,
     });
 
-    award_combat_xp(ctx, session.entity_id, "Missile", 20);
+    award_combat_xp(ctx, session.entity_id, WeaponCategory::Missile, 20);
     log::debug!("Player {} fired authoritative arrow projectile.", session.entity_id);
     Ok(())
 }

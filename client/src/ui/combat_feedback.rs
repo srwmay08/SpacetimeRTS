@@ -175,7 +175,7 @@ pub fn visualize_selection(
 }
 
 
-use avian3d::prelude::{GravityScale, LinearVelocity};
+use crate::physics::{GravityScale, LinearVelocity};
 
 pub fn tick_particles(
     mut commands: Commands,
