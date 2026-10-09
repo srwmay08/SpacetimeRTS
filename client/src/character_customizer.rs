@@ -3301,4 +3301,14 @@ mod tests {
         physics.step();
         assert!(physics.rigid_body_set.get(root_handle).is_some());
     }
+
+    #[test]
+    fn test_low_poly_helmet_mesh_attributes() {
+        let mesh = create_low_poly_helmet();
+        assert_eq!(mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+        let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).expect("Missing positions");
+        assert!(positions.len() >= 15);
+        let normals = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).expect("Missing flat normals");
+        assert_eq!(positions.len(), normals.len());
+    }
 }
