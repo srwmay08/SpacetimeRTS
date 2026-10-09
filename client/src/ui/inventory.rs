@@ -367,6 +367,16 @@ pub fn toggle_inventory_ui(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct PaperdollTextQueries<'w, 's> {
+    pub primary_hand: Query<'w, 's, &'static mut Text, (With<PaperdollPrimaryHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    pub main_hand: Query<'w, 's, &'static mut Text, (With<PaperdollMainHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    pub off_hand: Query<'w, 's, &'static mut Text, (With<PaperdollOffHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    pub head: Query<'w, 's, &'static mut Text, (With<PaperdollHeadText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    pub bag_text: Query<'w, 's, (&'static mut Text, &'static PaperdollBagText), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagTooltip>)>,
+    pub bag_tooltip: Query<'w, 's, (&'static mut Text, &'static PaperdollBagTooltip), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>)>,
+}
+
 pub fn update_inventory_ui(
     conn: Res<SpacetimeConnection>,
     player_query: Query<&Transform, With<PlayerBody>>,
@@ -377,12 +387,7 @@ pub fn update_inventory_ui(
     mut header_q: Query<&mut Text, (With<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
     mut name_q: Query<(&mut Text, &InventorySlotName), Without<InventorySlotCount>>,
     mut count_q: Query<(&mut Text, &InventorySlotCount), Without<InventorySlotName>>,
-    mut primary_hand_text_q: Query<&mut Text, (With<PaperdollPrimaryHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
-    mut main_hand_text_q: Query<&mut Text, (With<PaperdollMainHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
-    mut off_hand_text_q: Query<&mut Text, (With<PaperdollOffHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
-    mut head_text_q: Query<&mut Text, (With<PaperdollHeadText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
-    mut bag_text_q: Query<(&mut Text, &PaperdollBagText), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagTooltip>)>,
-    mut bag_tooltip_q: Query<(&mut Text, &PaperdollBagTooltip), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>)>,
+    mut paperdoll_texts: PaperdollTextQueries,
     mut capacity_header_q: Query<&mut Text, (With<InventoryCapacityHeader>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
     mut workbench_recipe_styles: Query<&mut Style, (With<RequiresWorkbenchRecipe>, Without<InventoryUiRoot>)>,
 ) {
@@ -420,7 +425,7 @@ pub fn update_inventory_ui(
             }
 
             // Sync Paperdoll Head Armor
-            for mut text in head_text_q.iter_mut() {
+            for mut text in paperdoll_texts.head.iter_mut() {
                 let formatted = if let Some(ref helm) = equipped_armor.head {
                     format!("Head: {}", helm)
                 } else {
@@ -436,7 +441,7 @@ pub fn update_inventory_ui(
             let main_weapon = loadout.as_ref().map(|l| l.main_hand.as_str()).unwrap_or("None");
             let off_weapon = loadout.as_ref().map(|l| l.off_hand.as_str()).unwrap_or("None");
 
-            for mut text in main_hand_text_q.iter_mut() {
+            for mut text in paperdoll_texts.main_hand.iter_mut() {
                 let new_val = if main_weapon == "None" || main_weapon.is_empty() {
                     "MainHand: [Unarmed]"
                 } else {
@@ -452,7 +457,7 @@ pub fn update_inventory_ui(
                 }
             }
 
-            for mut text in off_hand_text_q.iter_mut() {
+            for mut text in paperdoll_texts.off_hand.iter_mut() {
                 let new_val = if off_weapon == "None" || off_weapon.is_empty() {
                     "OffHand: [Empty]"
                 } else {
@@ -468,7 +473,7 @@ pub fn update_inventory_ui(
                 }
             }
 
-            for mut text in primary_hand_text_q.iter_mut() {
+            for mut text in paperdoll_texts.primary_hand.iter_mut() {
                 let new_val = match hand_side.0 {
                     HandSide::Right => "[⇄] PRIMARY HAND: RIGHT [H]",
                     HandSide::Left => "[⇄] PRIMARY HAND: LEFT [H]",
@@ -479,7 +484,7 @@ pub fn update_inventory_ui(
             }
 
             // Sync Bags & Capacity
-            for (mut text, b_idx) in bag_text_q.iter_mut() {
+            for (mut text, b_idx) in paperdoll_texts.bag_text.iter_mut() {
                 let new_val = if let Some(ref bag) = equipped_bags.bags[b_idx.0] {
                     format!("Bag {}: {}", b_idx.0 + 1, bag.name)
                 } else {
@@ -490,7 +495,7 @@ pub fn update_inventory_ui(
                 }
             }
 
-            for (mut text, b_idx) in bag_tooltip_q.iter_mut() {
+            for (mut text, b_idx) in paperdoll_texts.bag_tooltip.iter_mut() {
                 let (new_val, new_col) = if let Some(ref bag) = equipped_bags.bags[b_idx.0] {
                     (
                         format!("+{} Slots | Cap: {:?} | {}% WR", bag.capacity, bag.size_cap, bag.weight_reduction_pct),
