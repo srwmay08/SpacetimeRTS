@@ -51,6 +51,9 @@ pub struct EditorBrushResizeEvent {
     pub grow: bool,
 }
 
+#[derive(Event, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct ToggleCharacterEditorEvent;
+
 #[derive(Event, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToggleWeaponTunerEvent;
 
@@ -112,6 +115,7 @@ pub struct ModalHotkeyWriters<'w> {
     pub map: EventWriter<'w, ToggleWorldMapEvent>,
     pub zone_editor: EventWriter<'w, ToggleZoneEditorEvent>,
     pub brush_resize: EventWriter<'w, EditorBrushResizeEvent>,
+    pub char_editor: EventWriter<'w, ToggleCharacterEditorEvent>,
     pub tuner: EventWriter<'w, ToggleWeaponTunerEvent>,
     pub diag: EventWriter<'w, ToggleDiagnosticOverlayEvent>,
     pub persp: EventWriter<'w, TogglePerspectiveEvent>,
@@ -178,6 +182,7 @@ pub fn hotkey_dispatch_system(
     // Function keys (Dev tools, Overlays, Tuners)
     if keys.just_pressed(KeyCode::F3) { writers.diag.send(ToggleDiagnosticOverlayEvent); }
     if keys.just_pressed(KeyCode::F4) { writers.zone_editor.send(ToggleZoneEditorEvent); }
+    if keys.just_pressed(KeyCode::F5) { writers.char_editor.send(ToggleCharacterEditorEvent); }
     if keys.just_pressed(KeyCode::F6) { writers.tuner.send(ToggleWeaponTunerEvent); }
     if keys.just_pressed(KeyCode::F7) { writers.crosshair.send(ToggleCrosshairMenuEvent); }
     if keys.just_pressed(KeyCode::F8) { writers.cel_day_night.send(CelestialCycleDayNightEvent); }

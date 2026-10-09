@@ -37,6 +37,7 @@ impl Plugin for InputPlugin {
             .add_event::<ToggleZoneEditorEvent>()
             .add_event::<EditorBrushResizeEvent>()
             .add_event::<ToggleWeaponTunerEvent>()
+            .add_event::<ToggleCharacterEditorEvent>()
             .add_event::<ToggleDiagnosticOverlayEvent>()
             .add_event::<TogglePerspectiveEvent>()
             .add_event::<ToggleSkillsSheetEvent>()

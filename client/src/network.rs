@@ -30,7 +30,6 @@ use crate::module_bindings::npc_brain_table::NpcBrainTableAccess;
 use crate::module_bindings::pet_component_table::PetComponentTableAccess; 
 use crate::core::*;
 use crate::components::*;
-use crate::creatures::create_lowpoly_peasant_mesh;
 
 const DB_NAME: &str = "hybrid-backend";
 
@@ -178,6 +177,8 @@ pub fn init_network_connection(
         ExternalForce::default().with_persistence(false),
         Kcc { is_grounded: false },
         LocomotionState::default(),
+        crate::character_customizer::AnimationState::default(),
+        crate::character_customizer::PlayerCharacterCustomization::default(),
     ));
 
     player_entity_commands.insert((
@@ -195,16 +196,6 @@ pub fn init_network_connection(
     ));
 
     player_entity_commands.with_children(|parent| {
-        parent.spawn((
-            PbrBundle {
-                mesh: meshes.add(create_lowpoly_peasant_mesh()),
-                material: materials.add(StandardMaterial { base_color: Color::WHITE, perceptual_roughness: 0.85, ..default() }),
-                transform: BevyTransform::from_xyz(0.0, -1.05, 0.0),
-                ..default()
-            },
-            RenderLayers::layer(2), 
-            RTSProxy,
-        ));
 
         parent.spawn((
             PbrBundle {

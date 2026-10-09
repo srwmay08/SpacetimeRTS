@@ -85,7 +85,7 @@ pub fn rebuild_physics_cache(ctx: &ReducerContext) {
     }
 
     // 3. Update the Broad-Phase / BVH tree (incremental update if existing, or fresh build)
-    let mut query_pipeline = match cache_guard.take() {
+    let query_pipeline = match cache_guard.take() {
         Some((_old_colliders, mut existing_pipeline)) => {
             existing_pipeline.update(&colliders);
             existing_pipeline

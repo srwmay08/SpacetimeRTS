@@ -46,6 +46,10 @@ pub const CONSOLE_COMMANDS: &[&str] = &[
     "killall",
     "tuner",
     "weapontool",
+    "customizer",
+    "char",
+    "model",
+    "morphology",
     "crosshair",
     "abilities",
     "day",
@@ -693,6 +697,9 @@ pub fn handle_console_input(
             "tuner" | "weapontool" => {
                 console.logs.push("[Admin] Weapon & Spell Tuner Workbench available via [F6] hotkey.".into());
             }
+            "customizer" | "char" | "model" | "morphology" => {
+                console.logs.push("[Admin] Character Model Customizer Studio available via [F5] hotkey.".into());
+            }
             "dual" => {
                 if tokens.len() < 3 {
                     console.logs.push("[Syntax Error] Usage: dual <main_weapon> <off_weapon> (e.g. 'dual Sword Axe', 'dual Revolver Revolver')".into());
@@ -1153,6 +1160,7 @@ pub fn handle_console_input(
                 console.logs.push("clearinv               : Empties inventory slots completely".into());
                 console.logs.push("killall                : Destroys all active NPC brains".into());
                 console.logs.push("tuner / weapontool     : Opens Weapon & Spell Tuner [F6]".into());
+                console.logs.push("char / customizer      : Opens Character Model Studio [F5]".into());
                 console.logs.push("res [w h | preset]     : Sets resolution (e.g. res 1080p, res 1920 1080)".into());
                 console.logs.push("fullscreen / windowed  : Toggles or sets fullscreen / windowed display mode".into());
                 console.logs.push("maxfps <fps|0|off>     : Sets frame rate cap (0 or off = uncapped)".into());

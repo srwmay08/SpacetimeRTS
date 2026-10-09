@@ -28,6 +28,7 @@ pub mod creatures;
 pub mod resource_nodes;
 pub mod grass;
 pub mod templates;
+pub mod character_customizer;
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
@@ -85,6 +86,7 @@ fn main() {
         .add_plugins(SkillsSheetPlugin)
         .add_plugins(grass::GrassPlugin)
         .add_plugins(input::InputPlugin)
+        .add_plugins(character_customizer::CharacterCustomizerPlugin)
         .insert_resource(Msaa::Off)
         
         // Architectural Note: Luminous Sky Clear Color.
