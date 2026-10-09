@@ -42,9 +42,10 @@ pub fn toggle_noclip_system(
 
 pub fn rts_navmesh_movement_system(
     mut commands: Commands,
-    mut query: Query<(Entity, &BevyTransform, &mut LinearVelocity, &NavTarget)>,
+    mut query: Query<(Entity, &mut BevyTransform, &mut LinearVelocity, &NavTarget)>,
+    time: Res<Time>,
 ) {
-    for (entity, transform, mut velocity, target) in query.iter_mut() {
+    for (entity, mut transform, mut velocity, target) in query.iter_mut() {
         let dir = target.0 - transform.translation;
         let dist = Vec2::new(dir.x, dir.z).length(); 
 
@@ -57,6 +58,14 @@ pub fn rts_navmesh_movement_system(
             let speed = 8.0;
             velocity.x = move_dir.x * speed;
             velocity.z = move_dir.z * speed;
+
+            // Orient the entity to face directly in the direction it is moving
+            let forward_heading = Vec3::new(move_dir.x, 0.0, move_dir.z).normalize_or_zero();
+            if forward_heading.length_squared() > 0.001 {
+                let target_rot = Quat::from_rotation_arc(Vec3::NEG_Z, forward_heading);
+                let decay = (14.0 * time.delta_seconds()).min(1.0);
+                transform.rotation = transform.rotation.slerp(target_rot, decay);
+            }
         }
     }
 }

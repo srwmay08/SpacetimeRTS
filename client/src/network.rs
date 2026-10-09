@@ -321,16 +321,33 @@ pub fn sync_logical_components(
     time: Res<Time>,
     mut query: Query<(
         &LogicalPosition,
-        &LogicalRotation,
+        &mut LogicalRotation,
         &mut BevyTransform,
+        Option<&mut LinearVelocity>,
         Option<&mut PhysicsPosition>,
         Option<&mut PhysicsRotation>,
     ), (Without<PlayerBody>, With<NetworkEntity>)>,
 ) {
-    let decay_factor = 1.0 - (-18.0_f32 * time.delta_seconds()).exp(); 
+    let dt = time.delta_seconds();
+    let decay_factor = 1.0 - (-18.0_f32 * dt).exp(); 
     
-    for (log_pos, log_rot, mut transform, maybe_phys_pos, maybe_phys_rot) in query.iter_mut() {
-        if transform.translation.distance_squared(log_pos.0) > 16.0 { 
+    for (log_pos, mut log_rot, mut transform, maybe_vel, maybe_phys_pos, maybe_phys_rot) in query.iter_mut() {
+        let delta = log_pos.0 - transform.translation;
+        let horiz_sq = delta.x * delta.x + delta.z * delta.z;
+        if horiz_sq > 0.002 {
+            let move_dir = Vec3::new(delta.x, 0.0, delta.z).normalize();
+            log_rot.0 = Quat::from_rotation_arc(Vec3::NEG_Z, move_dir);
+        }
+
+        // Calculate velocity for animation systems
+        if let Some(mut vel) = maybe_vel {
+            if dt > 1e-4 {
+                let inst_vel = delta / dt;
+                vel.0 = vel.0.lerp(inst_vel, (12.0 * dt).min(1.0));
+            }
+        }
+
+        if transform.translation.distance_squared(log_pos.0) > 36.0 { 
             transform.translation = log_pos.0; 
         } else { 
             transform.translation = transform.translation.lerp(log_pos.0, decay_factor); 
@@ -446,6 +463,42 @@ pub fn sync_transforms(
                 id,
                 &db_t,
             );
+            spawned_ids.insert(id);
+            continue;
+        }
+
+        let is_player = conn.db.db.player().entity_id().find(&id).is_some();
+        if is_player {
+            let default_preset = &crate::character_customizer::CHARACTER_PRESETS[0];
+            let remote_entity = commands.spawn((
+                Name::new(format!("RemotePlayer_{}", id)),
+                StateScoped(GameState::InGame),
+                NetworkEntity(id),
+                SpatialBundle::from_transform(BevyTransform::from_xyz(db_t.x, db_t.y, db_t.z)),
+                LogicalPosition(Vec3::new(db_t.x, db_t.y, db_t.z)),
+                LogicalRotation(Quat::IDENTITY),
+                LinearVelocity::ZERO,
+                crate::character_customizer::AnimationState::default(),
+                crate::character_customizer::PlayerCharacterCustomization {
+                    face: default_preset.face.clone(),
+                    anatomy: default_preset.anatomy.clone(),
+                    dirty: false,
+                },
+                Selectable,
+                RigidBody::Kinematic,
+                Collider::capsule(0.35, 1.8),
+                CollisionLayers::new([GameLayer::Unit], [GameLayer::Default, GameLayer::Environment, GameLayer::Glass]),
+            )).id();
+
+            crate::character_customizer::spawn_procedural_character_hierarchy(
+                &mut commands,
+                remote_entity,
+                &mut meshes,
+                &mut materials,
+                &default_preset.anatomy,
+                &default_preset.face,
+            );
+
             spawned_ids.insert(id);
             continue;
         }

@@ -33,7 +33,7 @@ use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
 use bevy::window::{CursorGrabMode, PrimaryWindow};
-use avian3d::prelude::LinearVelocity;
+use crate::physics::LinearVelocity;
 use tracing::info;
 
 use crate::components::*;
@@ -563,26 +563,34 @@ pub fn spawn_procedural_character_hierarchy(
     ));
     let spike_mesh = meshes.add(create_low_poly_pyramid());
 
-    // Material assets
+    // Material assets (Two-sided PBR materials for crisp low-poly faceted shading without backface culling gaps)
     let skin_mat = materials.add(StandardMaterial {
         base_color: race.skin_color,
         perceptual_roughness: 0.82,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
     let cloth_mat = materials.add(StandardMaterial {
         base_color: race.cloth_color,
         perceptual_roughness: 0.88,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
     let pants_mat = materials.add(StandardMaterial {
         base_color: race.pants_color,
         perceptual_roughness: 0.85,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
     let armor_mat = materials.add(StandardMaterial {
         base_color: race.armor_color,
         metallic: 0.65,
         perceptual_roughness: 0.45,
+        cull_mode: None,
+        double_sided: true,
         ..default()
     });
 
@@ -1088,7 +1096,7 @@ pub fn procedural_animator_system(
                     match &state.action {
                         ActionState::MeleeSwing { timer, duration } => {
                             // 3-Phase Melee Swing: Anticipation -> Snap -> Follow-through
-                            let t = (*timer / duration.max(0.001)).clamp(0.0, 1.0);
+                            let t = (timer / duration.max(0.001)).clamp(0.0, 1.0);
                             if t < 0.30 {
                                 // Phase 1: Wind back and up
                                 let p = t / 0.30;
@@ -1126,7 +1134,7 @@ pub fn procedural_animator_system(
                 JointType::ElbowR => {
                     match &state.action {
                         ActionState::MeleeSwing { timer, duration } => {
-                            let t = (*timer / duration.max(0.001)).clamp(0.0, 1.0);
+                            let t = (timer / duration.max(0.001)).clamp(0.0, 1.0);
                             let bend = if t < 0.30 { 0.80 } else if t < 0.50 { 0.25 } else { 0.10 };
                             tf.rotation = Quat::from_rotation_x(bend);
                         }
@@ -1326,6 +1334,9 @@ impl CharacterEditorState {
 #[derive(Component)]
 pub struct CharacterEditorRoot;
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditorTabPanel(pub EditorTab);
+
 #[derive(Component, Clone, Debug)]
 pub enum EditorAction {
     SetTab(EditorTab),
@@ -1337,6 +1348,8 @@ pub enum EditorAction {
     AdjustFaceNoseBridge(f32),
     AdjustFaceNoseTipZ(f32),
     AdjustFaceBrowRidge(f32),
+    AdjustFaceChinForward(f32),
+    AdjustFaceEyeDepth(f32),
     AdjustTorsoWidth(f32),
     AdjustTorsoHeight(f32),
     AdjustShoulderWidth(f32),
@@ -1344,6 +1357,8 @@ pub enum EditorAction {
     AdjustArmLength(f32),
     AdjustLegLength(f32),
     AdjustLimbThickness(f32),
+    AdjustHeadScale(f32),
+    AdjustPauldronSize(f32),
     CycleSkinColor,
     CycleClothColor,
     CycleArmorColor,
@@ -1467,75 +1482,147 @@ pub fn setup_character_editor_ui(mut commands: Commands) {
                 spawn_tab_button(tabs, "4. Studio", EditorAction::SetTab(EditorTab::AnimationStudio));
             });
 
-            // 3. Tab Body Container
-            root.spawn(NodeBundle {
-                style: Style {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    padding: UiRect::vertical(Val::Px(6.0)),
-                    ..default()
-                },
-                ..default()
-            })
-            .with_children(|body| {
-                // Face Controls
-                spawn_param_row(body, "Jaw Width", EditorAction::AdjustFaceJawWidth(-0.02), EditorAction::AdjustFaceJawWidth(0.02), "face_jaw_width");
-                spawn_param_row(body, "Jaw Height", EditorAction::AdjustFaceJawHeight(-0.02), EditorAction::AdjustFaceJawHeight(0.02), "face_jaw_height");
-                spawn_param_row(body, "Cheekbones", EditorAction::AdjustFaceCheekbones(-0.02), EditorAction::AdjustFaceCheekbones(0.02), "face_cheekbones");
-                spawn_param_row(body, "Nose Bridge", EditorAction::AdjustFaceNoseBridge(-0.02), EditorAction::AdjustFaceNoseBridge(0.02), "face_nose_bridge");
-                spawn_param_row(body, "Nose Tip Depth", EditorAction::AdjustFaceNoseTipZ(-0.03), EditorAction::AdjustFaceNoseTipZ(0.03), "face_nose_tip_z");
-                spawn_param_row(body, "Brow Ridge", EditorAction::AdjustFaceBrowRidge(-0.02), EditorAction::AdjustFaceBrowRidge(0.02), "face_brow_ridge");
-
-                // Anatomy Controls
-                spawn_param_row(body, "Torso Width", EditorAction::AdjustTorsoWidth(-0.04), EditorAction::AdjustTorsoWidth(0.04), "torso_width");
-                spawn_param_row(body, "Torso Height", EditorAction::AdjustTorsoHeight(-0.04), EditorAction::AdjustTorsoHeight(0.04), "torso_height");
-                spawn_param_row(body, "Shoulder Width", EditorAction::AdjustShoulderWidth(-0.03), EditorAction::AdjustShoulderWidth(0.03), "shoulder_width");
-                spawn_param_row(body, "Hip Width", EditorAction::AdjustHipWidth(-0.02), EditorAction::AdjustHipWidth(0.02), "hip_width");
-                spawn_param_row(body, "Arm Length", EditorAction::AdjustArmLength(-0.03), EditorAction::AdjustArmLength(0.03), "arm_length");
-                spawn_param_row(body, "Leg Length", EditorAction::AdjustLegLength(-0.03), EditorAction::AdjustLegLength(0.03), "leg_length");
-
-                // Color / Wardrobe Row
-                body.spawn(NodeBundle {
+            // 3a. Tab Panel: Face Sculpt
+            root.spawn((
+                NodeBundle {
                     style: Style {
                         width: Val::Percent(100.0),
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::SpaceBetween,
-                        column_gap: Val::Px(6.0),
-                        margin: UiRect::top(Val::Px(4.0)),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        padding: UiRect::vertical(Val::Px(4.0)),
+                        display: Display::Flex,
                         ..default()
                     },
                     ..default()
-                })
-                .with_children(|color_bar| {
-                    spawn_editor_button(color_bar, "Cycle Skin", EditorAction::CycleSkinColor, 95.0, 24.0);
-                    spawn_editor_button(color_bar, "Cycle Cloth", EditorAction::CycleClothColor, 95.0, 24.0);
-                    spawn_editor_button(color_bar, "Cycle Armor", EditorAction::CycleArmorColor, 95.0, 24.0);
-                    spawn_editor_button(color_bar, "Spikes", EditorAction::ToggleShoulderSpikes, 75.0, 24.0);
-                });
+                },
+                EditorTabPanel(EditorTab::FaceSculpt),
+            ))
+            .with_children(|face_panel| {
+                spawn_section_label(face_panel, "FACIAL MORPHOLOGY SCULPT");
+                spawn_param_row(face_panel, "Jaw Width", EditorAction::AdjustFaceJawWidth(-0.02), EditorAction::AdjustFaceJawWidth(0.02), "face_jaw_width");
+                spawn_param_row(face_panel, "Jaw Height", EditorAction::AdjustFaceJawHeight(-0.02), EditorAction::AdjustFaceJawHeight(0.02), "face_jaw_height");
+                spawn_param_row(face_panel, "Cheekbones", EditorAction::AdjustFaceCheekbones(-0.02), EditorAction::AdjustFaceCheekbones(0.02), "face_cheekbones");
+                spawn_param_row(face_panel, "Nose Bridge", EditorAction::AdjustFaceNoseBridge(-0.02), EditorAction::AdjustFaceNoseBridge(0.02), "face_nose_bridge");
+                spawn_param_row(face_panel, "Nose Tip Depth", EditorAction::AdjustFaceNoseTipZ(-0.03), EditorAction::AdjustFaceNoseTipZ(0.03), "face_nose_tip_z");
+                spawn_param_row(face_panel, "Brow Ridge", EditorAction::AdjustFaceBrowRidge(-0.02), EditorAction::AdjustFaceBrowRidge(0.02), "face_brow_ridge");
+                spawn_param_row(face_panel, "Chin Forward", EditorAction::AdjustFaceChinForward(-0.02), EditorAction::AdjustFaceChinForward(0.02), "face_chin_forward");
+                spawn_param_row(face_panel, "Eye Depth", EditorAction::AdjustFaceEyeDepth(-0.02), EditorAction::AdjustFaceEyeDepth(0.02), "face_eye_depth");
+            });
 
-                // Animation Studio Actions Row
-                body.spawn(NodeBundle {
+            // 3b. Tab Panel: Body Anatomy
+            root.spawn((
+                NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        padding: UiRect::vertical(Val::Px(4.0)),
+                        display: Display::None,
+                        ..default()
+                    },
+                    ..default()
+                },
+                EditorTabPanel(EditorTab::BodyAnatomy),
+            ))
+            .with_children(|body_panel| {
+                spawn_section_label(body_panel, "SKELETAL PROPORTIONS & ANATOMY");
+                spawn_param_row(body_panel, "Torso Width", EditorAction::AdjustTorsoWidth(-0.04), EditorAction::AdjustTorsoWidth(0.04), "torso_width");
+                spawn_param_row(body_panel, "Torso Height", EditorAction::AdjustTorsoHeight(-0.04), EditorAction::AdjustTorsoHeight(0.04), "torso_height");
+                spawn_param_row(body_panel, "Shoulder Width", EditorAction::AdjustShoulderWidth(-0.03), EditorAction::AdjustShoulderWidth(0.03), "shoulder_width");
+                spawn_param_row(body_panel, "Hip Width", EditorAction::AdjustHipWidth(-0.02), EditorAction::AdjustHipWidth(0.02), "hip_width");
+                spawn_param_row(body_panel, "Arm Length", EditorAction::AdjustArmLength(-0.03), EditorAction::AdjustArmLength(0.03), "arm_length");
+                spawn_param_row(body_panel, "Leg Length", EditorAction::AdjustLegLength(-0.03), EditorAction::AdjustLegLength(0.03), "leg_length");
+                spawn_param_row(body_panel, "Limb Thickness", EditorAction::AdjustLimbThickness(-0.02), EditorAction::AdjustLimbThickness(0.02), "limb_thickness");
+                spawn_param_row(body_panel, "Head Scale", EditorAction::AdjustHeadScale(-0.04), EditorAction::AdjustHeadScale(0.04), "head_scale");
+                spawn_param_row(body_panel, "Pauldron Size", EditorAction::AdjustPauldronSize(-0.03), EditorAction::AdjustPauldronSize(0.03), "pauldron_size");
+            });
+
+            // 3c. Tab Panel: Wardrobe & Colors
+            root.spawn((
+                NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(7.0),
+                        padding: UiRect::vertical(Val::Px(4.0)),
+                        display: Display::None,
+                        ..default()
+                    },
+                    ..default()
+                },
+                EditorTabPanel(EditorTab::WardrobeColors),
+            ))
+            .with_children(|wardrobe_panel| {
+                spawn_section_label(wardrobe_panel, "WARDROBE & PBR PALETTES");
+                spawn_palette_row(wardrobe_panel, "Skin Complexion", EditorAction::CycleSkinColor, "skin_color_label");
+                spawn_palette_row(wardrobe_panel, "Tunic & Cloth", EditorAction::CycleClothColor, "cloth_color_label");
+                spawn_palette_row(wardrobe_panel, "Armor Material", EditorAction::CycleArmorColor, "armor_color_label");
+                spawn_palette_row(wardrobe_panel, "Pauldrons & Spikes", EditorAction::ToggleShoulderSpikes, "spikes_label");
+            });
+
+            // 3d. Tab Panel: Animation Studio
+            root.spawn((
+                NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(7.0),
+                        padding: UiRect::vertical(Val::Px(4.0)),
+                        display: Display::None,
+                        ..default()
+                    },
+                    ..default()
+                },
+                EditorTabPanel(EditorTab::AnimationStudio),
+            ))
+            .with_children(|studio_panel| {
+                spawn_section_label(studio_panel, "PROCEDURAL GAIT & ACTION STUDIO");
+                
+                studio_panel.spawn(NodeBundle {
                     style: Style {
                         width: Val::Percent(100.0),
                         flex_direction: FlexDirection::Row,
                         flex_wrap: FlexWrap::Wrap,
                         column_gap: Val::Px(6.0),
                         row_gap: Val::Px(4.0),
-                        margin: UiRect::top(Val::Px(4.0)),
                         ..default()
                     },
                     ..default()
                 })
-                .with_children(|anim_bar| {
-                    spawn_editor_button(anim_bar, "Live", EditorAction::SetStudioMode(StudioPreviewMode::LiveGameplay), 58.0, 24.0);
-                    spawn_editor_button(anim_bar, "Walk", EditorAction::SetStudioMode(StudioPreviewMode::Walk), 58.0, 24.0);
-                    spawn_editor_button(anim_bar, "Run", EditorAction::SetStudioMode(StudioPreviewMode::Run), 58.0, 24.0);
-                    spawn_editor_button(anim_bar, "Jump", EditorAction::SetStudioMode(StudioPreviewMode::JumpAscend), 58.0, 24.0);
-                    spawn_editor_button(anim_bar, "Swing Melee", EditorAction::TriggerMeleeSwing, 92.0, 24.0);
-                    spawn_editor_button(anim_bar, "Aim Bow", EditorAction::TriggerBowAim, 76.0, 24.0);
-                    spawn_editor_button(anim_bar, "Hit React", EditorAction::TriggerHitFlinch, 76.0, 24.0);
+                .with_children(|poses| {
+                    spawn_editor_button(poses, "Live Gameplay", EditorAction::SetStudioMode(StudioPreviewMode::LiveGameplay), 95.0, 24.0);
+                    spawn_editor_button(poses, "Walk (2.2m/s)", EditorAction::SetStudioMode(StudioPreviewMode::Walk), 95.0, 24.0);
+                    spawn_editor_button(poses, "Run (5.5m/s)", EditorAction::SetStudioMode(StudioPreviewMode::Run), 95.0, 24.0);
+                    spawn_editor_button(poses, "Jump Ascend", EditorAction::SetStudioMode(StudioPreviewMode::JumpAscend), 95.0, 24.0);
+                    spawn_editor_button(poses, "Airborne Fall", EditorAction::SetStudioMode(StudioPreviewMode::JumpFall), 95.0, 24.0);
                 });
+
+                spawn_section_label(studio_panel, "COMBAT ACTION TRIGGERS");
+                studio_panel.spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(6.0),
+                        row_gap: Val::Px(4.0),
+                        ..default()
+                    },
+                    ..default()
+                })
+                .with_children(|actions| {
+                    spawn_editor_button(actions, "⚔ Melee Swing", EditorAction::TriggerMeleeSwing, 120.0, 24.0);
+                    spawn_editor_button(actions, "🏹 Bow Aim Stance", EditorAction::TriggerBowAim, 130.0, 24.0);
+                    spawn_editor_button(actions, "💥 Hit Reaction", EditorAction::TriggerHitFlinch, 120.0, 24.0);
+                });
+
+                studio_panel.spawn(TextBundle::from_section(
+                    "💡 Camera zoomed to 3rd person. Hold Alt + mouse to free-look orbit.",
+                    TextStyle {
+                        font_size: 11.0,
+                        color: Color::srgb(0.70, 0.75, 0.85),
+                        ..default()
+                    },
+                ));
             });
 
             // 4. Footer Action Bar (Randomize / Reset / Export Rust)
@@ -1687,6 +1774,76 @@ fn spawn_param_row(
         });
 }
 
+fn spawn_section_label(parent: &mut ChildBuilder, text: &str) {
+    parent.spawn(
+        TextBundle::from_section(
+            text,
+            TextStyle {
+                font_size: 11.0,
+                color: Color::srgb(0.70, 0.78, 0.90),
+                ..default()
+            },
+        )
+        .with_style(Style {
+            margin: UiRect::top(Val::Px(4.0)),
+            ..default()
+        }),
+    );
+}
+
+fn spawn_palette_row(
+    parent: &mut ChildBuilder,
+    label: &str,
+    cycle_action: EditorAction,
+    val_key: &str,
+) {
+    parent
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(TextBundle::from_section(
+                label,
+                TextStyle {
+                    font_size: 11.5,
+                    color: Color::srgb(0.85, 0.85, 0.88),
+                    ..default()
+                },
+            ));
+
+            row.spawn(NodeBundle {
+                style: Style {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                },
+                ..default()
+            })
+            .with_children(|ctrls| {
+                ctrls.spawn((
+                    EditorValueDisplay(val_key.into()),
+                    TextBundle::from_section(
+                        "Default",
+                        TextStyle {
+                            font_size: 11.5,
+                            color: Color::srgb(0.96, 0.76, 0.25),
+                            ..default()
+                        },
+                    ),
+                ));
+                spawn_editor_button(ctrls, "Cycle >", cycle_action, 64.0, 20.0);
+            });
+        });
+}
+
 // ----------------------------------------------------------------------------
 // 11. TOGGLE & INTERACTION SYSTEMS
 // ----------------------------------------------------------------------------
@@ -1783,6 +1940,14 @@ pub fn handle_character_editor_interactions(
                 editor.face.brow_ridge = (editor.face.brow_ridge + d).clamp(0.02, 0.35);
                 mark_dirty = true;
             }
+            EditorAction::AdjustFaceChinForward(d) => {
+                editor.face.chin_forward = (editor.face.chin_forward + d).clamp(-0.15, 0.25);
+                mark_dirty = true;
+            }
+            EditorAction::AdjustFaceEyeDepth(d) => {
+                editor.face.eye_depth = (editor.face.eye_depth + d).clamp(0.00, 0.20);
+                mark_dirty = true;
+            }
             EditorAction::AdjustTorsoWidth(d) => {
                 editor.anatomy.torso_size.x = (editor.anatomy.torso_size.x + d).clamp(0.25, 0.80);
                 mark_dirty = true;
@@ -1811,6 +1976,14 @@ pub fn handle_character_editor_interactions(
             }
             EditorAction::AdjustLimbThickness(d) => {
                 editor.anatomy.limb_thickness = (editor.anatomy.limb_thickness + d).clamp(0.06, 0.24);
+                mark_dirty = true;
+            }
+            EditorAction::AdjustHeadScale(d) => {
+                editor.anatomy.head_scale = (editor.anatomy.head_scale + d).clamp(0.60, 1.60);
+                mark_dirty = true;
+            }
+            EditorAction::AdjustPauldronSize(d) => {
+                editor.anatomy.pauldron_size = (editor.anatomy.pauldron_size + d).clamp(0.00, 0.50);
                 mark_dirty = true;
             }
             EditorAction::CycleSkinColor => {
@@ -1925,12 +2098,32 @@ pub fn update_character_editor_display(
             "face_nose_bridge" => text.sections[0].value = format!("{:.2}m", editor.face.nose_bridge_length),
             "face_nose_tip_z" => text.sections[0].value = format!("{:.2}m", editor.face.nose_tip_z),
             "face_brow_ridge" => text.sections[0].value = format!("{:.2}m", editor.face.brow_ridge),
+            "face_chin_forward" => text.sections[0].value = format!("{:.2}m", editor.face.chin_forward),
+            "face_eye_depth" => text.sections[0].value = format!("{:.2}m", editor.face.eye_depth),
             "torso_width" => text.sections[0].value = format!("{:.2}m", editor.anatomy.torso_size.x),
             "torso_height" => text.sections[0].value = format!("{:.2}m", editor.anatomy.torso_size.y),
             "shoulder_width" => text.sections[0].value = format!("{:.2}m", editor.anatomy.shoulder_width_offset),
             "hip_width" => text.sections[0].value = format!("{:.2}m", editor.anatomy.hip_width_offset),
             "arm_length" => text.sections[0].value = format!("{:.2}m", editor.anatomy.upper_arm_length),
             "leg_length" => text.sections[0].value = format!("{:.2}m", editor.anatomy.upper_leg_length),
+            "limb_thickness" => text.sections[0].value = format!("{:.2}m", editor.anatomy.limb_thickness),
+            "head_scale" => text.sections[0].value = format!("{:.2}x", editor.anatomy.head_scale),
+            "pauldron_size" => text.sections[0].value = format!("{:.2}m", editor.anatomy.pauldron_size),
+            "skin_color_label" => {
+                let srgba = editor.anatomy.skin_color.to_srgba();
+                text.sections[0].value = format!("#{:02X}{:02X}{:02X}", (srgba.red * 255.0) as u8, (srgba.green * 255.0) as u8, (srgba.blue * 255.0) as u8);
+            }
+            "cloth_color_label" => {
+                let srgba = editor.anatomy.cloth_color.to_srgba();
+                text.sections[0].value = format!("#{:02X}{:02X}{:02X}", (srgba.red * 255.0) as u8, (srgba.green * 255.0) as u8, (srgba.blue * 255.0) as u8);
+            }
+            "armor_color_label" => {
+                let srgba = editor.anatomy.armor_color.to_srgba();
+                text.sections[0].value = format!("#{:02X}{:02X}{:02X}", (srgba.red * 255.0) as u8, (srgba.green * 255.0) as u8, (srgba.blue * 255.0) as u8);
+            }
+            "spikes_label" => {
+                text.sections[0].value = if editor.anatomy.has_shoulder_spikes { "Active".into() } else { "None".into() };
+            }
             _ => {}
         }
     }
@@ -1971,6 +2164,72 @@ pub fn sync_player_model_rebuild_system(
     }
 }
 
+/// Dynamically toggles tab panel containers based on the active tab, and highlights tab buttons.
+pub fn update_editor_tab_visibility(
+    editor: Res<CharacterEditorState>,
+    mut tab_panel_q: Query<(&EditorTabPanel, &mut Style)>,
+    mut tab_button_q: Query<(&EditorAction, &mut BorderColor, &mut BackgroundColor), With<Button>>,
+) {
+    if !editor.is_changed() && !editor.is_open {
+        return;
+    }
+
+    // Toggle tab panels
+    for (panel, mut style) in tab_panel_q.iter_mut() {
+        style.display = if editor.is_open && panel.0 == editor.current_tab {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+
+    // Highlight active tab button
+    for (action, mut border_color, mut bg_color) in tab_button_q.iter_mut() {
+        if let EditorAction::SetTab(tab) = action {
+            if *tab == editor.current_tab {
+                *border_color = Color::srgb(0.96, 0.76, 0.25).into(); // Gold border
+                *bg_color = Color::srgb(0.28, 0.32, 0.44).into();     // Active tab bg
+            } else {
+                *border_color = Color::srgb(0.40, 0.44, 0.52).into();
+                *bg_color = Color::srgb(0.20, 0.22, 0.30).into();
+            }
+        }
+    }
+}
+
+/// Rotates the local player model to face the direction of locomotion.
+/// When aiming with a bow or performing a melee swing, immediately aligns with the crosshair direction (Quat::IDENTITY).
+pub fn orient_character_model_to_locomotion_system(
+    time: Res<Time>,
+    player_q: Query<(&BevyTransform, &LinearVelocity, &AnimationState), With<PlayerBody>>,
+    mut model_q: Query<(&Parent, &mut BevyTransform), (With<CharacterModelRoot>, Without<PlayerBody>)>,
+) {
+    let dt = time.delta_seconds();
+    for (parent, mut model_transform) in model_q.iter_mut() {
+        if let Ok((body_transform, linvel, anim_state)) = player_q.get(parent.get()) {
+            let is_attacking = anim_state.action != ActionState::None;
+            let target_rot = if is_attacking {
+                Quat::IDENTITY
+            } else {
+                let local_vel = body_transform.rotation.inverse() * Vec3::new(linvel.x, 0.0, linvel.z);
+                let horiz_speed_sq = local_vel.x * local_vel.x + local_vel.z * local_vel.z;
+                if horiz_speed_sq > 0.08 {
+                    let move_dir = local_vel.normalize();
+                    // Face moving direction in local space
+                    Quat::from_rotation_arc(Vec3::NEG_Z, Vec3::new(move_dir.x, 0.0, move_dir.z))
+                } else {
+                    Quat::IDENTITY
+                }
+            };
+
+            // Smoothly slerp local model facing
+            let turn_speed = if is_attacking { 24.0 } else { 14.0 };
+            let t = (turn_speed * dt).min(1.0);
+            model_transform.rotation = model_transform.rotation.slerp(target_rot, t);
+        }
+    }
+}
+
 // ----------------------------------------------------------------------------
 // 12. CHARACTER CUSTOMIZER PLUGIN REGISTRATION
 // ----------------------------------------------------------------------------
@@ -1987,9 +2246,11 @@ impl Plugin for CharacterCustomizerPlugin {
                     toggle_character_editor_ui,
                     handle_character_editor_interactions,
                     update_character_editor_display,
+                    update_editor_tab_visibility,
                     sync_player_model_rebuild_system,
                     sync_player_animation_state,
                     procedural_animator_system,
+                    orient_character_model_to_locomotion_system,
                 )
                     .in_set(UpdateSet::Animation),
             );
