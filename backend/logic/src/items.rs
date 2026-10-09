@@ -384,6 +384,17 @@ impl ItemKind {
         )
     }
 
+    pub const fn equipment_slot(&self) -> Option<EquipmentSlot> {
+        match self {
+            Self::IronHelmet => Some(EquipmentSlot::Head),
+            Self::IronChestplate => Some(EquipmentSlot::Chest),
+            Self::IronGreaves => Some(EquipmentSlot::Legs),
+            Self::IronBoots => Some(EquipmentSlot::Feet),
+            k if k.is_weapon() || k.is_tool() => Some(EquipmentSlot::MainHand),
+            _ => None,
+        }
+    }
+
     pub const fn is_tool(&self) -> bool {
         matches!(self, Self::Hammer | Self::Pickaxe | Self::Torch | Self::Handaxe)
     }

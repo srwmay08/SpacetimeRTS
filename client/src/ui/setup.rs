@@ -225,6 +225,53 @@ pub fn setup_ui(mut commands: Commands) {
                 ));
             });
 
+            // Head / Helmet Slot
+            paperdoll.spawn((
+                NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        width: Val::Percent(100.0),
+                        height: Val::Px(32.0),
+                        padding: UiRect::horizontal(Val::Px(6.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    background_color: Color::srgba(0.12, 0.12, 0.14, 0.9).into(),
+                    border_color: Color::srgb(0.4, 0.4, 0.45).into(),
+                    ..default()
+                },
+                Interaction::default(),
+                PaperdollHeadSlot,
+            )).with_children(|row| {
+                row.spawn((
+                    TextBundle::from_section(
+                        "Head: [Empty]",
+                        TextStyle { font_size: 11.0, color: Color::WHITE, ..default() }
+                    ),
+                    PaperdollHeadText,
+                ));
+                row.spawn((
+                    ButtonBundle {
+                        style: Style {
+                            padding: UiRect::all(Val::Px(2.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        background_color: Color::srgba(0.25, 0.1, 0.1, 0.8).into(),
+                        border_color: Color::srgb(0.6, 0.2, 0.2).into(),
+                        ..default()
+                    },
+                    PaperdollUnequipHeadButton,
+                )).with_children(|btn| {
+                    btn.spawn(TextBundle::from_section(
+                        "Unequip",
+                        TextStyle { font_size: 10.0, color: Color::srgb(1.0, 0.6, 0.6), ..default() }
+                    ));
+                });
+            });
+
             // MainHand Slot
             paperdoll.spawn((
                 NodeBundle {

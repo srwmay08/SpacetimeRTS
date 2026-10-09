@@ -156,6 +156,17 @@ pub struct ClientEquippedBags {
     pub bags: [Option<BagContainerDef>; 4],
 }
 
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClientEquippedArmor {
+    pub head: Option<String>,
+    pub chest: Option<String>,
+    pub legs: Option<String>,
+    pub feet: Option<String>,
+}
+
+#[derive(Component)] pub struct PaperdollHeadSlot;
+#[derive(Component)] pub struct PaperdollHeadText;
+#[derive(Component)] pub struct PaperdollUnequipHeadButton;
 #[derive(Component)] pub struct PaperdollMainHandSlot;
 #[derive(Component)] pub struct PaperdollOffHandSlot;
 #[derive(Component)] pub struct PaperdollMainHandText;

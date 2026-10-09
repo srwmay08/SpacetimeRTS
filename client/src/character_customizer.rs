@@ -48,6 +48,7 @@ use crate::components::*;
 use crate::core::*;
 use crate::camera::CharacterCameraSettings;
 use crate::weapons::{WeaponState, WeaponType};
+use crate::ui::types::ClientEquippedArmor;
 
 // ----------------------------------------------------------------------------
 // 1. DATA STRUCTURES & MORPHOLOGY PROFILES
@@ -433,6 +434,10 @@ pub struct CharacterModelRoot;
 #[derive(Component)]
 pub struct ProceduralFaceMesh;
 
+/// Marker for the equipped 3D helmet mesh child entity.
+#[derive(Component)]
+pub struct EquippedHelmetMesh;
+
 /// Attached to the player to hold their active customization data.
 #[derive(Component, Clone, Debug)]
 pub struct PlayerCharacterCustomization {
@@ -585,6 +590,83 @@ pub fn create_low_poly_pyramid() -> Mesh {
         0, 4, 1, // Left Face
         1, 4, 3, // Base Bottom 1
         1, 3, 2, // Base Bottom 2
+    ]);
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(indices);
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
+/// Generates a stylized, low-poly faceted iron helmet with crown plates, crest, nasal guard,
+/// and cheek protectors matching the SpacetimeRTS BlendSwap #9440 aesthetic.
+pub fn create_low_poly_helmet() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    // Coordinate positions in local space of JointType::Head.
+    // The cranial skull is centered at [0.0, 0.08, 0.0] with extents [-0.12..+0.12, -0.05..+0.21, -0.13..+0.13].
+    // Forward is -Z, Up is +Y, Right is +X.
+    let positions: Vec<[f32; 3]> = vec![
+        // 0: Crown Apex (top center of the helmet dome)
+        [0.0, 0.245, 0.0],
+        // 1: Forehead Brow Center (rim right above the eyebrows)
+        [0.0, 0.14, -0.142],
+        // 2: Left Brow / Temple
+        [-0.132, 0.13, -0.11],
+        // 3: Right Brow / Temple
+        [0.132, 0.13, -0.11],
+        // 4: Left Ear / Side Rim
+        [-0.136, 0.06, 0.01],
+        // 5: Right Ear / Side Rim
+        [0.136, 0.06, 0.01],
+        // 6: Left Back Occipital
+        [-0.132, 0.05, 0.136],
+        // 7: Right Back Occipital
+        [0.132, 0.05, 0.136],
+        // 8: Back Neck Center Rim
+        [0.0, 0.04, 0.142],
+        // 9: Crest Ridge Front
+        [0.0, 0.265, -0.08],
+        // 10: Crest Ridge Peak
+        [0.0, 0.28, 0.02],
+        // 11: Crest Ridge Back
+        [0.0, 0.23, 0.11],
+        // 12: Nasal Guard Tip (pointed guard extending down the nose)
+        [0.0, 0.02, -0.155],
+        // 13: Left Cheek Guard Bottom
+        [-0.125, -0.01, -0.05],
+        // 14: Right Cheek Guard Bottom
+        [0.125, -0.01, -0.05],
+    ];
+
+    let indices = Indices::U32(vec![
+        // Dome Crown Facets (counter-clockwise winding for outward normals)
+        0, 2, 1,   // Crown to Left Forehead
+        0, 1, 3,   // Crown to Right Forehead
+        0, 4, 2,   // Crown to Left Side
+        0, 3, 5,   // Crown to Right Side
+        0, 6, 4,   // Crown to Left Back
+        0, 5, 7,   // Crown to Right Back
+        0, 8, 6,   // Crown to Center Back Left
+        0, 7, 8,   // Crown to Center Back Right
+
+        // Central Crest Fin (raised spine along the skull)
+        1, 9, 0,   // Front brow to crest front
+        0, 9, 10,  // Crest front to peak
+        0, 10, 11, // Crest peak to back
+        0, 11, 8,  // Crest back to neck rim
+
+        // Nasal Guard (pyramidal guard protecting nose bridge)
+        1, 12, 2,  // Brow center to nasal tip to left brow
+        1, 3, 12,  // Brow center to right brow to nasal tip
+
+        // Cheek Guards (flanking jaw & ear)
+        2, 4, 13,  // Left temple to ear to cheek bottom
+        3, 14, 5,  // Right temple to cheek bottom to ear
     ]);
 
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
@@ -3054,6 +3136,65 @@ pub fn orient_character_model_to_locomotion_system(
     }
 }
 
+/// Mounts or unmounts the low-poly iron helmet on the player's JointType::Head pivot
+/// based on the client's equipped armor state.
+pub fn sync_character_equipped_helmet(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    equipped_armor: Res<ClientEquippedArmor>,
+    head_joint_q: Query<(Entity, &JointType, &JointOwner)>,
+    helmet_mesh_q: Query<(Entity, &Parent), With<EquippedHelmetMesh>>,
+    player_q: Query<Entity, With<PlayerBody>>,
+    studio_player_q: Query<Entity, With<PlayerCharacterCustomization>>,
+    layers_q: Query<&RenderLayers>,
+) {
+    let valid_owners: Vec<Entity> = player_q.iter().chain(studio_player_q.iter()).collect();
+    if valid_owners.is_empty() {
+        return;
+    }
+
+    for (head_entity, joint, owner) in head_joint_q.iter() {
+        if *joint != JointType::Head || !valid_owners.contains(&owner.0) {
+            continue;
+        }
+
+        let existing_helmet = helmet_mesh_q.iter().find(|(_, p)| p.get() == head_entity);
+
+        if equipped_armor.head.is_some() {
+            if existing_helmet.is_none() {
+                let helmet_mesh = meshes.add(create_low_poly_helmet());
+                let helmet_mat = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.55, 0.58, 0.62),
+                    metallic: 0.85,
+                    perceptual_roughness: 0.35,
+                    cull_mode: None,
+                    double_sided: true,
+                    ..default()
+                });
+                let layer = layers_q.get(head_entity).cloned().unwrap_or(RenderLayers::from_layers(&[0, 1, 2]));
+
+                commands.entity(head_entity).with_children(|head| {
+                    head.spawn((
+                        PbrBundle {
+                            mesh: helmet_mesh,
+                            material: helmet_mat,
+                            transform: BevyTransform::IDENTITY,
+                            ..default()
+                        },
+                        EquippedHelmetMesh,
+                        layer,
+                    ));
+                });
+                info!("Equipped 3D Helmet on head pivot ({:?})", head_entity);
+            }
+        } else if let Some((helmet_entity, _)) = existing_helmet {
+            commands.entity(helmet_entity).despawn_recursive();
+            info!("Unequipped 3D Helmet from head pivot ({:?})", head_entity);
+        }
+    }
+}
+
 // ----------------------------------------------------------------------------
 // 15. CHARACTER CUSTOMIZER PLUGIN REGISTRATION
 // ----------------------------------------------------------------------------
@@ -3075,6 +3216,7 @@ impl Plugin for CharacterCustomizerPlugin {
                     update_editor_tab_visibility,
                     studio_camera_orbit_system,
                     live_character_update_system,
+                    sync_character_equipped_helmet,
                     sync_player_animation_state,
                     procedural_animator_system,
                     orient_character_model_to_locomotion_system,

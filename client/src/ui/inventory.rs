@@ -29,6 +29,18 @@ pub fn ui_node_screen_rect(transform: &GlobalTransform, node: &Node, _window: &W
     node.logical_rect(transform)
 }
 
+/// Identifies if an item name corresponds to a helmet / head armor piece.
+pub fn is_helmet_item(name: &str) -> bool {
+    let clean = name.trim();
+    if let Some(kind) = ItemKind::from_name(clean) {
+        kind == ItemKind::IronHelmet || kind.equipment_slot() == Some(EquipmentSlot::Head)
+    } else {
+        clean.eq_ignore_ascii_case("Iron Helmet")
+            || clean.to_ascii_lowercase().contains("helmet")
+            || clean.to_ascii_lowercase().contains("helm")
+    }
+}
+
 // ----------------------------------------------------------------------------
 // INVENTORY DRAG-AND-DROP & WORLD DROP SYSTEMS
 // ----------------------------------------------------------------------------
@@ -39,6 +51,7 @@ pub fn handle_inventory_drag_and_drop(
     console: Res<ConsoleState>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     slot_query: Query<(&InventorySlotIndex, &GlobalTransform, &Node, Option<&Interaction>)>,
+    head_slot_q: Query<(&GlobalTransform, &Node, Option<&Interaction>), With<PaperdollHeadSlot>>,
     main_hand_slot_q: Query<(&GlobalTransform, &Node, Option<&Interaction>), With<PaperdollMainHandSlot>>,
     off_hand_slot_q: Query<(&GlobalTransform, &Node, Option<&Interaction>), With<PaperdollOffHandSlot>>,
     bag_slot_query: Query<(&PaperdollBagSlotIndex, &GlobalTransform, &Node, Option<&Interaction>)>,
@@ -48,6 +61,7 @@ pub fn handle_inventory_drag_and_drop(
     cached_player: Res<CachedPlayerEntity>,
     hand_side: Res<EquippedHandSide>,
     mut equipped_bags: ResMut<ClientEquippedBags>,
+    mut equipped_armor: ResMut<ClientEquippedArmor>,
 ) {
     if console.is_open {
         return;
@@ -59,7 +73,7 @@ pub fn handle_inventory_drag_and_drop(
     let Some(player_id) = cached_player.0 else { return; };
     let Some(inv) = conn.db.db.inventory().entity_id().find(&player_id) else { return; };
 
-    // Right-Click to Quick-Equip Weapon or Bag
+    // Right-Click to Quick-Equip Weapon, Bag, or Helmet
     if mouse.just_pressed(MouseButton::Right) {
         for (slot_idx, transform, node, interaction) in slot_query.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
@@ -76,6 +90,11 @@ pub fn handle_inventory_drag_and_drop(
                                     break;
                                 }
                             }
+                        } else if is_helmet_item(&item_name) {
+                            info!("Paperdoll: Quick-Equipping Helmet '{}' to Head slot", item_name);
+                            equipped_armor.head = Some(item_name);
+                            return;
+                        } else {
                             let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
                             let is_two_handed = ItemKind::from_name(&item_name).map_or_else(
                                 || crate::weapons::WeaponType::from_item_name(Some(&item_name)).is_two_handed(),
@@ -142,7 +161,18 @@ pub fn handle_inventory_drag_and_drop(
             }
         }
 
-        // 2. Check if released over MainHand Paperdoll slot
+        // 2. Check if released over Head Paperdoll slot
+        let mut dropped_on_head = false;
+        for (transform, node, interaction) in head_slot_q.iter() {
+            let rect = ui_node_screen_rect(transform, node, window);
+            let is_hit = rect.contains(cursor_pos) || interaction.map_or(false, |i| *i != Interaction::None);
+            if is_hit {
+                dropped_on_head = true;
+                break;
+            }
+        }
+
+        // 3. Check if released over MainHand Paperdoll slot
         let mut dropped_on_main = false;
         for (transform, node, interaction) in main_hand_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
@@ -153,7 +183,7 @@ pub fn handle_inventory_drag_and_drop(
             }
         }
 
-        // 3. Check if released over OffHand Paperdoll slot
+        // 4. Check if released over OffHand Paperdoll slot
         let mut dropped_on_off = false;
         for (transform, node, interaction) in off_hand_slot_q.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
@@ -164,7 +194,7 @@ pub fn handle_inventory_drag_and_drop(
             }
         }
 
-        // 4. Check if released over Paperdoll Bag slot
+        // 5. Check if released over Paperdoll Bag slot
         let mut dropped_on_bag = None;
         for (bag_slot_idx, transform, node, interaction) in bag_slot_query.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
@@ -175,7 +205,7 @@ pub fn handle_inventory_drag_and_drop(
             }
         }
 
-        // 5. Check if released anywhere inside the Inventory window
+        // 6. Check if released anywhere inside the Inventory window
         let mut inside_inventory_window = false;
         for (transform, node) in inv_root_query.iter() {
             let rect = ui_node_screen_rect(transform, node, window);
@@ -191,6 +221,13 @@ pub fn handle_inventory_drag_and_drop(
                 if let Err(e) = conn.db.reducers.swap_inventory_slots(source as u32, target as u32) {
                     error!("Failed to swap slots: {:?}", e);
                 }
+            }
+        } else if dropped_on_head {
+            if is_helmet_item(&drag_drop.item_type) {
+                info!("Paperdoll: Dragged item '{}' into {}", drag_drop.item_type, EquipmentSlot::Head.as_str());
+                equipped_armor.head = Some(drag_drop.item_type.clone());
+            } else {
+                info!("Item '{}' cannot be equipped in the Head slot.", drag_drop.item_type);
             }
         } else if dropped_on_main {
             info!("Paperdoll: Dragged item '{}' into {}", drag_drop.item_type, EquipmentSlot::MainHand.as_str());
@@ -232,7 +269,9 @@ pub fn handle_paperdoll_interactions(
     conn: Res<SpacetimeConnection>,
     mut hand_side: ResMut<EquippedHandSide>,
     mut equipped_bags: ResMut<ClientEquippedBags>,
+    mut equipped_armor: ResMut<ClientEquippedArmor>,
     primary_hand_btn_q: Query<&Interaction, (With<PaperdollPrimaryHandButton>, Changed<Interaction>)>,
+    unequip_head_q: Query<&Interaction, (With<PaperdollUnequipHeadButton>, Changed<Interaction>)>,
     unequip_main_q: Query<&Interaction, (With<PaperdollUnequipMainButton>, Changed<Interaction>)>,
     unequip_off_q: Query<&Interaction, (With<PaperdollUnequipOffButton>, Changed<Interaction>)>,
     bag_slots_q: Query<(&PaperdollBagSlotIndex, &Interaction), Changed<Interaction>>,
@@ -244,6 +283,13 @@ pub fn handle_paperdoll_interactions(
                 HandSide::Left => HandSide::Right,
             };
             info!("Paperdoll: Swapped Primary Hand to {:?}", hand_side.0);
+        }
+    }
+
+    for interaction in unequip_head_q.iter() {
+        if *interaction == Interaction::Pressed {
+            info!("Paperdoll: Unequipping {}", EquipmentSlot::Head.as_str());
+            equipped_armor.head = None;
         }
     }
 
@@ -326,16 +372,18 @@ pub fn update_inventory_ui(
     player_query: Query<&Transform, With<PlayerBody>>,
     hand_side: Res<EquippedHandSide>,
     equipped_bags: Res<ClientEquippedBags>,
+    equipped_armor: Res<ClientEquippedArmor>,
     inventory_root_q: Query<&Style, (With<InventoryUiRoot>, Without<RequiresWorkbenchRecipe>)>,
-    mut header_q: Query<&mut Text, (With<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut header_q: Query<&mut Text, (With<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
     mut name_q: Query<(&mut Text, &InventorySlotName), Without<InventorySlotCount>>,
     mut count_q: Query<(&mut Text, &InventorySlotCount), Without<InventorySlotName>>,
-    mut primary_hand_text_q: Query<&mut Text, (With<PaperdollPrimaryHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
-    mut main_hand_text_q: Query<&mut Text, (With<PaperdollMainHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
-    mut off_hand_text_q: Query<&mut Text, (With<PaperdollOffHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
-    mut bag_text_q: Query<(&mut Text, &PaperdollBagText), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagTooltip>)>,
-    mut bag_tooltip_q: Query<(&mut Text, &PaperdollBagTooltip), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>)>,
-    mut capacity_header_q: Query<&mut Text, (With<InventoryCapacityHeader>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut primary_hand_text_q: Query<&mut Text, (With<PaperdollPrimaryHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut main_hand_text_q: Query<&mut Text, (With<PaperdollMainHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut off_hand_text_q: Query<&mut Text, (With<PaperdollOffHandText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut head_text_q: Query<&mut Text, (With<PaperdollHeadText>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
+    mut bag_text_q: Query<(&mut Text, &PaperdollBagText), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagTooltip>)>,
+    mut bag_tooltip_q: Query<(&mut Text, &PaperdollBagTooltip), (Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<InventoryCapacityHeader>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>)>,
+    mut capacity_header_q: Query<&mut Text, (With<InventoryCapacityHeader>, Without<WorkbenchHeaderStatus>, Without<InventorySlotName>, Without<InventorySlotCount>, Without<PaperdollPrimaryHandText>, Without<PaperdollMainHandText>, Without<PaperdollOffHandText>, Without<PaperdollHeadText>, Without<PaperdollBagText>, Without<PaperdollBagTooltip>)>,
     mut workbench_recipe_styles: Query<&mut Style, (With<RequiresWorkbenchRecipe>, Without<InventoryUiRoot>)>,
 ) {
     // 1. Performance Guard: Zero overhead when the Inventory modal is closed
@@ -368,6 +416,18 @@ pub fn update_inventory_ui(
                 };
                 if text.sections[0].value != new_val {
                     text.sections[0].value = new_val;
+                }
+            }
+
+            // Sync Paperdoll Head Armor
+            for mut text in head_text_q.iter_mut() {
+                let formatted = if let Some(ref helm) = equipped_armor.head {
+                    format!("Head: {}", helm)
+                } else {
+                    "Head: [Empty]".to_string()
+                };
+                if text.sections[0].value != formatted {
+                    text.sections[0].value = formatted;
                 }
             }
 

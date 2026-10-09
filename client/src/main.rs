@@ -137,6 +137,7 @@ fn main() {
         .init_resource::<WeaponTunerState>()
         .init_resource::<EquippedHandSide>()
         .init_resource::<ClientEquippedBags>()
+        .init_resource::<ClientEquippedArmor>()
         .init_resource::<CrosshairSettings>()
         .init_resource::<CrosshairMenuState>()
         .init_resource::<TacticalAbilityState>()
