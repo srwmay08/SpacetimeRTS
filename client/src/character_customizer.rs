@@ -29,6 +29,7 @@
 // ----------------------------------------------------------------------------
 
 use bevy::prelude::{Transform as BevyTransform, *};
+use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::view::RenderLayers;
@@ -76,14 +77,14 @@ pub struct FaceProfile {
 impl Default for FaceProfile {
     fn default() -> Self {
         Self {
-            jaw_width: 0.22,
-            jaw_height: -0.16,
-            cheekbone_width: 0.22,
-            nose_bridge_length: 0.20,
-            nose_tip_z: 0.22,
-            brow_ridge: 0.12,
-            chin_forward: 0.10,
-            eye_depth: 0.05,
+            jaw_width: 0.11,
+            jaw_height: -0.14,
+            cheekbone_width: 0.13,
+            nose_bridge_length: 0.10,
+            nose_tip_z: 0.06,
+            brow_ridge: 0.035,
+            chin_forward: 0.045,
+            eye_depth: 0.015,
         }
     }
 }
@@ -129,13 +130,13 @@ impl Default for RaceAnatomyProfile {
         Self {
             race_name: "Human",
             torso_size: Vec3::new(0.42, 0.58, 0.26),
-            shoulder_width_offset: 0.28,
-            hip_width_offset: 0.16,
+            shoulder_width_offset: 0.26,
+            hip_width_offset: 0.14,
             upper_arm_length: 0.32,
             forearm_length: 0.30,
-            upper_leg_length: 0.38,
-            lower_leg_length: 0.36,
-            limb_thickness: 0.12,
+            upper_leg_length: 0.40,
+            lower_leg_length: 0.38,
+            limb_thickness: 0.11,
             head_scale: 1.0,
             skin_color: Color::srgb(0.85, 0.68, 0.55),
             cloth_color: Color::srgb(0.24, 0.36, 0.52),
@@ -163,25 +164,25 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
         name: "Human Adventurer",
         description: "Balanced athletic humanoid proportions and versatile cranial silhouette.",
         face: FaceProfile {
-            jaw_width: 0.22,
-            jaw_height: -0.16,
-            cheekbone_width: 0.22,
-            nose_bridge_length: 0.20,
-            nose_tip_z: 0.22,
-            brow_ridge: 0.12,
-            chin_forward: 0.10,
-            eye_depth: 0.05,
+            jaw_width: 0.11,
+            jaw_height: -0.14,
+            cheekbone_width: 0.13,
+            nose_bridge_length: 0.10,
+            nose_tip_z: 0.06,
+            brow_ridge: 0.035,
+            chin_forward: 0.045,
+            eye_depth: 0.015,
         },
         anatomy: RaceAnatomyProfile {
             race_name: "Human",
             torso_size: Vec3::new(0.42, 0.58, 0.26),
-            shoulder_width_offset: 0.28,
-            hip_width_offset: 0.16,
+            shoulder_width_offset: 0.26,
+            hip_width_offset: 0.14,
             upper_arm_length: 0.32,
             forearm_length: 0.30,
-            upper_leg_length: 0.38,
-            lower_leg_length: 0.36,
-            limb_thickness: 0.12,
+            upper_leg_length: 0.40,
+            lower_leg_length: 0.38,
+            limb_thickness: 0.11,
             head_scale: 1.0,
             skin_color: Color::srgb(0.85, 0.68, 0.55),
             cloth_color: Color::srgb(0.22, 0.34, 0.48),
@@ -195,25 +196,25 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
         name: "Dark Elf (Drow)",
         description: "Slender agile frame, acute triangular jaw, high cheekbones, and sharp nasal bridge.",
         face: FaceProfile {
-            jaw_width: 0.15,
-            jaw_height: -0.18,
-            cheekbone_width: 0.26,
-            nose_bridge_length: 0.24,
-            nose_tip_z: 0.30,
-            brow_ridge: 0.16,
-            chin_forward: 0.12,
-            eye_depth: 0.07,
+            jaw_width: 0.08,
+            jaw_height: -0.16,
+            cheekbone_width: 0.14,
+            nose_bridge_length: 0.12,
+            nose_tip_z: 0.08,
+            brow_ridge: 0.045,
+            chin_forward: 0.055,
+            eye_depth: 0.020,
         },
         anatomy: RaceAnatomyProfile {
             race_name: "Dark Elf",
             torso_size: Vec3::new(0.36, 0.62, 0.22),
-            shoulder_width_offset: 0.24,
-            hip_width_offset: 0.14,
+            shoulder_width_offset: 0.23,
+            hip_width_offset: 0.13,
             upper_arm_length: 0.35,
             forearm_length: 0.33,
-            upper_leg_length: 0.42,
-            lower_leg_length: 0.40,
-            limb_thickness: 0.10,
+            upper_leg_length: 0.44,
+            lower_leg_length: 0.42,
+            limb_thickness: 0.095,
             head_scale: 0.95,
             skin_color: Color::srgb(0.55, 0.52, 0.65), // Dusky twilight purple
             cloth_color: Color::srgb(0.18, 0.12, 0.25), // Obsidian violet
@@ -227,26 +228,26 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
         name: "Barbarian Berserker",
         description: "Massive muscular torso, wide blocky jaw, blunt nose, and spiked heavy pauldrons.",
         face: FaceProfile {
-            jaw_width: 0.35,
-            jaw_height: -0.10,
-            cheekbone_width: 0.35,
-            nose_bridge_length: 0.18,
-            nose_tip_z: 0.15,
-            brow_ridge: 0.22,
-            chin_forward: 0.16,
-            eye_depth: 0.08,
+            jaw_width: 0.15,
+            jaw_height: -0.12,
+            cheekbone_width: 0.16,
+            nose_bridge_length: 0.09,
+            nose_tip_z: 0.05,
+            brow_ridge: 0.055,
+            chin_forward: 0.065,
+            eye_depth: 0.022,
         },
         anatomy: RaceAnatomyProfile {
             race_name: "Barbarian",
-            torso_size: Vec3::new(0.58, 0.65, 0.36),
-            shoulder_width_offset: 0.38,
-            hip_width_offset: 0.20,
+            torso_size: Vec3::new(0.56, 0.66, 0.34),
+            shoulder_width_offset: 0.34,
+            hip_width_offset: 0.17,
             upper_arm_length: 0.36,
             forearm_length: 0.34,
-            upper_leg_length: 0.40,
-            lower_leg_length: 0.38,
-            limb_thickness: 0.16,
-            head_scale: 1.15,
+            upper_leg_length: 0.42,
+            lower_leg_length: 0.40,
+            limb_thickness: 0.15,
+            head_scale: 1.10,
             skin_color: Color::srgb(0.78, 0.54, 0.40), // Bronzed sun-hardened tan
             cloth_color: Color::srgb(0.55, 0.18, 0.15), // Crimson war-tunic
             pants_color: Color::srgb(0.25, 0.18, 0.14),
@@ -259,26 +260,26 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
         name: "Forest Troll",
         description: "Elongated drooping snout, massive forward jaw, gangly limbs, and mossy green flesh.",
         face: FaceProfile {
-            jaw_width: 0.28,
-            jaw_height: -0.40,
-            cheekbone_width: 0.28,
-            nose_bridge_length: 0.32,
-            nose_tip_z: 0.50,
-            brow_ridge: 0.25,
-            chin_forward: 0.22,
-            eye_depth: 0.10,
+            jaw_width: 0.14,
+            jaw_height: -0.22,
+            cheekbone_width: 0.15,
+            nose_bridge_length: 0.16,
+            nose_tip_z: 0.12,
+            brow_ridge: 0.060,
+            chin_forward: 0.075,
+            eye_depth: 0.025,
         },
         anatomy: RaceAnatomyProfile {
             race_name: "Troll",
-            torso_size: Vec3::new(0.48, 0.72, 0.32),
-            shoulder_width_offset: 0.34,
-            hip_width_offset: 0.18,
+            torso_size: Vec3::new(0.46, 0.70, 0.30),
+            shoulder_width_offset: 0.29,
+            hip_width_offset: 0.15,
             upper_arm_length: 0.44,
             forearm_length: 0.42,
-            upper_leg_length: 0.44,
-            lower_leg_length: 0.42,
-            limb_thickness: 0.13,
-            head_scale: 1.10,
+            upper_leg_length: 0.46,
+            lower_leg_length: 0.44,
+            limb_thickness: 0.12,
+            head_scale: 1.05,
             skin_color: Color::srgb(0.38, 0.52, 0.32), // Mossy green
             cloth_color: Color::srgb(0.32, 0.26, 0.18), // Rough burlap
             pants_color: Color::srgb(0.20, 0.18, 0.14),
@@ -291,26 +292,26 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
         name: "Mountain Dwarf",
         description: "Broad stocky torso, low center of gravity, heavy brow, and dense thickset limbs.",
         face: FaceProfile {
-            jaw_width: 0.32,
-            jaw_height: -0.16,
-            cheekbone_width: 0.30,
-            nose_bridge_length: 0.20,
-            nose_tip_z: 0.26,
-            brow_ridge: 0.24,
-            chin_forward: 0.14,
-            eye_depth: 0.08,
+            jaw_width: 0.15,
+            jaw_height: -0.12,
+            cheekbone_width: 0.15,
+            nose_bridge_length: 0.09,
+            nose_tip_z: 0.07,
+            brow_ridge: 0.055,
+            chin_forward: 0.055,
+            eye_depth: 0.020,
         },
         anatomy: RaceAnatomyProfile {
             race_name: "Dwarf",
-            torso_size: Vec3::new(0.54, 0.48, 0.36),
-            shoulder_width_offset: 0.34,
-            hip_width_offset: 0.22,
+            torso_size: Vec3::new(0.52, 0.48, 0.34),
+            shoulder_width_offset: 0.31,
+            hip_width_offset: 0.18,
             upper_arm_length: 0.26,
             forearm_length: 0.24,
             upper_leg_length: 0.28,
             lower_leg_length: 0.26,
-            limb_thickness: 0.15,
-            head_scale: 1.10,
+            limb_thickness: 0.14,
+            head_scale: 1.05,
             skin_color: Color::srgb(0.82, 0.65, 0.52),
             cloth_color: Color::srgb(0.28, 0.42, 0.36), // Deep alpine green
             pants_color: Color::srgb(0.22, 0.18, 0.15),
@@ -494,33 +495,34 @@ pub fn generate_custom_face(profile: &FaceProfile) -> Mesh {
     );
 
     // Coordinate positions in local space (Forward is -Z, Up is +Y, Right is +X)
+    // Sized flush to the cranial skull bounds (width ~0.24m, height ~0.26m)
     let positions: Vec<[f32; 3]> = vec![
         // 0: Chin Tip
         [0.0, profile.jaw_height, -profile.chin_forward],
         // 1: Left Jaw
-        [-profile.jaw_width, profile.jaw_height + 0.10, 0.0],
+        [-profile.jaw_width, profile.jaw_height + 0.06, 0.0],
         // 2: Right Jaw
-        [profile.jaw_width, profile.jaw_height + 0.10, 0.0],
+        [profile.jaw_width, profile.jaw_height + 0.06, 0.0],
         // 3: Nose Tip
-        [0.0, 0.0, -profile.nose_tip_z],
+        [0.0, -0.02, -profile.nose_tip_z],
         // 4: Nose Bridge (Midway up)
-        [0.0, profile.nose_bridge_length * 0.55, -profile.nose_tip_z * 0.55],
+        [0.0, profile.nose_bridge_length * 0.35, -profile.nose_tip_z * 0.55],
         // 5: Left Cheekbone
-        [-profile.cheekbone_width, 0.08, -0.04],
+        [-profile.cheekbone_width, -0.01, -0.01],
         // 6: Right Cheekbone
-        [profile.cheekbone_width, 0.08, -0.04],
-        // 7: Forehead Center
-        [0.0, 0.42, 0.0],
+        [profile.cheekbone_width, -0.01, -0.01],
+        // 7: Forehead Center (flush with top cranial brow)
+        [0.0, 0.11, 0.0],
         // 8: Left Brow
-        [-profile.cheekbone_width * 0.75, 0.28, -profile.brow_ridge],
+        [-profile.cheekbone_width * 0.75, 0.06, -profile.brow_ridge],
         // 9: Right Brow
-        [profile.cheekbone_width * 0.75, 0.28, -profile.brow_ridge],
+        [profile.cheekbone_width * 0.75, 0.06, -profile.brow_ridge],
         // 10: Left Eye Socket
-        [-profile.cheekbone_width * 0.45, 0.18, -profile.eye_depth],
+        [-profile.cheekbone_width * 0.45, 0.02, -profile.eye_depth],
         // 11: Right Eye Socket
-        [profile.cheekbone_width * 0.45, 0.18, -profile.eye_depth],
+        [profile.cheekbone_width * 0.45, 0.02, -profile.eye_depth],
         // 12: Upper Lip / Philtrum
-        [0.0, profile.jaw_height * 0.45, -profile.chin_forward * 0.8],
+        [0.0, profile.jaw_height * 0.45, -profile.chin_forward * 0.6],
     ];
 
     // Connect vertices into triangular facets with counter-clockwise winding
@@ -670,13 +672,13 @@ pub fn spawn_procedural_character_hierarchy(
 
     // Head Collider
     let head_col = ColliderBuilder::cuboid(
-        0.34 * race.head_scale * 0.5,
-        0.38 * race.head_scale * 0.5,
-        0.34 * race.head_scale * 0.5,
+        0.24 * race.head_scale * 0.5,
+        0.26 * race.head_scale * 0.5,
+        0.26 * race.head_scale * 0.5,
     )
     .translation(rapier3d::na::Vector3::new(
         0.0,
-        race.torso_size.y * 0.5 + 0.24 * race.head_scale,
+        race.torso_size.y * 0.5 + 0.22 * race.head_scale,
         0.0,
     ));
     let head_col_h = physics.collider_set.insert_with_parent(
@@ -898,25 +900,31 @@ pub fn spawn_procedural_character_hierarchy(
                 RTSProxy,
             ))
             .with_children(|model_parent| {
-                // 1. TORSO (Central skeletal anchor)
+                // 1. TORSO PIVOT (Central skeletal anchor pivot - UNIFORM SCALE 1.0)
                 model_parent
                     .spawn((
-                        PbrBundle {
-                            mesh: unit_cuboid.clone(),
-                            material: cloth_mat.clone(),
-                            transform: BevyTransform {
-                                translation: Vec3::ZERO,
-                                scale: race.torso_size,
-                                ..default()
-                            },
-                            ..default()
-                        },
+                        SpatialBundle::from_transform(BevyTransform::IDENTITY),
                         JointType::Torso,
                         JointOwner(parent_entity),
                         ColHandle(torso_col_h),
-                        layers.clone(),
                     ))
                     .with_children(|torso| {
+                        // Torso Visual Mesh (Leaf child scaled to torso_size)
+                        torso.spawn((
+                            PbrBundle {
+                                mesh: unit_cuboid.clone(),
+                                material: cloth_mat.clone(),
+                                transform: BevyTransform {
+                                    translation: Vec3::ZERO,
+                                    scale: race.torso_size,
+                                    ..default()
+                                },
+                                ..default()
+                            },
+                            LimbMeshSegment(JointType::Torso),
+                            layers.clone(),
+                        ));
+
                         // 2. HEAD PIVOT
                         let head_pivot_y = race.torso_size.y * 0.5 + 0.16 * race.head_scale;
                         torso
@@ -931,26 +939,26 @@ pub fn spawn_procedural_character_hierarchy(
                                 ColHandle(head_col_h),
                             ))
                             .with_children(|head_pivot| {
-                                // Skull Base
+                                // Cranial Skull Base (proportional human head: 0.24m wide, 0.26m high, 0.26m deep)
                                 head_pivot.spawn((
                                     PbrBundle {
                                         mesh: unit_cuboid.clone(),
                                         material: skin_mat.clone(),
                                         transform: BevyTransform {
                                             translation: Vec3::new(0.0, 0.08, 0.0),
-                                            scale: Vec3::new(0.34, 0.38, 0.34),
+                                            scale: Vec3::new(0.24, 0.26, 0.26),
                                             ..default()
                                         },
                                         ..default()
                                     },
                                     layers.clone(),
                                 ));
-                                // Raw Procedural Face (Pinned to anterior face: -Z)
+                                // Raw Procedural Face (Pinned flush to anterior skull face: Z = -0.13)
                                 head_pivot.spawn((
                                     PbrBundle {
                                         mesh: face_mesh,
                                         material: skin_mat.clone(),
-                                        transform: BevyTransform::from_xyz(0.0, 0.06, -0.17),
+                                        transform: BevyTransform::from_xyz(0.0, 0.08, -0.13),
                                         ..default()
                                     },
                                     ProceduralFaceMesh,
@@ -1678,7 +1686,7 @@ pub fn live_character_update_system(
 
             match joint {
                 JointType::Torso => {
-                    tf.scale = race.torso_size;
+                    tf.scale = Vec3::ONE;
                     if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
                         col.set_shape(SharedShape::cuboid(
                             race.torso_size.x * 0.5,
@@ -1692,13 +1700,13 @@ pub fn live_character_update_system(
                     tf.scale = Vec3::splat(race.head_scale);
                     if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
                         col.set_shape(SharedShape::cuboid(
-                            0.34 * race.head_scale * 0.5,
-                            0.38 * race.head_scale * 0.5,
-                            0.34 * race.head_scale * 0.5,
+                            0.24 * race.head_scale * 0.5,
+                            0.26 * race.head_scale * 0.5,
+                            0.26 * race.head_scale * 0.5,
                         ));
                         col.set_position_wrt_parent(rapier3d::na::Isometry3::translation(
                             0.0,
-                            race.torso_size.y * 0.5 + 0.24 * race.head_scale,
+                            race.torso_size.y * 0.5 + 0.22 * race.head_scale,
                             0.0,
                         ));
                     }
@@ -1893,6 +1901,9 @@ pub fn live_character_update_system(
         // 2. Update visual limb mesh scales and offsets
         for (segment, mut tf) in limb_mesh_q.iter_mut() {
             match segment.0 {
+                JointType::Torso => {
+                    tf.scale = race.torso_size;
+                }
                 JointType::ShoulderL | JointType::ShoulderR => {
                     tf.translation = Vec3::new(0.0, -race.upper_arm_length * 0.5, 0.0);
                     tf.scale = Vec3::new(race.limb_thickness, race.upper_arm_length, race.limb_thickness);
@@ -1958,6 +1969,14 @@ pub struct CharacterEditorState {
     pub studio_preview_mode: StudioPreviewMode,
     pub studio_bow_draw: f32,
     pub previous_cam_distance: f32,
+    /// Horizontal orbit angle in radians (0.0 = directly in front of character)
+    pub studio_yaw: f32,
+    /// Vertical elevation angle in radians (0.0 = level with target)
+    pub studio_pitch: f32,
+    /// Camera distance from target anchor point in meters
+    pub studio_distance: f32,
+    /// Vertical height offset of the inspection target in local space (meters)
+    pub studio_target_height: f32,
 }
 
 impl Default for CharacterEditorState {
@@ -1971,6 +1990,10 @@ impl Default for CharacterEditorState {
             studio_preview_mode: StudioPreviewMode::LiveGameplay,
             studio_bow_draw: 0.0,
             previous_cam_distance: 0.0,
+            studio_yaw: 0.0,
+            studio_pitch: 0.0,
+            studio_distance: 1.15,
+            studio_target_height: 0.18,
         }
     }
 }
@@ -2161,14 +2184,32 @@ pub fn setup_character_editor_ui(mut commands: Commands) {
                 ..default()
             })
             .with_children(|header| {
-                header.spawn(TextBundle::from_section(
-                    "🎭 CHARACTER STUDIO & MORPHOLOGY",
-                    TextStyle {
-                        font_size: font_title,
-                        color: gold_header,
+                header.spawn(NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(2.0),
                         ..default()
                     },
-                ));
+                    ..default()
+                })
+                .with_children(|col| {
+                    col.spawn(TextBundle::from_section(
+                        "🎭 CHARACTER STUDIO & MORPHOLOGY",
+                        TextStyle {
+                            font_size: font_title,
+                            color: gold_header,
+                            ..default()
+                        },
+                    ));
+                    col.spawn(TextBundle::from_section(
+                        "💡 [Hold RMB Drag] Orbit 360° | [Scroll] Zoom",
+                        TextStyle {
+                            font_size: 10.5,
+                            color: Color::srgb(0.65, 0.72, 0.82),
+                            ..default()
+                        },
+                    ));
+                });
 
                 spawn_editor_button(header, " [X] ", EditorAction::CloseEditor, 36.0, 24.0);
             });
@@ -2607,10 +2648,18 @@ pub fn toggle_character_editor_ui(
                 window.cursor.grab_mode = CursorGrabMode::None;
                 window.cursor.visible = true;
 
-                // Orbit 3rd-person camera boom so player can inspect character model
+                // Configure studio camera parameters
                 editor.previous_cam_distance = cam_settings.target_distance;
-                cam_settings.target_distance = 3.2;
-                info!("🎭 Opened Character Model Customizer Studio [F5]. Camera zoomed to 3rd-person.");
+                editor.studio_yaw = 0.0;
+                editor.studio_pitch = 0.0;
+                if editor.current_tab == EditorTab::FaceSculpt {
+                    editor.studio_distance = 1.15;
+                    editor.studio_target_height = 0.38;
+                } else {
+                    editor.studio_distance = 2.80;
+                    editor.studio_target_height = -0.15;
+                }
+                info!("🎭 Opened Character Model Customizer Studio [F5]. Studio camera orbit active.");
             } else {
                 if *camera_mode.get() == CameraMode::FPS {
                     window.cursor.grab_mode = CursorGrabMode::Locked;
@@ -2621,6 +2670,65 @@ pub fn toggle_character_editor_ui(
             }
         }
     }
+}
+
+/// Smoothly orbits and frames the camera around the player character in Studio inspection mode.
+/// Supports 360° orbital rotation via Right Mouse Button drag and continuous zoom via mouse wheel.
+/// Automatically adjusts framing distance and focal height between face close-up and full-body.
+pub fn studio_camera_orbit_system(
+    time: Res<Time>,
+    mut editor: ResMut<CharacterEditorState>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut mouse_motion: EventReader<MouseMotion>,
+    mut scroll_evts: EventReader<MouseWheel>,
+    mut head_q: Query<(&mut BevyTransform, &mut RenderLayers), With<PlayerHead>>,
+) {
+    if !editor.is_open {
+        return;
+    }
+
+    let dt = time.delta_seconds();
+    let Ok((mut head_transform, mut head_layers)) = head_q.get_single_mut() else { return; };
+
+    // 1. Ensure 3rd-person render layers so character model is visible
+    let studio_layers = RenderLayers::from_layers(&[0, 2]);
+    if *head_layers != studio_layers {
+        *head_layers = studio_layers;
+    }
+
+    // 2. Mouse orbit controls when Right Mouse Button is held
+    if mouse_buttons.pressed(MouseButton::Right) {
+        for ev in mouse_motion.read() {
+            if ev.delta.length_squared() > 1e-4 {
+                editor.studio_yaw += ev.delta.x * 0.007;
+                editor.studio_pitch = (editor.studio_pitch - ev.delta.y * 0.007).clamp(-0.85, 0.85);
+            }
+        }
+    } else {
+        mouse_motion.clear();
+    }
+
+    // 3. Mouse wheel zoom
+    for ev in scroll_evts.read() {
+        if ev.y.abs() > 1e-3 {
+            editor.studio_distance = (editor.studio_distance - ev.y * 0.25).clamp(0.65, 5.0);
+        }
+    }
+
+    // 4. Smoothly interpolate camera position and orientation in PlayerBody local space
+    // In PlayerBody space, the character faces along local -Z.
+    // The camera is placed in front along -Z relative to the focal point.
+    let orbit_rot = Quat::from_euler(EulerRot::YXZ, editor.studio_yaw, editor.studio_pitch, 0.0);
+    let target_local = Vec3::new(0.0, editor.studio_target_height, 0.0);
+    let cam_offset = orbit_rot * Vec3::new(0.0, 0.0, -editor.studio_distance);
+    let desired_cam_pos = target_local + cam_offset;
+    let desired_cam_rot = BevyTransform::from_translation(desired_cam_pos)
+        .looking_at(target_local, Vec3::Y)
+        .rotation;
+
+    let t = (14.0 * dt).min(1.0);
+    head_transform.translation = head_transform.translation.lerp(desired_cam_pos, t);
+    head_transform.rotation = head_transform.rotation.slerp(desired_cam_rot, t);
 }
 
 pub fn handle_character_editor_interactions(
@@ -2640,6 +2748,20 @@ pub fn handle_character_editor_interactions(
         match action {
             EditorAction::SetTab(tab) => {
                 editor.current_tab = *tab;
+                match tab {
+                    EditorTab::FaceSculpt => {
+                        editor.studio_distance = 1.15;
+                        editor.studio_target_height = 0.38;
+                        editor.studio_yaw = 0.0;
+                        editor.studio_pitch = 0.0;
+                    }
+                    EditorTab::BodyAnatomy | EditorTab::WardrobeColors | EditorTab::AnimationStudio => {
+                        editor.studio_distance = 2.80;
+                        editor.studio_target_height = -0.15;
+                        editor.studio_yaw = 0.0;
+                        editor.studio_pitch = 0.0;
+                    }
+                }
             }
             EditorAction::PrevPreset => {
                 let count = CHARACTER_PRESETS.len();
@@ -2654,35 +2776,35 @@ pub fn handle_character_editor_interactions(
                 mark_dirty = true;
             }
             EditorAction::AdjustFaceJawWidth(d) => {
-                editor.face.jaw_width = (editor.face.jaw_width + d).clamp(0.08, 0.45);
+                editor.face.jaw_width = (editor.face.jaw_width + d).clamp(0.05, 0.22);
                 mark_dirty = true;
             }
             EditorAction::AdjustFaceJawHeight(d) => {
-                editor.face.jaw_height = (editor.face.jaw_height + d).clamp(-0.50, 0.05);
+                editor.face.jaw_height = (editor.face.jaw_height + d).clamp(-0.25, -0.06);
                 mark_dirty = true;
             }
             EditorAction::AdjustFaceCheekbones(d) => {
-                editor.face.cheekbone_width = (editor.face.cheekbone_width + d).clamp(0.12, 0.45);
+                editor.face.cheekbone_width = (editor.face.cheekbone_width + d).clamp(0.08, 0.22);
                 mark_dirty = true;
             }
             EditorAction::AdjustFaceNoseBridge(d) => {
-                editor.face.nose_bridge_length = (editor.face.nose_bridge_length + d).clamp(0.10, 0.40);
+                editor.face.nose_bridge_length = (editor.face.nose_bridge_length + d).clamp(0.05, 0.20);
                 mark_dirty = true;
             }
             EditorAction::AdjustFaceNoseTipZ(d) => {
-                editor.face.nose_tip_z = (editor.face.nose_tip_z + d).clamp(0.08, 0.60);
+                editor.face.nose_tip_z = (editor.face.nose_tip_z + d).clamp(0.02, 0.16);
                 mark_dirty = true;
             }
             EditorAction::AdjustFaceBrowRidge(d) => {
-                editor.face.brow_ridge = (editor.face.brow_ridge + d).clamp(0.02, 0.35);
+                editor.face.brow_ridge = (editor.face.brow_ridge + d).clamp(0.01, 0.10);
                 mark_dirty = true;
             }
             EditorAction::AdjustFaceChinForward(d) => {
-                editor.face.chin_forward = (editor.face.chin_forward + d).clamp(-0.15, 0.25);
+                editor.face.chin_forward = (editor.face.chin_forward + d).clamp(0.01, 0.12);
                 mark_dirty = true;
             }
             EditorAction::AdjustFaceEyeDepth(d) => {
-                editor.face.eye_depth = (editor.face.eye_depth + d).clamp(0.00, 0.20);
+                editor.face.eye_depth = (editor.face.eye_depth + d).clamp(0.00, 0.06);
                 mark_dirty = true;
             }
             EditorAction::AdjustTorsoWidth(d) => {
@@ -2951,6 +3073,7 @@ impl Plugin for CharacterCustomizerPlugin {
                     handle_character_editor_interactions,
                     update_character_editor_display,
                     update_editor_tab_visibility,
+                    studio_camera_orbit_system,
                     live_character_update_system,
                     sync_player_animation_state,
                     procedural_animator_system,
