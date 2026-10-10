@@ -495,78 +495,118 @@ pub enum ActionState {
 // 5. PROCEDURAL MESH GENERATORS
 // ----------------------------------------------------------------------------
 
-/// Generates a stylized, low-poly faceted 3D face mesh matching the FaceProfile.
-/// Winding order is counter-clockwise for outward normals, followed by flat normal calculation.
+/// Generates a stylized, high-density low-poly faceted 3D face mesh (27 Vertices).
+/// Winding order is counter-clockwise (CCW) for outward normals.
 pub fn generate_custom_face(profile: &FaceProfile) -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     );
 
-    // Coordinate positions in local space (Forward is -Z, Up is +Y, Right is +X)
-    // Sized flush to the cranial skull bounds (width ~0.24m, height ~0.26m)
+    // Local Space: Forward is -Z, Up is +Y, Right is +X
     let positions: Vec<[f32; 3]> = vec![
-        // 0: Chin Tip
-        [0.0, profile.jaw_height, -profile.chin_forward],
-        // 1: Left Jaw
-        [-profile.jaw_width, profile.jaw_height + 0.06, 0.0],
-        // 2: Right Jaw
-        [profile.jaw_width, profile.jaw_height + 0.06, 0.0],
-        // 3: Nose Tip
-        [0.0, -0.02, -profile.nose_tip_z],
-        // 4: Nose Bridge (Midway up)
-        [0.0, profile.nose_bridge_length * 0.35, -profile.nose_tip_z * 0.55],
-        // 5: Left Cheekbone
-        [-profile.cheekbone_width, -0.01, -0.01],
-        // 6: Right Cheekbone
-        [profile.cheekbone_width, -0.01, -0.01],
-        // 7: Forehead Center (flush with top cranial brow)
-        [0.0, 0.11, 0.0],
-        // 8: Left Brow
-        [-profile.cheekbone_width * 0.75, 0.06, -profile.brow_ridge],
-        // 9: Right Brow
-        [profile.cheekbone_width * 0.75, 0.06, -profile.brow_ridge],
-        // 10: Left Eye Socket
-        [-profile.cheekbone_width * 0.45, 0.02, -profile.eye_depth],
-        // 11: Right Eye Socket
-        [profile.cheekbone_width * 0.45, 0.02, -profile.eye_depth],
-        // 12: Upper Lip / Philtrum
-        [0.0, profile.jaw_height * 0.45, -profile.chin_forward * 0.6],
+        // -- JAW & CHIN (0-2) --
+        [0.0, profile.jaw_height, -profile.chin_forward], // 0: Chin Center
+        [-profile.jaw_width, profile.jaw_height + 0.05, 0.0], // 1: Left Jaw Corner
+        [profile.jaw_width, profile.jaw_height + 0.05, 0.0], // 2: Right Jaw Corner
+        
+        // -- MOUTH & LIPS (3-6) --
+        [-0.025, profile.jaw_height + 0.035, -profile.chin_forward * 0.7], // 3: Left Mouth Corner
+        [0.025, profile.jaw_height + 0.035, -profile.chin_forward * 0.7],  // 4: Right Mouth Corner
+        [0.0, profile.jaw_height + 0.05, -profile.chin_forward * 0.85],    // 5: Upper Lip
+        [0.0, profile.jaw_height + 0.02, -profile.chin_forward * 0.90],    // 6: Lower Lip
+        
+        // -- NOSE (7-10) --
+        [0.0, -0.015, -profile.nose_tip_z], // 7: Nose Tip
+        [-0.018, -0.01, -profile.nose_tip_z * 0.4], // 8: Left Nostril Base
+        [0.018, -0.01, -profile.nose_tip_z * 0.4],  // 9: Right Nostril Base
+        [0.0, profile.nose_bridge_length * 0.5, -profile.nose_tip_z * 0.5], // 10: Nose Bridge
+        
+        // -- CHEEKS & HOLLOWS (11-14) --
+        [-profile.cheekbone_width, 0.0, -0.01], // 11: Left Cheekbone (Zygomatic High)
+        [profile.cheekbone_width, 0.0, -0.01],  // 12: Right Cheekbone (Zygomatic High)
+        [-profile.cheekbone_width * 0.6, profile.jaw_height + 0.06, -0.02], // 13: Left Cheek Hollow
+        [profile.cheekbone_width * 0.6, profile.jaw_height + 0.06, -0.02],  // 14: Right Cheek Hollow
+        
+        // -- EYES & ORBITS (15-18) --
+        [-0.015, 0.025, -profile.eye_depth * 0.4], // 15: Left Inner Eye (Tear duct)
+        [0.015, 0.025, -profile.eye_depth * 0.4],  // 16: Right Inner Eye (Tear duct)
+        [-profile.cheekbone_width * 0.55, 0.02, -profile.eye_depth], // 17: Left Outer Eye Socket
+        [profile.cheekbone_width * 0.55, 0.02, -profile.eye_depth],  // 18: Right Outer Eye Socket
+        
+        // -- BROWS & TEMPLES (19-23) --
+        [0.0, 0.06, -profile.brow_ridge], // 19: Brow Center (Glabella)
+        [-profile.cheekbone_width * 0.5, 0.07, -profile.brow_ridge], // 20: Left Brow Arch
+        [profile.cheekbone_width * 0.5, 0.07, -profile.brow_ridge],  // 21: Right Brow Arch
+        [-profile.cheekbone_width * 0.85, 0.07, 0.0], // 22: Left Temple
+        [profile.cheekbone_width * 0.85, 0.07, 0.0],  // 23: Right Temple
+        
+        // -- FOREHEAD (24-26) --
+        [0.0, 0.12, 0.0], // 24: Forehead Top Center
+        [-profile.cheekbone_width * 0.6, 0.12, 0.0], // 25: Forehead Top Left
+        [profile.cheekbone_width * 0.6, 0.12, 0.0],  // 26: Forehead Top Right
     ];
 
-    // Connect vertices into triangular facets with counter-clockwise winding
     let indices = Indices::U32(vec![
-        // Lower Chin / Jaw
-        0, 1, 12,   // Chin to Left Jaw
-        0, 12, 2,   // Chin to Right Jaw
-        1, 5, 12,   // Left Jaw to Cheek
-        2, 12, 6,   // Right Jaw to Cheek
-
-        // Nose Pyramid
-        12, 5, 3,   // Left under-nose to cheek
-        12, 3, 6,   // Right under-nose to cheek
-        3, 5, 4,    // Left nose bridge facet
-        3, 4, 6,    // Right nose bridge facet
-
-        // Eye Sockets & Cheeks
-        5, 8, 10,   // Left cheek to brow
-        4, 5, 10,   // Nose bridge to left eye
-        4, 10, 8,   // Nose to left brow
-        6, 11, 9,   // Right cheek to brow
-        4, 11, 6,   // Nose bridge to right eye
-        4, 9, 11,   // Nose to right brow
-
-        // Forehead
-        4, 8, 7,    // Forehead left
-        4, 7, 9,    // Forehead right
-        8, 5, 7,    // Temple left
-        9, 7, 6,    // Temple right
+        // CHIN & LOWER JAW
+        0, 13, 3,    // Left chin to mouth
+        0, 1, 13,    // Left jaw edge
+        1, 11, 13,   // Left lower cheek
+        0, 4, 14,    // Right chin to mouth
+        0, 14, 2,    // Right jaw edge
+        2, 14, 12,   // Right lower cheek
+        
+        // MOUTH (Lips)
+        0, 3, 6,     // Left lower lip
+        0, 6, 4,     // Right lower lip
+        6, 3, 5,     // Left mouth corner
+        6, 5, 4,     // Right mouth corner
+        
+        // NASOLABIAL FOLDS (Smile Lines)
+        5, 3, 8,     // Left upper lip to nostril
+        3, 13, 8,    // Left cheek hollow
+        13, 11, 8,   // Left mid cheek
+        5, 9, 4,     // Right upper lip to nostril
+        4, 9, 14,    // Right cheek hollow
+        14, 9, 12,   // Right mid cheek
+        
+        // NOSE
+        5, 8, 7,     // Left under-nose
+        5, 7, 9,     // Right under-nose
+        7, 8, 10,    // Left nose bridge side
+        7, 10, 9,    // Right nose bridge side
+        
+        // UPPER CHEEKS (Zygomatic Arch to Eyes)
+        8, 11, 17,   // Left outer cheekbone
+        8, 17, 15,   // Left under-eye
+        15, 17, 10,  // Left inner eye to bridge
+        9, 18, 12,   // Right outer cheekbone
+        9, 16, 18,   // Right under-eye
+        16, 10, 18,  // Right inner eye to bridge
+        
+        // ORBITAL SOCKETS & BROWS
+        15, 10, 19,  // Left inner brow
+        15, 19, 20,  // Left mid brow
+        15, 20, 17,  // Left outer brow
+        17, 20, 22,  // Left temple lower
+        11, 22, 17,  // Left temple edge
+        16, 19, 10,  // Right inner brow
+        16, 21, 19,  // Right mid brow
+        16, 18, 21,  // Right outer brow
+        18, 23, 21,  // Right temple lower
+        12, 18, 23,  // Right temple edge
+        
+        // FOREHEAD
+        19, 25, 24,  // Left mid forehead
+        19, 20, 25,  // Left outer forehead
+        20, 22, 25,  // Left temple upper
+        19, 24, 26,  // Right mid forehead
+        19, 26, 21,  // Right outer forehead
+        21, 26, 23,  // Right temple upper
     ]);
 
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_indices(indices);
-
-    // Duplicate vertices per face and compute flat normals to guarantee crisp low-poly facets
     mesh.duplicate_vertices();
     mesh.compute_flat_normals();
     mesh
