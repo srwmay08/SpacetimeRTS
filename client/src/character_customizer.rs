@@ -438,6 +438,10 @@ pub struct ProceduralFaceMesh;
 #[derive(Component)]
 pub struct EquippedHelmetMesh;
 
+/// Marker for the cranial skull cuboid base entity.
+#[derive(Component)]
+pub struct CranialSkullMesh;
+
 /// Attached to the player to hold their active customization data.
 #[derive(Component, Clone, Debug)]
 pub struct PlayerCharacterCustomization {
@@ -601,6 +605,7 @@ pub fn create_low_poly_pyramid() -> Mesh {
 
 /// Generates a stylized, low-poly faceted iron helmet with crown plates, crest, nasal guard,
 /// and cheek protectors matching the SpacetimeRTS BlendSwap #9440 aesthetic.
+/// Fully dilated outside the cranial skull bounds to enclose the head without geometry clipping.
 pub fn create_low_poly_helmet() -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
@@ -608,65 +613,385 @@ pub fn create_low_poly_helmet() -> Mesh {
     );
 
     // Coordinate positions in local space of JointType::Head.
-    // The cranial skull is centered at [0.0, 0.08, 0.0] with extents [-0.12..+0.12, -0.05..+0.21, -0.13..+0.13].
+    // Cranial skull bounds: X: [-0.12..+0.12], Y: [-0.05..+0.21], Z: [-0.13..+0.13].
     // Forward is -Z, Up is +Y, Right is +X.
+    // Every vertex of the helmet dome sits comfortably outside the skull cuboid:
+    // - Roof Dome sits at Y >= 0.238 (above skull roof Y = 0.21)
+    // - Side Walls sit at |X| >= 0.140, |Z| >= 0.145
     let positions: Vec<[f32; 3]> = vec![
-        // 0: Crown Apex (top center of the helmet dome)
-        [0.0, 0.245, 0.0],
-        // 1: Forehead Brow Center (rim right above the eyebrows)
-        [0.0, 0.14, -0.142],
-        // 2: Left Brow / Temple
-        [-0.132, 0.13, -0.11],
-        // 3: Right Brow / Temple
-        [0.132, 0.13, -0.11],
-        // 4: Left Ear / Side Rim
-        [-0.136, 0.06, 0.01],
-        // 5: Right Ear / Side Rim
-        [0.136, 0.06, 0.01],
-        // 6: Left Back Occipital
-        [-0.132, 0.05, 0.136],
-        // 7: Right Back Occipital
-        [0.132, 0.05, 0.136],
-        // 8: Back Neck Center Rim
-        [0.0, 0.04, 0.142],
-        // 9: Crest Ridge Front
-        [0.0, 0.265, -0.08],
-        // 10: Crest Ridge Peak
-        [0.0, 0.28, 0.02],
-        // 11: Crest Ridge Back
-        [0.0, 0.23, 0.11],
-        // 12: Nasal Guard Tip (pointed guard extending down the nose)
-        [0.0, 0.02, -0.155],
-        // 13: Left Cheek Guard Bottom
-        [-0.125, -0.01, -0.05],
-        // 14: Right Cheek Guard Bottom
-        [0.125, -0.01, -0.05],
+        // 0: Crown Center Apex
+        [0.0, 0.275, 0.0],
+        // 1: Crown Ridge Front
+        [0.0, 0.265, -0.09],
+        // 2: Crown Ridge Back
+        [0.0, 0.260, 0.09],
+        // 3: Roof Front-Left
+        [-0.105, 0.238, -0.125],
+        // 4: Roof Front-Right
+        [0.105, 0.238, -0.125],
+        // 5: Roof Side-Left
+        [-0.140, 0.238, 0.0],
+        // 6: Roof Side-Right
+        [0.140, 0.238, 0.0],
+        // 7: Roof Back-Left
+        [-0.105, 0.238, 0.125],
+        // 8: Roof Back-Right
+        [0.105, 0.238, 0.125],
+        // 9: Roof Brow-Center
+        [0.0, 0.245, -0.148],
+        // 10: Roof Nape-Center
+        [0.0, 0.245, 0.148],
+
+        // 11: Crest Fin Front
+        [0.0, 0.295, -0.08],
+        // 12: Crest Fin Peak
+        [0.0, 0.320, 0.0],
+        // 13: Crest Fin Back
+        [0.0, 0.290, 0.08],
+
+        // 14: Lower Rim Brow-Center
+        [0.0, 0.115, -0.152],
+        // 15: Lower Rim Brow-Left
+        [-0.120, 0.105, -0.142],
+        // 16: Lower Rim Brow-Right
+        [0.120, 0.105, -0.142],
+        // 17: Lower Rim Temple-Left
+        [-0.142, 0.075, -0.06],
+        // 18: Lower Rim Temple-Right
+        [0.142, 0.075, -0.06],
+        // 19: Lower Rim Ear-Left
+        [-0.145, 0.055, 0.04],
+        // 20: Lower Rim Ear-Right
+        [0.145, 0.055, 0.04],
+        // 21: Lower Rim Occipital-Left
+        [-0.138, 0.045, 0.145],
+        // 22: Lower Rim Occipital-Right
+        [0.138, 0.045, 0.145],
+        // 23: Lower Rim Nape-Center
+        [0.0, 0.040, 0.155],
+
+        // 24: Nasal Guard Tip
+        [0.0, -0.010, -0.165],
+        // 25: Nasal Guard Mid-Left
+        [-0.022, 0.050, -0.158],
+        // 26: Nasal Guard Mid-Right
+        [0.022, 0.050, -0.158],
+        // 27: Cheek Guard Bottom-Left
+        [-0.138, -0.025, -0.06],
+        // 28: Cheek Guard Bottom-Right
+        [0.138, -0.025, -0.06],
     ];
 
     let indices = Indices::U32(vec![
-        // Dome Crown Facets (counter-clockwise winding for outward normals)
-        0, 2, 1,   // Crown to Left Forehead
-        0, 1, 3,   // Crown to Right Forehead
-        0, 4, 2,   // Crown to Left Side
-        0, 3, 5,   // Crown to Right Side
-        0, 6, 4,   // Crown to Left Back
-        0, 5, 7,   // Crown to Right Back
-        0, 8, 6,   // Crown to Center Back Left
-        0, 7, 8,   // Crown to Center Back Right
+        // Crown Dome Roof
+        0, 3, 1,
+        0, 1, 4,
+        0, 5, 3,
+        0, 4, 6,
+        0, 7, 5,
+        0, 6, 8,
+        0, 2, 7,
+        0, 8, 2,
+        1, 3, 9,
+        1, 9, 4,
+        2, 10, 7,
+        2, 8, 10,
 
         // Central Crest Fin (raised spine along the skull)
-        1, 9, 0,   // Front brow to crest front
-        0, 9, 10,  // Crest front to peak
-        0, 10, 11, // Crest peak to back
-        0, 11, 8,  // Crest back to neck rim
+        1, 11, 0,
+        0, 11, 12,
+        0, 12, 13,
+        0, 13, 2,
+
+        // Front Brow Wall
+        9, 3, 15,
+        9, 15, 14,
+        9, 16, 4,
+        9, 14, 16,
+
+        // Left Side Wall
+        3, 5, 17,
+        3, 17, 15,
+        5, 19, 17,
+        5, 7, 19,
+        7, 21, 19,
+
+        // Right Side Wall
+        4, 18, 6,
+        4, 16, 18,
+        6, 18, 20,
+        6, 20, 8,
+        8, 20, 22,
+
+        // Back Nape Wall
+        7, 10, 21,
+        10, 23, 21,
+        10, 8, 22,
+        10, 22, 23,
 
         // Nasal Guard (pyramidal guard protecting nose bridge)
-        1, 12, 2,  // Brow center to nasal tip to left brow
-        1, 3, 12,  // Brow center to right brow to nasal tip
+        14, 25, 26,
+        25, 24, 26,
 
         // Cheek Guards (flanking jaw & ear)
-        2, 4, 13,  // Left temple to ear to cheek bottom
-        3, 14, 5,  // Right temple to cheek bottom to ear
+        17, 27, 19,
+        18, 20, 28,
+    ]);
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(indices);
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
+/// Generates a heroic Golden Winged Dragon Helmet matching the EverQuest/classic fantasy dragon helm aesthetic.
+/// Features a scaled cranial dome, dorsal crest spine, snout nasal guard, cheek/mandible guards,
+/// brow sockets for glowing ruby eyes, and two majestic sweeping dragon wings towering above the head.
+pub fn create_dragon_helmet() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    // Coordinate space: JointType::Head local coordinates.
+    // Cranial skull bounds: X: [-0.12..+0.12], Y: [-0.05..+0.21], Z: [-0.13..+0.13].
+    // Forward is -Z, Up is +Y, Right is +X.
+    let positions: Vec<[f32; 3]> = vec![
+        // 0..=5: Dorsal Spine / Dragon Crest & Snout
+        [0.0, 0.120, 0.160],   // 0: Dorsal Nape Base
+        [0.0, 0.250, 0.120],   // 1: Dorsal Mid Back
+        [0.0, 0.295, 0.020],   // 2: Dorsal Crown Peak
+        [0.0, 0.265, -0.090],  // 3: Dorsal Forehead Brow
+        [0.0, 0.180, -0.165],  // 4: Dorsal Snout Bridge (between eyes)
+        [0.0, -0.020, -0.180], // 5: Nasal Beak Tip (arrowhead over nose)
+
+        // 6..=11: Cranial Dome Plates
+        [-0.090, 0.260, 0.020],  // 6: Crown Left
+        [0.090, 0.260, 0.020],   // 7: Crown Right
+        [-0.080, 0.235, -0.095], // 8: Forehead Left
+        [0.080, 0.235, -0.095],  // 9: Forehead Right
+        [-0.085, 0.235, 0.110],  // 10: Mid Back Left
+        [0.085, 0.235, 0.110],   // 11: Mid Back Right
+
+        // 12..=19: Lateral Temporal Flanges & Wing Roots
+        [-0.142, 0.225, -0.010], // 12: Temple Left (Upper Wing Root)
+        [0.142, 0.225, -0.010],  // 13: Temple Right (Upper Wing Root)
+        [-0.135, 0.210, -0.085], // 14: Temple Left Anterior
+        [0.135, 0.210, -0.085],  // 15: Temple Right Anterior
+        [-0.138, 0.210, 0.075],  // 16: Temple Left Posterior
+        [0.138, 0.210, 0.075],   // 17: Temple Right Posterior
+        [-0.145, 0.120, 0.010],  // 18: Ear Flange Left (Lower Wing Root)
+        [0.145, 0.120, 0.010],   // 19: Ear Flange Right (Lower Wing Root)
+
+        // 20..=27: Brow Sockets for Ruby Eyes
+        [-0.035, 0.150, -0.158], // 20: Left Socket Inner
+        [-0.095, 0.145, -0.145], // 21: Left Socket Outer
+        [-0.065, 0.185, -0.152], // 22: Left Socket Top
+        [-0.065, 0.125, -0.155], // 23: Left Socket Bottom
+        [0.035, 0.150, -0.158],  // 24: Right Socket Inner
+        [0.095, 0.145, -0.145],  // 25: Right Socket Outer
+        [0.065, 0.185, -0.152],  // 26: Right Socket Top
+        [0.065, 0.125, -0.155],  // 27: Right Socket Bottom
+
+        // 28..=29: Nasal Mid Flanges
+        [-0.025, 0.050, -0.170], // 28: Nasal Mid Left
+        [0.025, 0.050, -0.170],  // 29: Nasal Mid Right
+
+        // 30..=35: Cheek & Jaw Guards
+        [-0.138, 0.040, -0.075],  // 30: Cheek Mid Left
+        [0.138, 0.040, -0.075],   // 31: Cheek Mid Right
+        [-0.130, -0.035, -0.060], // 32: Jaw Corner Left
+        [0.130, -0.035, -0.060],  // 33: Jaw Corner Right
+        [-0.090, -0.030, -0.105], // 34: Jaw Anterior Left
+        [0.090, -0.030, -0.105],  // 35: Jaw Anterior Right
+
+        // 36..=38: Occipital Nape Rim
+        [-0.132, 0.050, 0.142], // 36: Occipital Rim Left
+        [0.132, 0.050, 0.142],  // 37: Occipital Rim Right
+        [0.0, 0.040, 0.155],    // 38: Nape Rim Center
+
+        // 39..=46: Left Dragon Wing
+        [-0.160, 0.350, -0.025], // 39: Left Wing Mid Leading Edge
+        [-0.175, 0.450, -0.015], // 40: Left Wing Upper Leading Edge
+        [-0.185, 0.525, -0.005], // 41: Left Wing Tip / Apex Talon
+        [-0.168, 0.435, 0.035],  // 42: Left Wing Upper Notch
+        [-0.172, 0.395, 0.060],  // 43: Left Wing Second Talon
+        [-0.158, 0.310, 0.055],  // 44: Left Wing Lower Notch
+        [-0.162, 0.275, 0.078],  // 45: Left Wing Third Talon
+        [-0.145, 0.165, 0.070],  // 46: Left Wing Trailing Root
+
+        // 47..=54: Right Dragon Wing
+        [0.160, 0.350, -0.025], // 47: Right Wing Mid Leading Edge
+        [0.175, 0.450, -0.015], // 48: Right Wing Upper Leading Edge
+        [0.185, 0.525, -0.005], // 49: Right Wing Tip / Apex Talon
+        [0.168, 0.435, 0.035],  // 50: Right Wing Upper Notch
+        [0.172, 0.395, 0.060],  // 51: Right Wing Second Talon
+        [0.158, 0.310, 0.055],  // 52: Right Wing Lower Notch
+        [0.162, 0.275, 0.078],  // 53: Right Wing Third Talon
+        [0.145, 0.165, 0.070],  // 54: Right Wing Trailing Root
+    ];
+
+    let indices = Indices::U32(vec![
+        // Crown Dome Left
+        2, 6, 3,
+        1, 10, 2,
+        2, 10, 6,
+        0, 36, 1,
+        1, 36, 10,
+
+        // Crown Dome Right
+        2, 3, 7,
+        1, 2, 11,
+        2, 7, 11,
+        0, 1, 37,
+        1, 11, 37,
+
+        // Forehead to Brow
+        3, 8, 4,
+        3, 4, 9,
+        6, 8, 3,
+        3, 9, 7,
+
+        // Temple & Lateral Walls Left
+        6, 12, 8,
+        8, 12, 14,
+        10, 16, 6,
+        6, 16, 12,
+        10, 36, 16,
+
+        // Temple & Lateral Walls Right
+        7, 9, 13,
+        9, 15, 13,
+        11, 7, 17,
+        7, 13, 17,
+        11, 17, 37,
+
+        // Brow Sockets & Snout (Left)
+        8, 14, 21,
+        8, 21, 22,
+        4, 8, 22,
+        4, 22, 20,
+        20, 22, 23,
+        22, 21, 23,
+
+        // Brow Sockets & Snout (Right)
+        9, 25, 15,
+        9, 26, 25,
+        4, 26, 9,
+        4, 24, 26,
+        24, 27, 26,
+        26, 27, 25,
+
+        // Snout to Nasal Beak
+        4, 20, 28,
+        4, 28, 29,
+        4, 29, 24,
+        28, 5, 29,
+
+        // Cheek & Jaw Guards (Left)
+        14, 18, 30,
+        14, 30, 21,
+        21, 30, 23,
+        30, 32, 34,
+        23, 30, 34,
+        18, 36, 30,
+        30, 36, 32,
+
+        // Cheek & Jaw Guards (Right)
+        15, 31, 19,
+        15, 25, 31,
+        25, 31, 27,
+        31, 35, 33,
+        27, 35, 31,
+        19, 31, 37,
+        31, 33, 37,
+
+        // Nape Back Center
+        0, 37, 38,
+        0, 38, 36,
+
+        // Left Dragon Wing (Base to Mid)
+        14, 12, 39,
+        12, 44, 39,
+        12, 16, 44,
+        16, 46, 44,
+        44, 46, 45,
+        // Left Dragon Wing (Mid to Upper)
+        39, 40, 42,
+        39, 42, 44,
+        42, 43, 44,
+        // Left Dragon Wing (Upper to Tip)
+        40, 41, 42,
+
+        // Right Dragon Wing (Base to Mid)
+        15, 47, 13,
+        13, 47, 52,
+        13, 52, 17,
+        17, 52, 54,
+        52, 53, 54,
+        // Right Dragon Wing (Mid to Upper)
+        47, 50, 48,
+        47, 52, 50,
+        50, 52, 51,
+        // Right Dragon Wing (Upper to Tip)
+        48, 50, 49,
+    ]);
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(indices);
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
+/// Generates a pair of glowing faceted 3D ruby gemstones to embed directly in the dragon eye sockets of the helmet.
+pub fn create_dragon_ruby_eyes() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    let positions: Vec<[f32; 3]> = vec![
+        // Left Eye (0..=5)
+        [-0.068, 0.155, -0.170], // 0: Left Gem Apex (Front)
+        [-0.065, 0.172, -0.156], // 1: Left Gem Top
+        [-0.048, 0.155, -0.159], // 2: Left Gem Inner
+        [-0.065, 0.138, -0.156], // 3: Left Gem Bottom
+        [-0.082, 0.155, -0.151], // 4: Left Gem Outer
+        [-0.065, 0.155, -0.150], // 5: Left Gem Base (Back)
+
+        // Right Eye (6..=11)
+        [0.068, 0.155, -0.170],  // 6: Right Gem Apex (Front)
+        [0.065, 0.172, -0.156],  // 7: Right Gem Top
+        [0.082, 0.155, -0.151],  // 8: Right Gem Outer
+        [0.065, 0.138, -0.156],  // 9: Right Gem Bottom
+        [0.048, 0.155, -0.159],  // 10: Right Gem Inner
+        [0.065, 0.155, -0.150],  // 11: Right Gem Base (Back)
+    ];
+
+    let indices = Indices::U32(vec![
+        // Left Gem Front Facets
+        0, 1, 2,
+        0, 2, 3,
+        0, 3, 4,
+        0, 4, 1,
+        // Left Gem Back Facets
+        5, 2, 1,
+        5, 3, 2,
+        5, 4, 3,
+        5, 1, 4,
+
+        // Right Gem Front Facets
+        6, 8, 7,
+        6, 9, 8,
+        6, 10, 9,
+        6, 7, 10,
+        // Right Gem Back Facets
+        11, 7, 8,
+        11, 8, 9,
+        11, 9, 10,
+        11, 10, 7,
     ]);
 
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
@@ -1033,6 +1358,7 @@ pub fn spawn_procedural_character_hierarchy(
                                         },
                                         ..default()
                                     },
+                                    CranialSkullMesh,
                                     layers.clone(),
                                 ));
                                 // Raw Procedural Face (Pinned flush to anterior skull face: Z = -0.13)
@@ -3145,6 +3471,7 @@ pub fn sync_character_equipped_helmet(
     equipped_armor: Res<ClientEquippedArmor>,
     head_joint_q: Query<(Entity, &JointType, &JointOwner)>,
     helmet_mesh_q: Query<(Entity, &Parent), With<EquippedHelmetMesh>>,
+    mut skull_mesh_q: Query<(&Parent, &mut Visibility), With<CranialSkullMesh>>,
     player_q: Query<Entity, With<PlayerBody>>,
     studio_player_q: Query<Entity, With<PlayerCharacterCustomization>>,
     layers_q: Query<&RenderLayers>,
@@ -3163,11 +3490,21 @@ pub fn sync_character_equipped_helmet(
 
         if equipped_armor.head.is_some() {
             if existing_helmet.is_none() {
-                let helmet_mesh = meshes.add(create_low_poly_helmet());
-                let helmet_mat = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.55, 0.58, 0.62),
-                    metallic: 0.85,
-                    perceptual_roughness: 0.35,
+                let helmet_mesh = meshes.add(create_dragon_helmet());
+                let gold_mat = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.86, 0.70, 0.24), // Antique burnished gold
+                    metallic: 0.88,
+                    perceptual_roughness: 0.28,
+                    cull_mode: None,
+                    double_sided: true,
+                    ..default()
+                });
+                let ruby_mesh = meshes.add(create_dragon_ruby_eyes());
+                let ruby_mat = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.95, 0.05, 0.10), // Deep crimson ruby
+                    emissive: LinearRgba::new(0.70, 0.03, 0.06, 1.0), // Glowing jewel core
+                    metallic: 0.20,
+                    perceptual_roughness: 0.15,
                     cull_mode: None,
                     double_sided: true,
                     ..default()
@@ -3178,19 +3515,46 @@ pub fn sync_character_equipped_helmet(
                     head.spawn((
                         PbrBundle {
                             mesh: helmet_mesh,
-                            material: helmet_mat,
+                            material: gold_mat,
                             transform: BevyTransform::IDENTITY,
                             ..default()
                         },
                         EquippedHelmetMesh,
-                        layer,
-                    ));
+                        layer.clone(),
+                    )).with_children(|helm| {
+                        helm.spawn((
+                            PbrBundle {
+                                mesh: ruby_mesh,
+                                material: ruby_mat,
+                                transform: BevyTransform::IDENTITY,
+                                ..default()
+                            },
+                            EquippedHelmetMesh,
+                            layer,
+                        ));
+                    });
                 });
-                info!("Equipped 3D Helmet on head pivot ({:?})", head_entity);
+                info!("Equipped Golden Winged Dragon Helmet with Ruby Eyes on head pivot ({:?})", head_entity);
             }
-        } else if let Some((helmet_entity, _)) = existing_helmet {
-            commands.entity(helmet_entity).despawn_recursive();
-            info!("Unequipped 3D Helmet from head pivot ({:?})", head_entity);
+
+            // Hide the bare cranial skull cuboid underneath so it never clips through the helmet
+            for (parent, mut vis) in skull_mesh_q.iter_mut() {
+                if parent.get() == head_entity {
+                    *vis = Visibility::Hidden;
+                }
+            }
+        } else {
+            if let Some((helmet_entity, _)) = existing_helmet {
+                commands.entity(helmet_entity).despawn_recursive();
+                info!("Unequipped 3D Helmet from head pivot ({:?})", head_entity);
+            }
+
+            // Restore the bare cranial skull cuboid when helmet is unequipped
+            for (parent, mut vis) in skull_mesh_q.iter_mut() {
+                if parent.get() == head_entity {
+                    *vis = Visibility::Inherited;
+                }
+            }
         }
     }
 }
@@ -3310,5 +3674,20 @@ mod tests {
         assert!(positions.len() >= 15);
         let normals = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).expect("Missing flat normals");
         assert_eq!(positions.len(), normals.len());
+    }
+
+    #[test]
+    fn test_dragon_helmet_mesh_attributes() {
+        let helm_mesh = create_dragon_helmet();
+        assert_eq!(helm_mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+        let positions = helm_mesh.attribute(Mesh::ATTRIBUTE_POSITION).expect("Missing positions");
+        assert!(positions.len() >= 50);
+        let normals = helm_mesh.attribute(Mesh::ATTRIBUTE_NORMAL).expect("Missing flat normals");
+        assert_eq!(positions.len(), normals.len());
+
+        let gems_mesh = create_dragon_ruby_eyes();
+        assert_eq!(gems_mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+        let gem_positions = gems_mesh.attribute(Mesh::ATTRIBUTE_POSITION).expect("Missing gem positions");
+        assert!(gem_positions.len() >= 12);
     }
 }

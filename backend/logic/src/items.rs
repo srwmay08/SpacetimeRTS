@@ -122,6 +122,7 @@ pub enum ItemKind {
 
     // Armor Pieces
     IronHelmet,
+    DragonHelm,
     IronChestplate,
     IronGreaves,
     IronBoots,
@@ -220,6 +221,7 @@ impl ItemKind {
             "Bouncy Bomb Ammo" => Some(Self::BouncyBombAmmo),
 
             // Armor
+            "Dragon Helm" | "Golden Dragon Helm" | "Golden Dragon Helmet" | "Dragon Helmet" | "Winged Dragon Helm" | "Helm of the Dragon" => Some(Self::DragonHelm),
             "Iron Helmet" => Some(Self::IronHelmet),
             "Iron Chestplate" => Some(Self::IronChestplate),
             "Iron Greaves" => Some(Self::IronGreaves),
@@ -302,6 +304,7 @@ impl ItemKind {
             Self::ShotgunShell => "Shotgun Shell",
             Self::SniperAmmo => "Sniper Ammo",
             Self::BouncyBombAmmo => "Bouncy Bomb Ammo",
+            Self::DragonHelm => "Dragon Helm",
             Self::IronHelmet => "Iron Helmet",
             Self::IronChestplate => "Iron Chestplate",
             Self::IronGreaves => "Iron Greaves",
@@ -380,13 +383,13 @@ impl ItemKind {
     pub const fn is_armor(&self) -> bool {
         matches!(
             self,
-            Self::IronHelmet | Self::IronChestplate | Self::IronGreaves | Self::IronBoots
+            Self::IronHelmet | Self::DragonHelm | Self::IronChestplate | Self::IronGreaves | Self::IronBoots
         )
     }
 
     pub const fn equipment_slot(&self) -> Option<EquipmentSlot> {
         match self {
-            Self::IronHelmet => Some(EquipmentSlot::Head),
+            Self::IronHelmet | Self::DragonHelm => Some(EquipmentSlot::Head),
             Self::IronChestplate => Some(EquipmentSlot::Chest),
             Self::IronGreaves => Some(EquipmentSlot::Legs),
             Self::IronBoots => Some(EquipmentSlot::Feet),
@@ -698,6 +701,12 @@ mod tests {
 
         let wood = ItemKind::from_name("Wood").unwrap();
         assert!(wood.is_resource());
+
+        let dragon_helm = ItemKind::from_name("Dragon Helm").unwrap();
+        assert_eq!(dragon_helm, ItemKind::DragonHelm);
+        assert!(dragon_helm.is_armor());
+        assert_eq!(dragon_helm.equipment_slot(), Some(EquipmentSlot::Head));
+        assert_eq!(dragon_helm.as_str(), "Dragon Helm");
 
         let unarmed = ItemKind::from_name("None").unwrap();
         assert_eq!(unarmed, ItemKind::Unarmed);

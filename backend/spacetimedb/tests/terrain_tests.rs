@@ -2,9 +2,13 @@
 //! These tests verify the deterministic noise-based terrain height calculation.
 
 use backend::get_terrain_height;
+use std::sync::Mutex;
+
+static SEED_MUTEX: Mutex<()> = Mutex::new(());
 
 #[test]
 fn test_terrain_height_deterministic() {
+    let _lock = SEED_MUTEX.lock().unwrap();
     // Same input should always produce same output
     let h1 = get_terrain_height(10.0, 20.0);
     let h2 = get_terrain_height(10.0, 20.0);
@@ -14,6 +18,7 @@ fn test_terrain_height_deterministic() {
 
 #[test]
 fn test_terrain_height_always_positive() {
+    let _lock = SEED_MUTEX.lock().unwrap();
     // Test a grid of positions
     for x in -100..100 {
         for z in -100..100 {
@@ -25,6 +30,7 @@ fn test_terrain_height_always_positive() {
 
 #[test]
 fn test_terrain_height_no_nan() {
+    let _lock = SEED_MUTEX.lock().unwrap();
     for x in -50..50 {
         for z in -50..50 {
             let h = get_terrain_height(x as f32, z as f32);
@@ -36,6 +42,7 @@ fn test_terrain_height_no_nan() {
 
 #[test]
 fn test_terrain_height_varies() {
+    let _lock = SEED_MUTEX.lock().unwrap();
     // Different positions should produce different heights (not a flat plane)
     let h1 = get_terrain_height(0.0, 0.0);
     let h2 = get_terrain_height(50.0, 50.0);
@@ -47,6 +54,7 @@ fn test_terrain_height_varies() {
 
 #[test]
 fn test_terrain_height_reasonable_range() {
+    let _lock = SEED_MUTEX.lock().unwrap();
     // Heights should be within expected bounds (0 to ~30 based on amplitude)
     for x in -200..200 {
         for z in -200..200 {
@@ -58,6 +66,7 @@ fn test_terrain_height_reasonable_range() {
 
 #[test]
 fn test_terrain_height_lake_depression() {
+    let _lock = SEED_MUTEX.lock().unwrap();
     // The lake at (-35, -35) should create a depression
     let lake_center = get_terrain_height(-35.0, -35.0);
     let nearby = get_terrain_height(-20.0, -20.0);
@@ -79,6 +88,7 @@ fn test_terrain_height_seeded_variance() {
 
 #[test]
 fn test_apply_world_seed_updates_global_height() {
+    let _lock = SEED_MUTEX.lock().unwrap();
     use backend::apply_world_seed;
     apply_world_seed(42);
     let base_h = get_terrain_height(75.0, 120.0);
@@ -92,4 +102,3 @@ fn test_apply_world_seed_updates_global_height() {
     let restored_h = get_terrain_height(75.0, 120.0);
     assert_eq!(base_h, restored_h, "Restoring world seed 42 must restore exact original height");
 }
-
