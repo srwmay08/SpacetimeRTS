@@ -483,6 +483,7 @@ pub fn sync_transforms(
                 crate::character_customizer::PlayerCharacterCustomization {
                     face: default_preset.face.clone(),
                     anatomy: default_preset.anatomy.clone(),
+                    hair: default_preset.hair.clone(),
                     dirty: false,
                 },
                 Selectable,

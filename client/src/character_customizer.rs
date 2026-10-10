@@ -149,6 +149,44 @@ impl Default for RaceAnatomyProfile {
     }
 }
 
+/// Retro stylized solid low-poly hair styles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HairStyle {
+    Bald,
+    Buzzcut,   // Scalp cap only
+    Spiky,     // Outward-pointing stylized polyhedral locks
+    Ponytail,  // Scalp cap + secondary animated rear plait
+}
+
+/// Retro stylized solid low-poly beard styles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BeardStyle {
+    CleanShaven,
+    Goatee,   // Pointed faceted goatee on chin
+    Dwarven,  // Massive braided block beard over upper chest
+    Chops,    // Flared mutton chops connecting to mustache
+}
+
+/// Parameters governing procedural hair and beard geometry and coloring.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HairProfile {
+    pub hair_style: HairStyle,
+    pub beard_style: BeardStyle,
+    pub hair_color: Color,
+    pub volume: f32,
+}
+
+impl Default for HairProfile {
+    fn default() -> Self {
+        Self {
+            hair_style: HairStyle::Spiky,
+            beard_style: BeardStyle::CleanShaven,
+            hair_color: Color::srgb(0.28, 0.18, 0.12),
+            volume: 1.0,
+        }
+    }
+}
+
 // ----------------------------------------------------------------------------
 // 2. PRESETS CATALOG
 // ----------------------------------------------------------------------------
@@ -158,6 +196,7 @@ pub struct CharacterPreset {
     pub description: &'static str,
     pub face: FaceProfile,
     pub anatomy: RaceAnatomyProfile,
+    pub hair: HairProfile,
 }
 
 pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
@@ -192,6 +231,12 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
             pauldron_size: 0.16,
             has_shoulder_spikes: false,
         },
+        hair: HairProfile {
+            hair_style: HairStyle::Spiky,
+            beard_style: BeardStyle::CleanShaven,
+            hair_color: Color::srgb(0.28, 0.18, 0.12), // Deep chestnut brown
+            volume: 1.0,
+        },
     },
     CharacterPreset {
         name: "Dark Elf (Drow)",
@@ -223,6 +268,12 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
             armor_color: Color::srgb(0.72, 0.65, 0.38), // Burnished elven brass
             pauldron_size: 0.14,
             has_shoulder_spikes: true,
+        },
+        hair: HairProfile {
+            hair_style: HairStyle::Ponytail,
+            beard_style: BeardStyle::CleanShaven,
+            hair_color: Color::srgb(0.92, 0.92, 0.96), // Silvery white
+            volume: 1.0,
         },
     },
     CharacterPreset {
@@ -256,6 +307,12 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
             pauldron_size: 0.24,
             has_shoulder_spikes: true,
         },
+        hair: HairProfile {
+            hair_style: HairStyle::Spiky,
+            beard_style: BeardStyle::Chops,
+            hair_color: Color::srgb(0.22, 0.16, 0.12), // Dark brown
+            volume: 1.15,
+        },
     },
     CharacterPreset {
         name: "Forest Troll",
@@ -288,6 +345,12 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
             pauldron_size: 0.18,
             has_shoulder_spikes: true,
         },
+        hair: HairProfile {
+            hair_style: HairStyle::Spiky,
+            beard_style: BeardStyle::Goatee,
+            hair_color: Color::srgb(0.12, 0.16, 0.10), // Mossy dark green-black
+            volume: 1.05,
+        },
     },
     CharacterPreset {
         name: "Mountain Dwarf",
@@ -319,6 +382,12 @@ pub const CHARACTER_PRESETS: &[CharacterPreset] = &[
             armor_color: Color::srgb(0.55, 0.52, 0.50), // Mountain steel
             pauldron_size: 0.22,
             has_shoulder_spikes: false,
+        },
+        hair: HairProfile {
+            hair_style: HairStyle::Buzzcut,
+            beard_style: BeardStyle::Dwarven,
+            hair_color: Color::srgb(0.68, 0.26, 0.08), // Fiery auburn
+            volume: 1.20,
         },
     },
 ];
@@ -408,6 +477,7 @@ pub struct LimbMeshSegment(pub JointType);
 pub enum JointType {
     Torso,
     Head,
+    Jaw,
     ShoulderL,
     ElbowL,
     HandL,
@@ -420,6 +490,8 @@ pub enum JointType {
     HipR,
     KneeR,
     FootR,
+    BeardRoot,
+    Ponytail,
 }
 
 /// Identifies the owning character entity for an articulated joint.
@@ -430,9 +502,21 @@ pub struct JointOwner(pub Entity);
 #[derive(Component)]
 pub struct CharacterModelRoot;
 
-/// Marker for the generated procedural face mesh entity.
+/// Marker for the generated procedural upper face mesh entity.
 #[derive(Component)]
 pub struct ProceduralFaceMesh;
+
+/// Marker for the articulated procedural lower jaw mesh entity.
+#[derive(Component)]
+pub struct ProceduralJawMesh;
+
+/// Marker for procedural character hair mesh entity.
+#[derive(Component)]
+pub struct CharacterHairMesh;
+
+/// Marker for procedural character beard mesh entity.
+#[derive(Component)]
+pub struct CharacterBeardMesh;
 
 /// Marker for the equipped 3D helmet mesh child entity.
 #[derive(Component)]
@@ -447,6 +531,7 @@ pub struct CranialSkullMesh;
 pub struct PlayerCharacterCustomization {
     pub face: FaceProfile,
     pub anatomy: RaceAnatomyProfile,
+    pub hair: HairProfile,
     pub dirty: bool,
 }
 
@@ -455,6 +540,7 @@ impl Default for PlayerCharacterCustomization {
         Self {
             face: CHARACTER_PRESETS[0].face.clone(),
             anatomy: CHARACTER_PRESETS[0].anatomy.clone(),
+            hair: CHARACTER_PRESETS[0].hair.clone(),
             dirty: true,
         }
     }
@@ -468,6 +554,7 @@ pub struct AnimationState {
     pub vertical_velocity: f32,
     pub action: ActionState,
     pub hit_react_timer: f32,
+    pub blink_timer: f32,
 }
 
 impl Default for AnimationState {
@@ -478,6 +565,7 @@ impl Default for AnimationState {
             vertical_velocity: 0.0,
             action: ActionState::None,
             hit_react_timer: 0.0,
+            blink_timer: 0.0,
         }
     }
 }
@@ -492,124 +580,456 @@ pub enum ActionState {
 }
 
 // ----------------------------------------------------------------------------
-// 5. PROCEDURAL MESH GENERATORS
+// 5. PROCEDURAL MESH GENERATORS & SYMMETRICAL TOPOLOGY BUILDER
 // ----------------------------------------------------------------------------
 
-/// Generates a stylized, high-density low-poly faceted 3D face mesh (27 Vertices).
-/// Winding order is counter-clockwise (CCW) for outward normals.
+/// Helper utility implementing the "Cage & Mirror" symmetrical topology builder.
+/// Defines vertices and triangles for the right half (X >= 0) and sagittal midline (X = 0),
+/// then algorithmically mirrors them across X=0 to produce a complete watertight mesh.
+#[derive(Default, Clone, Debug)]
+pub struct SymmetricalFaceBuilder {
+    positions: Vec<[f32; 3]>,
+    indices: Vec<u32>,
+}
+
+impl SymmetricalFaceBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a vertex. If X is nearly zero (< 1e-4), it is clamped to exactly 0.0 to lie on the seam.
+    pub fn add_vertex(&mut self, mut pos: [f32; 3]) -> u32 {
+        if pos[0].abs() < 1e-4 {
+            pos[0] = 0.0;
+        }
+        let idx = self.positions.len() as u32;
+        self.positions.push(pos);
+        idx
+    }
+
+    /// Adds a triangle with CCW winding for outward normals.
+    pub fn add_triangle(&mut self, a: u32, b: u32, c: u32) {
+        self.indices.push(a);
+        self.indices.push(b);
+        self.indices.push(c);
+    }
+
+    /// Adds a quad as two CCW triangles: (a, b, c) and (a, c, d).
+    pub fn add_quad(&mut self, a: u32, b: u32, c: u32, d: u32) {
+        self.add_triangle(a, b, c);
+        self.add_triangle(a, c, d);
+    }
+
+    /// Builds the complete symmetrical mesh by mirroring right-half geometry across the sagittal plane.
+    pub fn build(self) -> Mesh {
+        let mut final_positions = self.positions.clone();
+        let mut mirror_map = Vec::with_capacity(self.positions.len());
+
+        for (i, pos) in self.positions.iter().enumerate() {
+            if pos[0].abs() < 1e-4 {
+                // Midline vertex is shared on the sagittal seam
+                mirror_map.push(i as u32);
+            } else {
+                // Mirror +X to -X
+                let mirrored = [-pos[0], pos[1], pos[2]];
+                let new_idx = final_positions.len() as u32;
+                final_positions.push(mirrored);
+                mirror_map.push(new_idx);
+            }
+        }
+
+        let mut final_indices = self.indices.clone();
+
+        // For each right-half triangle (a, b, c), add its left-half counterpart.
+        // Because flipping X reverses winding from CCW to CW, we reverse the order
+        // to (a, c, b) on the mirror side to preserve CCW outward normals.
+        let tri_count = self.indices.len() / 3;
+        for t in 0..tri_count {
+            let a = self.indices[t * 3];
+            let b = self.indices[t * 3 + 1];
+            let c = self.indices[t * 3 + 2];
+
+            let ma = mirror_map[a as usize];
+            let mb = mirror_map[b as usize];
+            let mc = mirror_map[c as usize];
+
+            // If all 3 vertices are on the midline, mirroring would create a duplicate zero-width triangle
+            if ma == a && mb == b && mc == c {
+                continue;
+            }
+
+            final_indices.push(ma);
+            final_indices.push(mc);
+            final_indices.push(mb);
+        }
+
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, final_positions);
+        mesh.insert_indices(Indices::U32(final_indices));
+        mesh.duplicate_vertices();
+        mesh.compute_flat_normals();
+        mesh
+    }
+}
+
+/// Generates the upper skull and face mesh (forehead, brows, radial octagon eyes, nose, cheeks, upper lip)
+/// with support for mathematical morph targets via `blink_factor` (1.0 = open, 0.0 = closed).
+pub fn generate_upper_face_mesh(profile: &FaceProfile, blink_factor: f32) -> Mesh {
+    let mut b = SymmetricalFaceBuilder::new();
+
+    // -- MIDLINE VERTICES (X = 0.0) --
+    let f_top = b.add_vertex([0.0, 0.12, 0.0]);
+    let f_mid = b.add_vertex([0.0, 0.08, -profile.brow_ridge * 0.35]);
+    let glabella = b.add_vertex([0.0, 0.045, -profile.brow_ridge]);
+    let n_top = b.add_vertex([0.0, profile.nose_bridge_length * 0.45, -profile.nose_tip_z * 0.40]);
+    let n_mid = b.add_vertex([0.0, profile.nose_bridge_length * 0.15, -profile.nose_tip_z * 0.65]);
+    let n_tip = b.add_vertex([0.0, -0.015, -profile.nose_tip_z]);
+    let columella = b.add_vertex([0.0, -0.030, -profile.nose_tip_z * 0.45]);
+    let lip_up_c = b.add_vertex([0.0, profile.jaw_height + 0.05, -profile.chin_forward * 0.85]);
+
+    // -- RIGHT-HALF FOREHEAD & BROW (X > 0.0) --
+    let f_top_mid = b.add_vertex([profile.cheekbone_width * 0.45, 0.12, 0.0]);
+    let f_top_out = b.add_vertex([profile.cheekbone_width * 0.80, 0.12, 0.0]);
+    let f_mid_mid = b.add_vertex([profile.cheekbone_width * 0.45, 0.08, -profile.brow_ridge * 0.30]);
+    let f_temple = b.add_vertex([profile.cheekbone_width * 0.85, 0.08, -0.005]);
+    let b_inner = b.add_vertex([0.022, 0.050, -profile.brow_ridge * 0.95]);
+    let b_mid = b.add_vertex([profile.cheekbone_width * 0.48, 0.060, -profile.brow_ridge]);
+    let b_outer = b.add_vertex([profile.cheekbone_width * 0.82, 0.050, -profile.brow_ridge * 0.55]);
+    let temple = b.add_vertex([profile.cheekbone_width * 0.88, 0.035, 0.0]);
+
+    // -- RADIAL OCTAGON EYE SOCKET (RIGHT SIDE) --
+    let eye_cx = profile.cheekbone_width * 0.42;
+    let eye_cy = 0.022;
+    let eye_cz = -profile.eye_depth * 0.5;
+    let rx = 0.024;
+    let ry = 0.016 * blink_factor.clamp(0.0, 1.2);
+    let d = 0.7071;
+
+    let e_0 = b.add_vertex([eye_cx + rx, eye_cy, eye_cz]);
+    let e_1 = b.add_vertex([eye_cx + d * rx, eye_cy + d * ry, eye_cz]);
+    let e_2 = b.add_vertex([eye_cx, eye_cy + ry, eye_cz]);
+    let e_3 = b.add_vertex([eye_cx - d * rx, eye_cy + d * ry, eye_cz]);
+    let e_4 = b.add_vertex([eye_cx - rx, eye_cy, eye_cz]);
+    let e_5 = b.add_vertex([eye_cx - d * rx, eye_cy - d * ry, eye_cz]);
+    let e_6 = b.add_vertex([eye_cx, eye_cy - ry, eye_cz]);
+    let e_7 = b.add_vertex([eye_cx + d * rx, eye_cy - d * ry, eye_cz]);
+    let e_pupil = b.add_vertex([eye_cx, eye_cy, eye_cz - 0.012]);
+
+    // -- NOSE SIDEWALL & NOSTRIL --
+    let n_side_top = b.add_vertex([0.018, profile.nose_bridge_length * 0.40, -profile.nose_tip_z * 0.40]);
+    let n_side_mid = b.add_vertex([0.020, profile.nose_bridge_length * 0.15, -profile.nose_tip_z * 0.60]);
+    let n_base = b.add_vertex([0.022, -0.018, -profile.nose_tip_z * 0.40]);
+    let n_wing = b.add_vertex([0.030, -0.022, -profile.nose_tip_z * 0.35]);
+
+    // -- CHEEKS & HOLLOWS --
+    let c_infra = b.add_vertex([profile.cheekbone_width * 0.50, -0.005, -0.02]);
+    let c_high = b.add_vertex([profile.cheekbone_width, 0.0, -0.01]);
+    let c_hollow = b.add_vertex([profile.cheekbone_width * 0.65, profile.jaw_height + 0.06, -0.02]);
+    let c_sub = b.add_vertex([profile.cheekbone_width * 0.85, -0.03, 0.0]);
+
+    // -- UPPER LIP / MAXILLA --
+    let l_up_lat = b.add_vertex([0.014, profile.jaw_height + 0.048, -profile.chin_forward * 0.82]);
+    let l_up_corner = b.add_vertex([0.028, profile.jaw_height + 0.042, -profile.chin_forward * 0.72]);
+
+    // -- FOREHEAD FACETS --
+    b.add_quad(f_mid, f_top, f_top_mid, f_mid_mid);
+    b.add_quad(f_mid_mid, f_top_mid, f_top_out, f_temple);
+    b.add_quad(glabella, f_mid, f_mid_mid, b_inner);
+    b.add_quad(b_inner, f_mid_mid, f_temple, b_mid);
+    b.add_quad(b_mid, f_temple, temple, b_outer);
+
+    // -- RADIAL EYE SOCKET APERTURE --
+    b.add_triangle(e_pupil, e_1, e_0);
+    b.add_triangle(e_pupil, e_2, e_1);
+    b.add_triangle(e_pupil, e_3, e_2);
+    b.add_triangle(e_pupil, e_4, e_3);
+    b.add_triangle(e_pupil, e_5, e_4);
+    b.add_triangle(e_pupil, e_6, e_5);
+    b.add_triangle(e_pupil, e_7, e_6);
+    b.add_triangle(e_pupil, e_0, e_7);
+
+    // -- BROW TO EYE SOCKET UPPER RIM --
+    b.add_quad(e_3, b_inner, b_mid, e_2);
+    b.add_quad(e_2, b_mid, b_outer, e_1);
+    b.add_quad(e_1, b_outer, temple, e_0);
+
+    // -- MEDIAL CANTHUS TO NOSE BRIDGE & GLABELLA --
+    b.add_triangle(e_4, glabella, b_inner);
+    b.add_triangle(e_4, n_top, glabella);
+    b.add_triangle(e_4, n_mid, n_top);
+    b.add_triangle(e_5, n_side_mid, e_4);
+    b.add_triangle(n_side_mid, n_mid, e_4);
+    b.add_triangle(n_side_mid, n_base, e_5);
+
+    // -- NOSE BRIDGE TO APEX & NOSTRIL --
+    b.add_triangle(n_mid, n_side_top, n_top);
+    b.add_triangle(n_tip, n_base, n_side_mid);
+    b.add_triangle(n_mid, n_tip, n_side_mid);
+    b.add_triangle(columella, n_base, n_tip);
+    b.add_triangle(n_base, n_wing, n_tip);
+
+    // -- UNDER-EYE RIM TO CHEEKBONE & ALAR BASE --
+    b.add_triangle(c_infra, n_base, e_5);
+    b.add_triangle(c_infra, e_5, e_6);
+    b.add_triangle(c_infra, e_6, e_7);
+    b.add_triangle(c_high, c_infra, e_7);
+    b.add_triangle(c_high, e_7, e_0);
+    b.add_triangle(temple, c_high, e_0);
+
+    // -- CHEEK HOLLOWS & ZYGOMATIC ARCH --
+    b.add_triangle(c_hollow, n_base, c_infra);
+    b.add_triangle(c_hollow, c_infra, c_high);
+    b.add_triangle(c_sub, c_hollow, c_high);
+    b.add_triangle(c_sub, c_high, temple);
+
+    // -- PHILTRUM & UPPER LIP --
+    b.add_triangle(columella, l_up_lat, lip_up_c);
+    b.add_triangle(columella, n_base, l_up_lat);
+    b.add_triangle(l_up_lat, n_base, l_up_corner);
+    b.add_triangle(l_up_corner, n_base, c_hollow);
+
+    b.build()
+}
+
+/// Generates the articulated lower jaw mesh (mandible, lower lip, chin apex, chin underside, gonion angle).
+pub fn generate_jaw_mesh(profile: &FaceProfile) -> Mesh {
+    let mut b = SymmetricalFaceBuilder::new();
+
+    // Coordinates in local face-plane space (flush with upper face when jaw is closed)
+    // -- MIDLINE VERTICES (X = 0.0) --
+    let j_lip_c = b.add_vertex([0.0, profile.jaw_height + 0.025, -profile.chin_forward * 0.90]);
+    let j_crease = b.add_vertex([0.0, profile.jaw_height + 0.005, -profile.chin_forward * 0.80]);
+    let j_chin = b.add_vertex([0.0, profile.jaw_height - 0.020, -profile.chin_forward]);
+    let j_base = b.add_vertex([0.0, profile.jaw_height - 0.040, -profile.chin_forward * 0.60]);
+    let j_under = b.add_vertex([0.0, profile.jaw_height - 0.035, 0.04]);
+
+    // -- RIGHT-HALF JAW & MANDIBLE (X > 0.0) --
+    let j_lip_lat = b.add_vertex([0.014, profile.jaw_height + 0.024, -profile.chin_forward * 0.85]);
+    let j_lip_corner = b.add_vertex([0.028, profile.jaw_height + 0.028, -profile.chin_forward * 0.72]);
+    let j_chin_lat = b.add_vertex([0.025, profile.jaw_height - 0.018, -profile.chin_forward * 0.92]);
+    let j_body = b.add_vertex([profile.jaw_width * 0.55, profile.jaw_height - 0.010, -0.005]);
+    let j_gonion = b.add_vertex([profile.jaw_width, profile.jaw_height + 0.045, 0.04]);
+    let j_ramus = b.add_vertex([profile.jaw_width * 0.85, profile.jaw_height + 0.080, 0.02]);
+    let j_sub = b.add_vertex([profile.jaw_width * 0.45, profile.jaw_height - 0.030, 0.035]);
+
+    // -- LOWER LIP TO MENTOLABIAL CREASE --
+    b.add_triangle(j_crease, j_lip_c, j_lip_lat);
+    b.add_triangle(j_crease, j_lip_lat, j_chin_lat);
+    b.add_triangle(j_chin_lat, j_lip_lat, j_lip_corner);
+
+    // -- CHIN PROMINENCE --
+    b.add_triangle(j_chin, j_crease, j_chin_lat);
+    b.add_triangle(j_base, j_chin, j_chin_lat);
+
+    // -- MANDIBULAR BODY --
+    b.add_triangle(j_body, j_chin_lat, j_lip_corner);
+    b.add_triangle(j_base, j_chin_lat, j_body);
+
+    // -- ANGLE OF JAW (GONION) & RAMUS --
+    b.add_triangle(j_gonion, j_body, j_lip_corner);
+    b.add_triangle(j_ramus, j_gonion, j_lip_corner);
+
+    // -- UNDERSIDE / SUBMENTAL & SUBMANDIBULAR --
+    b.add_triangle(j_under, j_base, j_sub);
+    b.add_triangle(j_sub, j_base, j_body);
+    b.add_triangle(j_sub, j_body, j_gonion);
+
+    b.build()
+}
+
+/// Generates a unified high-density low-poly face mesh combining upper skull and jaw
+/// via the symmetrical Cage & Mirror topology builder (60–90 faceted vertices).
+pub fn generate_high_density_face(profile: &FaceProfile, blink_factor: f32) -> Mesh {
+    let mut b = SymmetricalFaceBuilder::new();
+
+    // -- MIDLINE VERTICES (X = 0.0) --
+    let f_top = b.add_vertex([0.0, 0.12, 0.0]);
+    let f_mid = b.add_vertex([0.0, 0.08, -profile.brow_ridge * 0.35]);
+    let glabella = b.add_vertex([0.0, 0.045, -profile.brow_ridge]);
+    let n_top = b.add_vertex([0.0, profile.nose_bridge_length * 0.45, -profile.nose_tip_z * 0.40]);
+    let n_mid = b.add_vertex([0.0, profile.nose_bridge_length * 0.15, -profile.nose_tip_z * 0.65]);
+    let n_tip = b.add_vertex([0.0, -0.015, -profile.nose_tip_z]);
+    let columella = b.add_vertex([0.0, -0.030, -profile.nose_tip_z * 0.45]);
+    let lip_up_c = b.add_vertex([0.0, profile.jaw_height + 0.05, -profile.chin_forward * 0.85]);
+    let lip_low_c = b.add_vertex([0.0, profile.jaw_height + 0.025, -profile.chin_forward * 0.90]);
+    let j_crease = b.add_vertex([0.0, profile.jaw_height + 0.005, -profile.chin_forward * 0.80]);
+    let j_chin = b.add_vertex([0.0, profile.jaw_height - 0.020, -profile.chin_forward]);
+    let j_base = b.add_vertex([0.0, profile.jaw_height - 0.040, -profile.chin_forward * 0.60]);
+    let j_under = b.add_vertex([0.0, profile.jaw_height - 0.035, 0.04]);
+
+    // -- RIGHT-HALF FOREHEAD & BROW (X > 0.0) --
+    let f_top_mid = b.add_vertex([profile.cheekbone_width * 0.45, 0.12, 0.0]);
+    let f_top_out = b.add_vertex([profile.cheekbone_width * 0.80, 0.12, 0.0]);
+    let f_mid_mid = b.add_vertex([profile.cheekbone_width * 0.45, 0.08, -profile.brow_ridge * 0.30]);
+    let f_temple = b.add_vertex([profile.cheekbone_width * 0.85, 0.08, -0.005]);
+    let b_inner = b.add_vertex([0.022, 0.050, -profile.brow_ridge * 0.95]);
+    let b_mid = b.add_vertex([profile.cheekbone_width * 0.48, 0.060, -profile.brow_ridge]);
+    let b_outer = b.add_vertex([profile.cheekbone_width * 0.82, 0.050, -profile.brow_ridge * 0.55]);
+    let temple = b.add_vertex([profile.cheekbone_width * 0.88, 0.035, 0.0]);
+
+    // -- RADIAL OCTAGON EYE SOCKET (RIGHT SIDE) --
+    let eye_cx = profile.cheekbone_width * 0.42;
+    let eye_cy = 0.022;
+    let eye_cz = -profile.eye_depth * 0.5;
+    let rx = 0.024;
+    let ry = 0.016 * blink_factor.clamp(0.0, 1.2);
+    let d = 0.7071;
+
+    let e_0 = b.add_vertex([eye_cx + rx, eye_cy, eye_cz]);
+    let e_1 = b.add_vertex([eye_cx + d * rx, eye_cy + d * ry, eye_cz]);
+    let e_2 = b.add_vertex([eye_cx, eye_cy + ry, eye_cz]);
+    let e_3 = b.add_vertex([eye_cx - d * rx, eye_cy + d * ry, eye_cz]);
+    let e_4 = b.add_vertex([eye_cx - rx, eye_cy, eye_cz]);
+    let e_5 = b.add_vertex([eye_cx - d * rx, eye_cy - d * ry, eye_cz]);
+    let e_6 = b.add_vertex([eye_cx, eye_cy - ry, eye_cz]);
+    let e_7 = b.add_vertex([eye_cx + d * rx, eye_cy - d * ry, eye_cz]);
+    let e_pupil = b.add_vertex([eye_cx, eye_cy, eye_cz - 0.012]);
+
+    // -- NOSE SIDEWALL & NOSTRIL --
+    let n_side_top = b.add_vertex([0.018, profile.nose_bridge_length * 0.40, -profile.nose_tip_z * 0.40]);
+    let n_side_mid = b.add_vertex([0.020, profile.nose_bridge_length * 0.15, -profile.nose_tip_z * 0.60]);
+    let n_base = b.add_vertex([0.022, -0.018, -profile.nose_tip_z * 0.40]);
+    let n_wing = b.add_vertex([0.030, -0.022, -profile.nose_tip_z * 0.35]);
+
+    // -- CHEEKS & HOLLOWS --
+    let c_infra = b.add_vertex([profile.cheekbone_width * 0.50, -0.005, -0.02]);
+    let c_high = b.add_vertex([profile.cheekbone_width, 0.0, -0.01]);
+    let c_hollow = b.add_vertex([profile.cheekbone_width * 0.65, profile.jaw_height + 0.06, -0.02]);
+    let c_sub = b.add_vertex([profile.cheekbone_width * 0.85, -0.03, 0.0]);
+
+    // -- MOUTH & LIPS --
+    let l_up_lat = b.add_vertex([0.014, profile.jaw_height + 0.048, -profile.chin_forward * 0.82]);
+    let l_up_corner = b.add_vertex([0.028, profile.jaw_height + 0.042, -profile.chin_forward * 0.72]);
+    let l_low_lat = b.add_vertex([0.014, profile.jaw_height + 0.024, -profile.chin_forward * 0.85]);
+    let l_low_corner = b.add_vertex([0.028, profile.jaw_height + 0.028, -profile.chin_forward * 0.72]);
+
+    // -- JAW & MANDIBLE --
+    let j_chin_lat = b.add_vertex([0.025, profile.jaw_height - 0.018, -profile.chin_forward * 0.92]);
+    let j_body = b.add_vertex([profile.jaw_width * 0.55, profile.jaw_height - 0.010, -0.005]);
+    let j_gonion = b.add_vertex([profile.jaw_width, profile.jaw_height + 0.045, 0.04]);
+    let j_ramus = b.add_vertex([profile.jaw_width * 0.85, profile.jaw_height + 0.080, 0.02]);
+    let j_sub = b.add_vertex([profile.jaw_width * 0.45, profile.jaw_height - 0.030, 0.035]);
+
+    // -- FOREHEAD FACETS --
+    b.add_quad(f_mid, f_top, f_top_mid, f_mid_mid);
+    b.add_quad(f_mid_mid, f_top_mid, f_top_out, f_temple);
+    b.add_quad(glabella, f_mid, f_mid_mid, b_inner);
+    b.add_quad(b_inner, f_mid_mid, f_temple, b_mid);
+    b.add_quad(b_mid, f_temple, temple, b_outer);
+
+    // -- RADIAL EYE SOCKET APERTURE --
+    b.add_triangle(e_pupil, e_1, e_0);
+    b.add_triangle(e_pupil, e_2, e_1);
+    b.add_triangle(e_pupil, e_3, e_2);
+    b.add_triangle(e_pupil, e_4, e_3);
+    b.add_triangle(e_pupil, e_5, e_4);
+    b.add_triangle(e_pupil, e_6, e_5);
+    b.add_triangle(e_pupil, e_7, e_6);
+    b.add_triangle(e_pupil, e_0, e_7);
+
+    // -- BROW TO EYE SOCKET UPPER RIM --
+    b.add_quad(e_3, b_inner, b_mid, e_2);
+    b.add_quad(e_2, b_mid, b_outer, e_1);
+    b.add_quad(e_1, b_outer, temple, e_0);
+
+    // -- MEDIAL CANTHUS TO NOSE BRIDGE & GLABELLA --
+    b.add_triangle(e_4, glabella, b_inner);
+    b.add_triangle(e_4, n_top, glabella);
+    b.add_triangle(e_4, n_mid, n_top);
+    b.add_triangle(e_5, n_side_mid, e_4);
+    b.add_triangle(n_side_mid, n_mid, e_4);
+    b.add_triangle(n_side_mid, n_base, e_5);
+
+    // -- NOSE BRIDGE TO APEX & NOSTRIL --
+    b.add_triangle(n_mid, n_side_top, n_top);
+    b.add_triangle(n_tip, n_base, n_side_mid);
+    b.add_triangle(n_mid, n_tip, n_side_mid);
+    b.add_triangle(columella, n_base, n_tip);
+    b.add_triangle(n_base, n_wing, n_tip);
+
+    // -- UNDER-EYE RIM TO CHEEKBONE & ALAR BASE --
+    b.add_triangle(c_infra, n_base, e_5);
+    b.add_triangle(c_infra, e_5, e_6);
+    b.add_triangle(c_infra, e_6, e_7);
+    b.add_triangle(c_high, c_infra, e_7);
+    b.add_triangle(c_high, e_7, e_0);
+    b.add_triangle(temple, c_high, e_0);
+
+    // -- CHEEK HOLLOWS & ZYGOMATIC ARCH --
+    b.add_triangle(c_hollow, n_base, c_infra);
+    b.add_triangle(c_hollow, c_infra, c_high);
+    b.add_triangle(c_sub, c_hollow, c_high);
+    b.add_triangle(c_sub, c_high, temple);
+
+    // -- PHILTRUM & UPPER LIP --
+    b.add_triangle(columella, l_up_lat, lip_up_c);
+    b.add_triangle(columella, n_base, l_up_lat);
+    b.add_triangle(l_up_lat, n_base, l_up_corner);
+    b.add_triangle(l_up_corner, n_base, c_hollow);
+
+    // -- ORAL COMMISSURE (UPPER TO LOWER LIP SEAM) --
+    b.add_triangle(lip_low_c, lip_up_c, l_up_lat);
+    b.add_triangle(lip_low_c, l_up_lat, l_low_lat);
+    b.add_triangle(l_low_lat, l_up_lat, l_up_corner);
+    b.add_triangle(l_low_lat, l_up_corner, l_low_corner);
+    b.add_triangle(l_up_corner, c_hollow, j_body);
+    b.add_triangle(l_low_corner, l_up_corner, j_body);
+
+    // -- LOWER LIP TO MENTOLABIAL CREASE --
+    b.add_triangle(j_crease, lip_low_c, l_low_lat);
+    b.add_triangle(j_crease, l_low_lat, j_chin_lat);
+    b.add_triangle(j_chin_lat, l_low_lat, l_low_corner);
+
+    // -- CHIN PROMINENCE --
+    b.add_triangle(j_chin, j_crease, j_chin_lat);
+    b.add_triangle(j_base, j_chin, j_chin_lat);
+
+    // -- MANDIBULAR BODY --
+    b.add_triangle(j_body, j_chin_lat, l_low_corner);
+    b.add_triangle(j_base, j_chin_lat, j_body);
+
+    // -- ANGLE OF JAW (GONION) & RAMUS --
+    b.add_triangle(j_gonion, j_body, c_sub);
+    b.add_triangle(j_ramus, j_gonion, c_sub);
+    b.add_triangle(temple, c_sub, j_ramus);
+
+    // -- UNDERSIDE / SUBMENTAL & SUBMANDIBULAR --
+    b.add_triangle(j_under, j_base, j_sub);
+    b.add_triangle(j_sub, j_base, j_body);
+    b.add_triangle(j_sub, j_body, j_gonion);
+
+    b.build()
+}
+
+/// Generates a stylized, high-density low-poly faceted 3D face mesh via the symmetrical Cage & Mirror builder.
 pub fn generate_custom_face(profile: &FaceProfile) -> Mesh {
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
+    generate_high_density_face(profile, 1.0)
+}
 
-    // Local Space: Forward is -Z, Up is +Y, Right is +X
-    let positions: Vec<[f32; 3]> = vec![
-        // -- JAW & CHIN (0-2) --
-        [0.0, profile.jaw_height, -profile.chin_forward], // 0: Chin Center
-        [-profile.jaw_width, profile.jaw_height + 0.05, 0.0], // 1: Left Jaw Corner
-        [profile.jaw_width, profile.jaw_height + 0.05, 0.0], // 2: Right Jaw Corner
-        
-        // -- MOUTH & LIPS (3-6) --
-        [-0.025, profile.jaw_height + 0.035, -profile.chin_forward * 0.7], // 3: Left Mouth Corner
-        [0.025, profile.jaw_height + 0.035, -profile.chin_forward * 0.7],  // 4: Right Mouth Corner
-        [0.0, profile.jaw_height + 0.05, -profile.chin_forward * 0.85],    // 5: Upper Lip
-        [0.0, profile.jaw_height + 0.02, -profile.chin_forward * 0.90],    // 6: Lower Lip
-        
-        // -- NOSE (7-10) --
-        [0.0, -0.015, -profile.nose_tip_z], // 7: Nose Tip
-        [-0.018, -0.01, -profile.nose_tip_z * 0.4], // 8: Left Nostril Base
-        [0.018, -0.01, -profile.nose_tip_z * 0.4],  // 9: Right Nostril Base
-        [0.0, profile.nose_bridge_length * 0.5, -profile.nose_tip_z * 0.5], // 10: Nose Bridge
-        
-        // -- CHEEKS & HOLLOWS (11-14) --
-        [-profile.cheekbone_width, 0.0, -0.01], // 11: Left Cheekbone (Zygomatic High)
-        [profile.cheekbone_width, 0.0, -0.01],  // 12: Right Cheekbone (Zygomatic High)
-        [-profile.cheekbone_width * 0.6, profile.jaw_height + 0.06, -0.02], // 13: Left Cheek Hollow
-        [profile.cheekbone_width * 0.6, profile.jaw_height + 0.06, -0.02],  // 14: Right Cheek Hollow
-        
-        // -- EYES & ORBITS (15-18) --
-        [-0.015, 0.025, -profile.eye_depth * 0.4], // 15: Left Inner Eye (Tear duct)
-        [0.015, 0.025, -profile.eye_depth * 0.4],  // 16: Right Inner Eye (Tear duct)
-        [-profile.cheekbone_width * 0.55, 0.02, -profile.eye_depth], // 17: Left Outer Eye Socket
-        [profile.cheekbone_width * 0.55, 0.02, -profile.eye_depth],  // 18: Right Outer Eye Socket
-        
-        // -- BROWS & TEMPLES (19-23) --
-        [0.0, 0.06, -profile.brow_ridge], // 19: Brow Center (Glabella)
-        [-profile.cheekbone_width * 0.5, 0.07, -profile.brow_ridge], // 20: Left Brow Arch
-        [profile.cheekbone_width * 0.5, 0.07, -profile.brow_ridge],  // 21: Right Brow Arch
-        [-profile.cheekbone_width * 0.85, 0.07, 0.0], // 22: Left Temple
-        [profile.cheekbone_width * 0.85, 0.07, 0.0],  // 23: Right Temple
-        
-        // -- FOREHEAD (24-26) --
-        [0.0, 0.12, 0.0], // 24: Forehead Top Center
-        [-profile.cheekbone_width * 0.6, 0.12, 0.0], // 25: Forehead Top Left
-        [profile.cheekbone_width * 0.6, 0.12, 0.0],  // 26: Forehead Top Right
-    ];
+/// Dynamically morphs the radial eye socket eyelids in-place on an existing Mesh.
+/// Adjusts the Y positions of eyelid vertices based on the blink factor (0.0 = fully closed, 1.0 = wide open).
+pub fn apply_eye_morph_target(mesh: &mut Mesh, profile: &FaceProfile, blink_factor: f32) {
+    let eye_cx = profile.cheekbone_width * 0.42;
+    let eye_cy = 0.022;
+    let base_ry = 0.016;
+    let target_ry = base_ry * blink_factor.clamp(0.0, 1.2);
 
-    let indices = Indices::U32(vec![
-        // CHIN & LOWER JAW
-        0, 13, 3,    // Left chin to mouth
-        0, 1, 13,    // Left jaw edge
-        1, 11, 13,   // Left lower cheek
-        0, 4, 14,    // Right chin to mouth
-        0, 14, 2,    // Right jaw edge
-        2, 14, 12,   // Right lower cheek
-        
-        // MOUTH (Lips)
-        0, 3, 6,     // Left lower lip
-        0, 6, 4,     // Right lower lip
-        6, 3, 5,     // Left mouth corner
-        6, 5, 4,     // Right mouth corner
-        
-        // NASOLABIAL FOLDS (Smile Lines)
-        5, 3, 8,     // Left upper lip to nostril
-        3, 13, 8,    // Left cheek hollow
-        13, 11, 8,   // Left mid cheek
-        5, 9, 4,     // Right upper lip to nostril
-        4, 9, 14,    // Right cheek hollow
-        14, 9, 12,   // Right mid cheek
-        
-        // NOSE
-        5, 8, 7,     // Left under-nose
-        5, 7, 9,     // Right under-nose
-        7, 8, 10,    // Left nose bridge side
-        7, 10, 9,    // Right nose bridge side
-        
-        // UPPER CHEEKS (Zygomatic Arch to Eyes)
-        8, 11, 17,   // Left outer cheekbone
-        8, 17, 15,   // Left under-eye
-        15, 17, 10,  // Left inner eye to bridge
-        9, 18, 12,   // Right outer cheekbone
-        9, 16, 18,   // Right under-eye
-        16, 10, 18,  // Right inner eye to bridge
-        
-        // ORBITAL SOCKETS & BROWS
-        15, 10, 19,  // Left inner brow
-        15, 19, 20,  // Left mid brow
-        15, 20, 17,  // Left outer brow
-        17, 20, 22,  // Left temple lower
-        11, 22, 17,  // Left temple edge
-        16, 19, 10,  // Right inner brow
-        16, 21, 19,  // Right mid brow
-        16, 18, 21,  // Right outer brow
-        18, 23, 21,  // Right temple lower
-        12, 18, 23,  // Right temple edge
-        
-        // FOREHEAD
-        19, 25, 24,  // Left mid forehead
-        19, 20, 25,  // Left outer forehead
-        20, 22, 25,  // Left temple upper
-        19, 24, 26,  // Right mid forehead
-        19, 26, 21,  // Right outer forehead
-        21, 26, 23,  // Right temple upper
-    ]);
-
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_indices(indices);
-    mesh.duplicate_vertices();
-    mesh.compute_flat_normals();
-    mesh
+    if let Some(bevy::render::mesh::VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+    {
+        for pos in positions.iter_mut() {
+            let dist_x = (pos[0].abs() - eye_cx).abs();
+            let dist_y = (pos[1] - eye_cy).abs();
+            if dist_x < 0.030 && dist_y < 0.022 && pos[2] > -profile.eye_depth * 0.7 {
+                let dy = pos[1] - eye_cy;
+                if dy.abs() > 0.003 {
+                    let sign = dy.signum();
+                    pos[1] = eye_cy + sign * (dy.abs() / base_ry).min(1.0) * target_ry;
+                }
+            }
+        }
+        mesh.compute_flat_normals();
+    }
 }
 
 /// Generates a sharp, faceted low-poly pyramid suitable for spiked armor pauldrons.
@@ -1041,6 +1461,322 @@ pub fn create_dragon_ruby_eyes() -> Mesh {
     mesh
 }
 
+/// Generates a solid scalp cap base to cover the cranial dome and prevent bare skin gaps.
+pub fn generate_scalp_cap(volume: f32) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    let v = volume.clamp(0.8, 1.5);
+    let positions: Vec<[f32; 3]> = vec![
+        [0.0, 0.222 * v, 0.010],                    // 0: Crown Apex
+        [-0.085 * v, 0.200 * v, -0.075],            // 1: Forehead Hairline Left
+        [0.0, 0.205 * v, -0.090 * v],               // 2: Forehead Hairline Center
+        [0.085 * v, 0.200 * v, -0.075],             // 3: Forehead Hairline Right
+        [-0.126 * v, 0.160, -0.020],                // 4: Temple Left
+        [0.126 * v, 0.160, -0.020],                 // 5: Temple Right
+        [-0.126 * v, 0.095, 0.025],                 // 6: Ear Rim Left
+        [0.126 * v, 0.095, 0.025],                  // 7: Ear Rim Right
+        [-0.110 * v, 0.085, 0.115],                 // 8: Occipital Left
+        [0.110 * v, 0.085, 0.115],                  // 9: Occipital Right
+        [0.0, 0.080, 0.136 * v],                    // 10: Nape Center
+        [-0.085 * v, 0.185 * v, 0.080],             // 11: Crown Back Left
+        [0.085 * v, 0.185 * v, 0.080],              // 12: Crown Back Right
+    ];
+
+    let indices = Indices::U32(vec![
+        0, 1, 2,  0, 2, 3,  0, 4, 1,  0, 3, 5,
+        1, 4, 6,  3, 7, 5,  4, 0, 11, 0, 5, 12,
+        4, 11, 6, 5, 7, 12, 0, 12, 11, 11, 12, 10,
+        11, 10, 8, 12, 9, 10, 6, 11, 8, 7, 9, 12,
+    ]);
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(indices);
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
+/// Generates stylized outward-pointing low-poly spiky hair clusters over the scalp cap.
+pub fn generate_spiky_hair(volume: f32) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    let v = volume.clamp(0.8, 1.5);
+    let mut positions: Vec<[f32; 3]> = vec![
+        [0.0, 0.222 * v, 0.010],
+        [-0.085 * v, 0.200 * v, -0.075],
+        [0.0, 0.205 * v, -0.090 * v],
+        [0.085 * v, 0.200 * v, -0.075],
+        [-0.126 * v, 0.160, -0.020],
+        [0.126 * v, 0.160, -0.020],
+        [-0.126 * v, 0.095, 0.025],
+        [0.126 * v, 0.095, 0.025],
+        [-0.110 * v, 0.085, 0.115],
+        [0.110 * v, 0.085, 0.115],
+        [0.0, 0.080, 0.136 * v],
+        [-0.085 * v, 0.185 * v, 0.080],
+        [0.085 * v, 0.185 * v, 0.080],
+    ];
+
+    let mut indices: Vec<u32> = vec![
+        0, 1, 2,  0, 2, 3,  0, 4, 1,  0, 3, 5,
+        1, 4, 6,  3, 7, 5,  4, 0, 11, 0, 5, 12,
+        4, 11, 6, 5, 7, 12, 0, 12, 11, 11, 12, 10,
+        11, 10, 8, 12, 9, 10, 6, 11, 8, 7, 9, 12,
+    ];
+
+    let spikes: &[([f32; 3], [f32; 3], [f32; 3], [f32; 3], [f32; 3])] = &[
+        // Front Cowlick Center
+        ([-0.025 * v, 0.195 * v, -0.070], [0.025 * v, 0.195 * v, -0.070], [0.020 * v, 0.210 * v, -0.050], [-0.020 * v, 0.210 * v, -0.050], [0.0, 0.255 * v, -0.125 * v]),
+        // Front Cowlick Left
+        ([-0.075 * v, 0.190 * v, -0.060], [-0.035 * v, 0.195 * v, -0.065], [-0.040 * v, 0.210 * v, -0.040], [-0.080 * v, 0.205 * v, -0.035], [-0.065 * v, 0.245 * v, -0.110 * v]),
+        // Front Cowlick Right
+        ([0.035 * v, 0.195 * v, -0.065], [0.075 * v, 0.190 * v, -0.060], [0.080 * v, 0.205 * v, -0.035], [0.040 * v, 0.210 * v, -0.040], [0.065 * v, 0.245 * v, -0.110 * v]),
+        // Top Center Crown Peak
+        ([-0.035 * v, 0.215 * v, -0.020], [0.035 * v, 0.215 * v, -0.020], [0.035 * v, 0.215 * v, 0.030], [-0.035 * v, 0.215 * v, 0.030], [0.0, 0.315 * v, 0.010]),
+        // Top Front Ridge
+        ([-0.030 * v, 0.210 * v, -0.060], [0.030 * v, 0.210 * v, -0.060], [0.025 * v, 0.220 * v, -0.020], [-0.025 * v, 0.220 * v, -0.020], [0.0, 0.295 * v, -0.045 * v]),
+        // Crown Left High
+        ([-0.085 * v, 0.200 * v, -0.010], [-0.040 * v, 0.215 * v, -0.010], [-0.040 * v, 0.215 * v, 0.040], [-0.085 * v, 0.200 * v, 0.040], [-0.080 * v, 0.290 * v, 0.015]),
+        // Crown Right High
+        ([0.040 * v, 0.215 * v, -0.010], [0.085 * v, 0.200 * v, -0.010], [0.085 * v, 0.200 * v, 0.040], [0.040 * v, 0.215 * v, 0.040], [0.080 * v, 0.290 * v, 0.015]),
+        // Temple Flare Left
+        ([-0.120 * v, 0.170, -0.040], [-0.090 * v, 0.190 * v, -0.035], [-0.090 * v, 0.190 * v, 0.010], [-0.120 * v, 0.170, 0.010], [-0.165 * v, 0.210 * v, -0.015]),
+        // Temple Flare Right
+        ([0.090 * v, 0.190 * v, -0.035], [0.120 * v, 0.170, -0.040], [0.120 * v, 0.170, 0.010], [0.090 * v, 0.190 * v, 0.010], [0.165 * v, 0.210 * v, -0.015]),
+        // Rear Occipital Center
+        ([-0.035 * v, 0.180 * v, 0.080], [0.035 * v, 0.180 * v, 0.080], [0.030 * v, 0.120, 0.130 * v], [-0.030 * v, 0.120, 0.130 * v], [0.0, 0.200 * v, 0.180 * v]),
+        // Rear Occipital Left
+        ([-0.095 * v, 0.160, 0.060], [-0.050 * v, 0.175 * v, 0.070], [-0.040 * v, 0.110, 0.125 * v], [-0.085 * v, 0.100, 0.115 * v], [-0.095 * v, 0.155, 0.170 * v]),
+        // Rear Occipital Right
+        ([0.050 * v, 0.175 * v, 0.070], [0.095 * v, 0.160, 0.060], [0.085 * v, 0.100, 0.115 * v], [0.040 * v, 0.110, 0.125 * v], [0.095 * v, 0.155, 0.170 * v]),
+    ];
+
+    for &(b0, b1, b2, b3, apex) in spikes {
+        let base_idx = positions.len() as u32;
+        positions.push(b0);
+        positions.push(b1);
+        positions.push(b2);
+        positions.push(b3);
+        positions.push(apex);
+
+        indices.extend_from_slice(&[
+            base_idx + 4, base_idx + 0, base_idx + 1,
+            base_idx + 4, base_idx + 1, base_idx + 2,
+            base_idx + 4, base_idx + 2, base_idx + 3,
+            base_idx + 4, base_idx + 3, base_idx + 0,
+        ]);
+    }
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
+/// Generates the base swept scalp mesh for ponytail hairstyle.
+pub fn generate_ponytail_root_mesh(volume: f32) -> Mesh {
+    generate_scalp_cap(volume)
+}
+
+/// Generates the articulated ponytail tail mesh attached to JointType::Ponytail.
+pub fn generate_ponytail_tail_mesh(volume: f32) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    let v = volume.clamp(0.8, 1.5);
+    let tiers: &[(f32, f32, f32)] = &[
+        (0.00, 0.038 * v, 0.00),
+        (-0.07, 0.045 * v, 0.025 * v),
+        (-0.16, 0.036 * v, 0.020 * v),
+        (-0.25, 0.024 * v, 0.010 * v),
+        (-0.34, 0.008, 0.00),
+    ];
+
+    let mut positions: Vec<[f32; 3]> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    let sides = 6;
+    for &(y, r, z_off) in tiers {
+        for s in 0..sides {
+            let angle = (s as f32 / sides as f32) * std::f32::consts::TAU;
+            let x = angle.cos() * r;
+            let z = angle.sin() * r + z_off;
+            positions.push([x, y, z]);
+        }
+    }
+
+    for t in 0..(tiers.len() - 1) {
+        let r0 = (t * sides) as u32;
+        let r1 = ((t + 1) * sides) as u32;
+        for s in 0..sides as u32 {
+            let next_s = (s + 1) % sides as u32;
+            indices.extend_from_slice(&[
+                r0 + s, r1 + s, r0 + next_s,
+                r0 + next_s, r1 + s, r1 + next_s,
+            ]);
+        }
+    }
+
+    let tip_idx = positions.len() as u32;
+    positions.push([0.0, -0.36 * v, 0.0]);
+    let last_tier = ((tiers.len() - 1) * sides) as u32;
+    for s in 0..sides as u32 {
+        let next_s = (s + 1) % sides as u32;
+        indices.extend_from_slice(&[
+            last_tier + s, tip_idx, last_tier + next_s,
+        ]);
+    }
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
+/// Generates a stylized, pointed faceted goatee beard attached to the chin.
+pub fn generate_goatee_mesh(volume: f32) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    let v = volume.clamp(0.8, 1.5);
+    let positions: Vec<[f32; 3]> = vec![
+        [-0.035 * v, 0.015, -0.065],
+        [0.035 * v, 0.015, -0.065],
+        [0.0, 0.020, -0.080 * v],
+        [-0.030 * v, -0.040, -0.075],
+        [0.030 * v, -0.040, -0.075],
+        [0.0, -0.035, -0.095 * v],
+        [0.0, -0.095 * v, -0.085 * v],
+    ];
+
+    let indices = Indices::U32(vec![
+        2, 0, 5,
+        2, 5, 1,
+        0, 3, 5,
+        1, 5, 4,
+        5, 3, 6,
+        5, 6, 4,
+        3, 0, 6,
+        4, 6, 1,
+    ]);
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(indices);
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
+/// Generates a massive braided block dwarven beard with twin hanging braids.
+pub fn generate_dwarven_beard_mesh(volume: f32) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    let v = volume.clamp(0.8, 1.5);
+    let positions: Vec<[f32; 3]> = vec![
+        [-0.080 * v, 0.030, -0.070],
+        [0.080 * v, 0.030, -0.070],
+        [-0.035 * v, 0.035, -0.115],
+        [0.035 * v, 0.035, -0.115],
+        [0.0, 0.040, -0.125],
+        [-0.100 * v, -0.080, -0.060],
+        [0.100 * v, -0.080, -0.060],
+        [-0.075 * v, -0.070, -0.125],
+        [0.075 * v, -0.070, -0.125],
+        [0.0, -0.065, -0.135],
+        [-0.085 * v, -0.190, -0.050],
+        [0.085 * v, -0.190, -0.050],
+        [-0.065 * v, -0.190, -0.110],
+        [0.065 * v, -0.190, -0.110],
+        [0.0, -0.185, -0.120],
+        [-0.050 * v, -0.330 * v, -0.040],
+        [0.050 * v, -0.330 * v, -0.040],
+    ];
+
+    let indices = Indices::U32(vec![
+        4, 2, 9,
+        4, 9, 3,
+        2, 7, 9,
+        3, 9, 8,
+        0, 5, 7,
+        0, 7, 2,
+        1, 3, 8,
+        1, 8, 6,
+        7, 12, 9,
+        9, 12, 14,
+        9, 14, 13,
+        9, 13, 8,
+        5, 10, 12,
+        5, 12, 7,
+        6, 8, 13,
+        6, 13, 11,
+        12, 10, 15,
+        12, 15, 14,
+        14, 15, 13,
+        14, 13, 16,
+        13, 16, 11,
+    ]);
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(indices);
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
+/// Generates flared low-poly mutton chops sideburns connecting to a mustache.
+pub fn generate_chops_mesh(volume: f32) -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    let v = volume.clamp(0.8, 1.5);
+    let positions: Vec<[f32; 3]> = vec![
+        [-0.128 * v, 0.080, -0.010],
+        [-0.145 * v, 0.020, -0.035],
+        [-0.138 * v, -0.050, -0.055],
+        [-0.090 * v, -0.060, -0.090],
+        [0.128 * v, 0.080, -0.010],
+        [0.145 * v, 0.020, -0.035],
+        [0.138 * v, -0.050, -0.055],
+        [0.090 * v, -0.060, -0.090],
+        [-0.030 * v, 0.010, -0.120],
+        [0.030 * v, 0.010, -0.120],
+        [0.0, 0.025, -0.130],
+    ];
+
+    let indices = Indices::U32(vec![
+        0, 1, 2,
+        0, 2, 3,
+        3, 8, 0,
+        4, 6, 5,
+        4, 7, 6,
+        7, 4, 9,
+        10, 8, 9,
+    ]);
+
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_indices(indices);
+    mesh.duplicate_vertices();
+    mesh.compute_flat_normals();
+    mesh
+}
+
 // ----------------------------------------------------------------------------
 // 6. PROCEDURAL CHARACTER HIERARCHY & COMPOUND PHYSICS SKELETON
 // ----------------------------------------------------------------------------
@@ -1064,7 +1800,8 @@ pub fn spawn_procedural_character_hierarchy(
 
     // 2. Unit cuboid mesh shared across all procedural limbs (sized purely via Transform::scale)
     let unit_cuboid = meshes.add(bevy::math::primitives::Cuboid::new(1.0, 1.0, 1.0));
-    let face_mesh = meshes.add(generate_custom_face(face));
+    let upper_face_mesh = meshes.add(generate_upper_face_mesh(face, 1.0));
+    let jaw_mesh = meshes.add(generate_jaw_mesh(face));
     let spike_mesh = meshes.add(create_low_poly_pyramid());
 
     // 3. Material assets (Two-sided PBR materials for crisp low-poly faceted shading)
@@ -1399,17 +2136,66 @@ pub fn spawn_procedural_character_hierarchy(
                                         ..default()
                                     },
                                     CranialSkullMesh,
-                                    layers.clone(),
-                                ));
-                                // Raw Procedural Face (Pinned flush to anterior skull face: Z = -0.13)
+                                    layers.clone()                                 ));
+                                // Procedural Upper Face (Forehead, Eyes, Nose, Cheeks, Upper Lip)
                                 head_pivot.spawn((
                                     PbrBundle {
-                                        mesh: face_mesh,
+                                        mesh: upper_face_mesh,
                                         material: skin_mat.clone(),
                                         transform: BevyTransform::from_xyz(0.0, 0.08, -0.13),
                                         ..default()
                                     },
                                     ProceduralFaceMesh,
+                                    layers.clone(),
+                                ));
+
+                                // Articulated Lower Jaw Joint (temporomandibular hinge)
+                                head_pivot
+                                    .spawn((
+                                        SpatialBundle::from_transform(BevyTransform::from_xyz(
+                                            0.0,
+                                            0.08 + face.jaw_height + 0.06,
+                                            -0.05,
+                                        )),
+                                        JointType::Jaw,
+                                        JointOwner(parent_entity),
+                                        layers.clone(),
+                                    ))
+                                    .with_children(|jaw| {
+                                        // Procedural Lower Jaw Mesh (mandible, lower lip, chin)
+                                        jaw.spawn((
+                                            PbrBundle {
+                                                mesh: jaw_mesh,
+                                                material: skin_mat.clone(),
+                                                transform: BevyTransform::from_xyz(
+                                                    0.0,
+                                                    -face.jaw_height - 0.06,
+                                                    -0.08,
+                                                ),
+                                                ..default()
+                                            },
+                                            ProceduralJawMesh,
+                                            layers.clone(),
+                                        ));
+
+                                        // Procedural Beard Joint Root (anchored to jaw so beard tracks mouth/chin)
+                                        jaw.spawn((
+                                            SpatialBundle::from_transform(BevyTransform::from_xyz(
+                                                0.0,
+                                                0.02,
+                                                -0.01,
+                                            )),
+                                            JointType::BeardRoot,
+                                            JointOwner(parent_entity),
+                                            layers.clone(),
+                                        ));
+                                    });
+
+                                // Procedural Ponytail Joint Root (rear crown clasp)
+                                head_pivot.spawn((
+                                    SpatialBundle::from_transform(BevyTransform::from_xyz(0.0, 0.18, 0.13)),
+                                    JointType::Ponytail,
+                                    JointOwner(parent_entity),
                                     layers.clone(),
                                 ));
                             });
@@ -1785,7 +2571,7 @@ pub fn procedural_animator_system(
     time: Res<Time>,
     mut character_q: Query<(Entity, &mut AnimationState, Option<&LinearVelocity>, Has<PlayerBody>)>,
     editor_state: Res<CharacterEditorState>,
-    mut joint_q: Query<(&JointType, &JointOwner, &ColHandle, &mut BevyTransform)>,
+    mut joint_q: Query<(&JointType, &JointOwner, Option<&ColHandle>, &mut BevyTransform)>,
     mut physics: Option<ResMut<PhysicsWorld>>,
 ) {
     let dt = time.delta_seconds();
@@ -1837,6 +2623,12 @@ pub fn procedural_animator_system(
         if state.hit_react_timer > 0.0 {
             state.hit_react_timer = (state.hit_react_timer - dt * 5.0).max(0.0);
         }
+
+        // 4. Advance Eyelid Blink Clock (periodic natural blinks every ~4.2s)
+        state.blink_timer += dt;
+        if state.blink_timer > 4.2 {
+            state.blink_timer = 0.0;
+        }
     }
 
     for (joint, owner, col_handle, mut tf) in joint_q.iter_mut() {
@@ -1856,6 +2648,7 @@ pub fn procedural_animator_system(
         // Cache single trigonometric evaluation and half-wave rectifications per joint update
         let phase = state.gait_phase;
         let phase_sin = phase.sin();
+        let phase_cos = phase.cos();
         let rect_sin_pos = phase_sin.max(0.0);
         let rect_sin_neg = (-phase_sin).max(0.0);
 
@@ -1875,6 +2668,29 @@ pub fn procedural_animator_system(
             JointType::Head => {
                 let hit_snap = state.hit_react_timer * 0.25;
                 tf.rotation = Quat::from_euler(EulerRot::XYZ, hit_snap, 0.0, 0.0);
+            }
+
+            // JAW: Articulated lower jaw opening for battle shouts and hit flinches
+            JointType::Jaw => {
+                let hit_open = (state.hit_react_timer * 0.65).clamp(0.0, 0.40);
+                let swing_open = match &state.action {
+                    ActionState::MeleeSwing { timer, duration } => {
+                        let t = (timer / duration.max(0.001)).clamp(0.0, 1.0);
+                        if (0.25..=0.65).contains(&t) {
+                            let p = if t < 0.45 {
+                                (t - 0.25) / 0.20
+                            } else {
+                                (0.65 - t) / 0.20
+                            };
+                            p * 0.28
+                        } else {
+                            0.0
+                        }
+                    }
+                    _ => 0.0,
+                };
+                let jaw_pitch = hit_open + swing_open;
+                tf.rotation = Quat::from_rotation_x(jaw_pitch);
             }
 
             // LOWER BODY: Locomotion vs Airborne Trajectory
@@ -1989,16 +2805,18 @@ pub fn procedural_animator_system(
                 }
 
                 // Sync swinging arm rotation down to Rapier collider for precise hit-detection
-                if let Some(ref mut phys) = physics {
-                    if let Some(col) = phys.collider_set.get_mut(col_handle.0) {
-                        let cur_pos = col.position_wrt_parent().map_or(rapier3d::na::Isometry3::identity(), |iso| *iso);
-                        let rapier_rot = rapier3d::na::UnitQuaternion::new_normalize(
-                            rapier3d::na::Quaternion::new(tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z)
-                        );
-                        col.set_position_wrt_parent(rapier3d::na::Isometry3::from_parts(
-                            cur_pos.translation,
-                            rapier_rot,
-                        ));
+                if let Some(col_h) = col_handle {
+                    if let Some(ref mut phys) = physics {
+                        if let Some(col) = phys.collider_set.get_mut(col_h.0) {
+                            let cur_pos = col.position_wrt_parent().map_or(rapier3d::na::Isometry3::identity(), |iso| *iso);
+                            let rapier_rot = rapier3d::na::UnitQuaternion::new_normalize(
+                                rapier3d::na::Quaternion::new(tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z)
+                            );
+                            col.set_position_wrt_parent(rapier3d::na::Isometry3::from_parts(
+                                cur_pos.translation,
+                                rapier_rot,
+                            ));
+                        }
                     }
                 }
             }
@@ -2020,18 +2838,34 @@ pub fn procedural_animator_system(
                     }
                 }
 
-                if let Some(ref mut phys) = physics {
-                    if let Some(col) = phys.collider_set.get_mut(col_handle.0) {
-                        let cur_pos = col.position_wrt_parent().map_or(rapier3d::na::Isometry3::identity(), |iso| *iso);
-                        let rapier_rot = rapier3d::na::UnitQuaternion::new_normalize(
-                            rapier3d::na::Quaternion::new(tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z)
-                        );
-                        col.set_position_wrt_parent(rapier3d::na::Isometry3::from_parts(
-                            cur_pos.translation,
-                            rapier_rot,
-                        ));
+                if let Some(col_h) = col_handle {
+                    if let Some(ref mut phys) = physics {
+                        if let Some(col) = phys.collider_set.get_mut(col_h.0) {
+                            let cur_pos = col.position_wrt_parent().map_or(rapier3d::na::Isometry3::identity(), |iso| *iso);
+                            let rapier_rot = rapier3d::na::UnitQuaternion::new_normalize(
+                                rapier3d::na::Quaternion::new(tf.rotation.w, tf.rotation.x, tf.rotation.y, tf.rotation.z)
+                            );
+                            col.set_position_wrt_parent(rapier3d::na::Isometry3::from_parts(
+                                cur_pos.translation,
+                                rapier_rot,
+                            ));
+                        }
                     }
                 }
+            }
+
+            JointType::Ponytail => {
+                let lag_pitch = (state.vertical_velocity * 0.08).clamp(-0.45, 0.45);
+                let bounce = phase_cos * (amplitude * 0.45);
+                let sway = phase_sin * (amplitude * 0.25);
+                tf.rotation = Quat::from_euler(EulerRot::XYZ, lag_pitch + bounce, sway, 0.0);
+            }
+
+            JointType::BeardRoot => {
+                let sprint_lean = -0.15 * walk_run_blend;
+                let gravity_comp = -sprint_lean * 0.75;
+                let sway = phase_sin * (amplitude * 0.12);
+                tf.rotation = Quat::from_euler(EulerRot::XYZ, gravity_comp, sway, 0.0);
             }
 
             _ => {}
@@ -2104,9 +2938,10 @@ pub fn live_character_update_system(
     mut physics: ResMut<PhysicsWorld>,
     player_q: Query<(Entity, &PlayerCharacterCustomization), (With<PlayerBody>, Changed<PlayerCharacterCustomization>)>,
     existing_root_q: Query<(Entity, &Parent), With<CharacterModelRoot>>,
-    mut joint_q: Query<(&JointType, &JointOwner, &ColHandle, &mut BevyTransform)>,
+    mut joint_q: Query<(&JointType, &JointOwner, Option<&ColHandle>, &mut BevyTransform)>,
     mut limb_mesh_q: Query<(&LimbMeshSegment, &mut BevyTransform), Without<JointType>>,
     face_mesh_q: Query<(&ProceduralFaceMesh, &Handle<Mesh>)>,
+    jaw_mesh_q: Query<(&ProceduralJawMesh, &Handle<Mesh>)>,
 ) {
     for (player_entity, custom) in player_q.iter() {
         let has_model = existing_root_q.iter().any(|(_, p)| p.get() == player_entity);
@@ -2131,11 +2966,12 @@ pub fn live_character_update_system(
             if owner.0 != player_entity {
                 continue;
             }
+            let col_h = col_handle.map(|c| c.0);
 
             match joint {
                 JointType::Torso => {
                     tf.scale = Vec3::ONE;
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.torso_size.x * 0.5,
                             race.torso_size.y * 0.5,
@@ -2146,7 +2982,7 @@ pub fn live_character_update_system(
                 JointType::Head => {
                     tf.translation.y = race.torso_size.y * 0.5 + 0.16 * race.head_scale;
                     tf.scale = Vec3::splat(race.head_scale);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             0.24 * race.head_scale * 0.5,
                             0.26 * race.head_scale * 0.5,
@@ -2161,7 +2997,7 @@ pub fn live_character_update_system(
                 }
                 JointType::ShoulderL => {
                     tf.translation = Vec3::new(-race.shoulder_width_offset, race.torso_size.y * 0.5 - 0.08, 0.0);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 0.5,
                             race.upper_arm_length * 0.5,
@@ -2176,7 +3012,7 @@ pub fn live_character_update_system(
                 }
                 JointType::ShoulderR => {
                     tf.translation = Vec3::new(race.shoulder_width_offset, race.torso_size.y * 0.5 - 0.08, 0.0);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 0.5,
                             race.upper_arm_length * 0.5,
@@ -2191,7 +3027,7 @@ pub fn live_character_update_system(
                 }
                 JointType::ElbowL => {
                     tf.translation = Vec3::new(0.0, -race.upper_arm_length, 0.0);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 0.9 * 0.5,
                             race.forearm_length * 0.5,
@@ -2206,7 +3042,7 @@ pub fn live_character_update_system(
                 }
                 JointType::ElbowR => {
                     tf.translation = Vec3::new(0.0, -race.upper_arm_length, 0.0);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 0.9 * 0.5,
                             race.forearm_length * 0.5,
@@ -2222,7 +3058,7 @@ pub fn live_character_update_system(
                 JointType::HandL => {
                     tf.translation = Vec3::new(0.0, -race.forearm_length - 0.04, 0.0);
                     tf.scale = Vec3::new(race.limb_thickness * 0.95, 0.12, race.limb_thickness * 1.1);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 0.95 * 0.5,
                             0.12 * 0.5,
@@ -2238,7 +3074,7 @@ pub fn live_character_update_system(
                 JointType::HandR => {
                     tf.translation = Vec3::new(0.0, -race.forearm_length - 0.04, 0.0);
                     tf.scale = Vec3::new(race.limb_thickness * 0.95, 0.12, race.limb_thickness * 1.1);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 0.95 * 0.5,
                             0.12 * 0.5,
@@ -2253,7 +3089,7 @@ pub fn live_character_update_system(
                 }
                 JointType::HipL => {
                     tf.translation = Vec3::new(-race.hip_width_offset, -race.torso_size.y * 0.5, 0.0);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 1.15 * 0.5,
                             race.upper_leg_length * 0.5,
@@ -2268,7 +3104,7 @@ pub fn live_character_update_system(
                 }
                 JointType::HipR => {
                     tf.translation = Vec3::new(race.hip_width_offset, -race.torso_size.y * 0.5, 0.0);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 1.15 * 0.5,
                             race.upper_leg_length * 0.5,
@@ -2283,7 +3119,7 @@ pub fn live_character_update_system(
                 }
                 JointType::KneeL => {
                     tf.translation = Vec3::new(0.0, -race.upper_leg_length, 0.0);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 0.5,
                             race.lower_leg_length * 0.5,
@@ -2298,7 +3134,7 @@ pub fn live_character_update_system(
                 }
                 JointType::KneeR => {
                     tf.translation = Vec3::new(0.0, -race.upper_leg_length, 0.0);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 0.5,
                             race.lower_leg_length * 0.5,
@@ -2314,7 +3150,7 @@ pub fn live_character_update_system(
                 JointType::FootL => {
                     tf.translation = Vec3::new(0.0, -race.lower_leg_length - 0.04, -0.05);
                     tf.scale = Vec3::new(race.limb_thickness * 1.05, 0.10, 0.24);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 1.05 * 0.5,
                             0.10 * 0.5,
@@ -2330,7 +3166,7 @@ pub fn live_character_update_system(
                 JointType::FootR => {
                     tf.translation = Vec3::new(0.0, -race.lower_leg_length - 0.04, -0.05);
                     tf.scale = Vec3::new(race.limb_thickness * 1.05, 0.10, 0.24);
-                    if let Some(col) = physics.collider_set.get_mut(col_handle.0) {
+                    if let Some(col) = col_h.and_then(|h| physics.collider_set.get_mut(h)) {
                         col.set_shape(SharedShape::cuboid(
                             race.limb_thickness * 1.05 * 0.5,
                             0.10 * 0.5,
@@ -2343,6 +3179,10 @@ pub fn live_character_update_system(
                         ));
                     }
                 }
+                JointType::Jaw => {
+                    tf.translation = Vec3::new(0.0, 0.08 + race.head_scale * (custom.face.jaw_height + 0.06), -0.05);
+                }
+                JointType::BeardRoot | JointType::Ponytail => {}
             }
         }
 
@@ -2372,10 +3212,15 @@ pub fn live_character_update_system(
             }
         }
 
-        // 3. Update procedural face mesh in-place without asset recreation
+        // 3. Update procedural face meshes in-place without asset recreation
         for (_, mesh_handle) in face_mesh_q.iter() {
             if let Some(mesh) = meshes.get_mut(mesh_handle) {
-                *mesh = generate_custom_face(&custom.face);
+                *mesh = generate_upper_face_mesh(&custom.face, 1.0);
+            }
+        }
+        for (_, mesh_handle) in jaw_mesh_q.iter() {
+            if let Some(mesh) = meshes.get_mut(mesh_handle) {
+                *mesh = generate_jaw_mesh(&custom.face);
             }
         }
 
@@ -3599,6 +4444,180 @@ pub fn sync_character_equipped_helmet(
     }
 }
 
+/// Dynamically mounts, updates, and colors procedural hair and beard meshes
+/// based on the player's active HairProfile and handles helmet visibility arbitration.
+pub fn sync_character_hair_and_beard(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    equipped_armor: Res<ClientEquippedArmor>,
+    player_custom_q: Query<(Entity, &PlayerCharacterCustomization)>,
+    head_joint_q: Query<(Entity, &JointType, &JointOwner)>,
+    mut hair_mesh_q: Query<(Entity, &Parent, &mut Visibility), With<CharacterHairMesh>>,
+    mut beard_mesh_q: Query<(Entity, &Parent, &mut Visibility), (With<CharacterBeardMesh>, Without<CharacterHairMesh>)>,
+    layers_q: Query<&RenderLayers>,
+) {
+    for (player_entity, custom) in player_custom_q.iter() {
+        let mut head_joint = None;
+        let mut beard_joint = None;
+        let mut ponytail_joint = None;
+
+        for (joint_entity, joint_type, owner) in head_joint_q.iter() {
+            if owner.0 != player_entity {
+                continue;
+            }
+            match joint_type {
+                JointType::Head => head_joint = Some(joint_entity),
+                JointType::BeardRoot => beard_joint = Some(joint_entity),
+                JointType::Ponytail => ponytail_joint = Some(joint_entity),
+                _ => {}
+            }
+        }
+
+        let Some(head_entity) = head_joint else { continue; };
+        let layer = layers_q.get(head_entity).cloned().unwrap_or(RenderLayers::from_layers(&[0, 1, 2]));
+
+        let hair_mat = materials.add(StandardMaterial {
+            base_color: custom.hair.hair_color,
+            perceptual_roughness: 0.75,
+            metallic: 0.08,
+            cull_mode: None,
+            double_sided: true,
+            ..default()
+        });
+
+        let helmet_equipped = equipped_armor.head.is_some();
+
+        // 1. Hair Mesh Sync
+        let existing_hair = hair_mesh_q.iter_mut().find(|(_, p, _)| p.get() == head_entity);
+
+        if let Some((_, _, mut vis)) = existing_hair {
+            if helmet_equipped || custom.hair.hair_style == HairStyle::Bald {
+                *vis = Visibility::Hidden;
+            } else {
+                *vis = Visibility::Inherited;
+            }
+        } else if custom.hair.hair_style != HairStyle::Bald {
+            let (hair_mesh, tail_mesh) = match custom.hair.hair_style {
+                HairStyle::Bald => (None, None),
+                HairStyle::Buzzcut => (Some(meshes.add(generate_scalp_cap(custom.hair.volume))), None),
+                HairStyle::Spiky => (Some(meshes.add(generate_spiky_hair(custom.hair.volume))), None),
+                HairStyle::Ponytail => (
+                    Some(meshes.add(generate_ponytail_root_mesh(custom.hair.volume))),
+                    Some(meshes.add(generate_ponytail_tail_mesh(custom.hair.volume))),
+                ),
+            };
+
+            if let Some(mesh) = hair_mesh {
+                let initial_vis = if helmet_equipped { Visibility::Hidden } else { Visibility::Inherited };
+                commands.entity(head_entity).with_children(|head| {
+                    head.spawn((
+                        PbrBundle {
+                            mesh,
+                            material: hair_mat.clone(),
+                            transform: BevyTransform::IDENTITY,
+                            visibility: initial_vis,
+                            ..default()
+                        },
+                        CharacterHairMesh,
+                        layer.clone(),
+                    ));
+                });
+            }
+
+            if let (Some(tail), Some(pt_entity)) = (tail_mesh, ponytail_joint) {
+                let initial_vis = if helmet_equipped { Visibility::Hidden } else { Visibility::Inherited };
+                commands.entity(pt_entity).with_children(|pt| {
+                    pt.spawn((
+                        PbrBundle {
+                            mesh: tail,
+                            material: hair_mat.clone(),
+                            transform: BevyTransform::IDENTITY,
+                            visibility: initial_vis,
+                            ..default()
+                        },
+                        CharacterHairMesh,
+                        layer.clone(),
+                    ));
+                });
+            }
+        }
+
+        // 2. Beard Mesh Sync
+        let target_beard_parent = beard_joint.unwrap_or(head_entity);
+        let existing_beard = beard_mesh_q.iter_mut().find(|(_, p, _)| p.get() == target_beard_parent);
+
+        if let Some((_, _, mut vis)) = existing_beard {
+            if custom.hair.beard_style == BeardStyle::CleanShaven {
+                *vis = Visibility::Hidden;
+            } else {
+                // Beards flow proudly even with helmets on
+                *vis = Visibility::Inherited;
+            }
+        } else if custom.hair.beard_style != BeardStyle::CleanShaven {
+            let beard_mesh = match custom.hair.beard_style {
+                BeardStyle::CleanShaven => None,
+                BeardStyle::Goatee => Some(meshes.add(generate_goatee_mesh(custom.hair.volume))),
+                BeardStyle::Dwarven => Some(meshes.add(generate_dwarven_beard_mesh(custom.hair.volume))),
+                BeardStyle::Chops => Some(meshes.add(generate_chops_mesh(custom.hair.volume))),
+            };
+
+            if let Some(mesh) = beard_mesh {
+                commands.entity(target_beard_parent).with_children(|parent| {
+                    parent.spawn((
+                        PbrBundle {
+                            mesh,
+                            material: hair_mat,
+                            transform: BevyTransform::IDENTITY,
+                            ..default()
+                        },
+                        CharacterBeardMesh,
+                        layer,
+                    ));
+                });
+            }
+        }
+    }
+}
+
+/// Updates character eyelid blinking and squinting morph targets across all procedural face meshes.
+pub fn sync_character_eye_blinking(
+    time: Res<Time>,
+    character_q: Query<(&AnimationState, &PlayerCharacterCustomization)>,
+    face_mesh_q: Query<(&Parent, &Handle<Mesh>), With<ProceduralFaceMesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let dt = time.delta_seconds();
+    for (state, custom) in character_q.iter() {
+        let is_blinking = state.blink_timer < 0.16;
+        let is_squinting = state.hit_react_timer > 0.0 || matches!(state.action, ActionState::BowAim { .. });
+
+        if is_blinking || is_squinting {
+            let blink_factor = if is_blinking {
+                let p = state.blink_timer / 0.16;
+                (1.0 - (p * std::f32::consts::PI).sin()).clamp(0.0, 1.0)
+            } else if state.hit_react_timer > 0.0 {
+                0.35
+            } else {
+                0.55
+            };
+
+            for (_, mesh_h) in face_mesh_q.iter() {
+                if let Some(mesh) = meshes.get_mut(mesh_h) {
+                    apply_eye_morph_target(mesh, &custom.face, blink_factor);
+                }
+            }
+        } else if (state.blink_timer - dt) < 0.16 {
+            // Restore to fully open when blink ends
+            for (_, mesh_h) in face_mesh_q.iter() {
+                if let Some(mesh) = meshes.get_mut(mesh_h) {
+                    apply_eye_morph_target(mesh, &custom.face, 1.0);
+                }
+            }
+        }
+    }
+}
+
 // ----------------------------------------------------------------------------
 // 15. CHARACTER CUSTOMIZER PLUGIN REGISTRATION
 // ----------------------------------------------------------------------------
@@ -3621,8 +4640,10 @@ impl Plugin for CharacterCustomizerPlugin {
                     studio_camera_orbit_system,
                     live_character_update_system,
                     sync_character_equipped_helmet,
+                    sync_character_hair_and_beard,
                     sync_player_animation_state,
                     procedural_animator_system,
+                    sync_character_eye_blinking,
                     orient_character_model_to_locomotion_system,
                 )
                     .in_set(UpdateSet::Animation),
@@ -3647,7 +4668,50 @@ mod tests {
         assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
 
         let pos_count = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len();
-        assert!(pos_count > 10, "Face mesh must have faceted vertices");
+        assert!(pos_count >= 50, "High density face mesh must have faceted vertices");
+    }
+
+    #[test]
+    fn test_symmetrical_face_builder_mirroring_and_normals() {
+        let mut builder = SymmetricalFaceBuilder::new();
+        let c0 = builder.add_vertex([0.0, 0.0, 0.0]);
+        let c1 = builder.add_vertex([0.0, 1.0, 0.0]);
+        let r0 = builder.add_vertex([1.0, 0.5, 0.0]);
+
+        builder.add_triangle(c0, c1, r0);
+        let mesh = builder.build();
+
+        let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
+        // Right triangle + Left mirrored triangle = 6 vertices after duplicate_vertices()
+        assert_eq!(positions.len(), 6);
+        let normals = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap();
+        assert_eq!(normals.len(), 6);
+    }
+
+    #[test]
+    fn test_high_density_face_with_radial_eye_sockets_and_morphs() {
+        let profile = FaceProfile::default();
+        let mut mesh = generate_high_density_face(&profile, 1.0);
+
+        let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
+        assert!(positions.len() >= 60, "Must contain rich radial eye and facial geometry");
+
+        // Apply mathematical morph target: blink eye closed (blink_factor = 0.0)
+        apply_eye_morph_target(&mut mesh, &profile, 0.0);
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
+    }
+
+    #[test]
+    fn test_articulated_jaw_and_upper_face_meshes() {
+        let profile = FaceProfile::default();
+        let upper_mesh = generate_upper_face_mesh(&profile, 1.0);
+        assert!(upper_mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 40);
+        assert_eq!(upper_mesh.primitive_topology(), PrimitiveTopology::TriangleList);
+
+        let jaw_mesh = generate_jaw_mesh(&profile);
+        assert!(jaw_mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 18);
+        assert_eq!(jaw_mesh.primitive_topology(), PrimitiveTopology::TriangleList);
     }
 
     #[test]
@@ -3659,7 +4723,26 @@ mod tests {
             assert!(preset.face.nose_tip_z > 0.0);
             assert!(preset.anatomy.torso_size.x > 0.0);
             assert!(preset.anatomy.torso_size.y > 0.0);
+            assert!(preset.hair.volume > 0.0);
         }
+    }
+
+    #[test]
+    fn test_hair_and_beard_mesh_attributes() {
+        let scalp = generate_scalp_cap(1.0);
+        assert!(scalp.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 13);
+        let spiky = generate_spiky_hair(1.0);
+        assert!(spiky.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 50);
+        let pt_root = generate_ponytail_root_mesh(1.0);
+        assert!(pt_root.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 13);
+        let pt_tail = generate_ponytail_tail_mesh(1.0);
+        assert!(pt_tail.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 30);
+        let goatee = generate_goatee_mesh(1.0);
+        assert!(goatee.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 7);
+        let dwarf = generate_dwarven_beard_mesh(1.0);
+        assert!(dwarf.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 17);
+        let chops = generate_chops_mesh(1.0);
+        assert!(chops.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().len() >= 11);
     }
 
     #[test]
